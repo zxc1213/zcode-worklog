@@ -7,7 +7,7 @@ var __export = (target, all) => {
 
 // src/server.mjs
 import { readFile as readFile2 } from "node:fs/promises";
-import { dirname as dirname3, join as join4 } from "node:path";
+import { dirname as dirname3, join as join5 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // node_modules/@modelcontextprotocol/server/dist/chunk-vYduTEsO.mjs
@@ -34472,7 +34472,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 var PLUGIN_NAME = "zcode-worklog";
-var PLUGIN_VERSION = "0.1.3";
+var PLUGIN_VERSION = "0.1.4";
 function pluginHome() {
   const explicit = String(process.env.WORKLOG_HOME || "").trim();
   if (explicit) return resolve(explicit);
@@ -34516,7 +34516,7 @@ function defaultConfig() {
     autoArchive: false,
     skipWeekends: true,
     taskTime: "18:30",
-    ai: { baseUrl: "", apiKey: "", model: "" }
+    ai: { baseUrl: "", apiKey: "", model: "", apiFormat: "openai" }
   };
 }
 function normalizeStringArray(value) {
@@ -34551,7 +34551,8 @@ function mergeConfig(base, patch = {}) {
     ai: {
       baseUrl: String(ai.baseUrl || "").trim().replace(/\/+$/, ""),
       apiKey: String(ai.apiKey || ""),
-      model: String(ai.model || "").trim()
+      model: String(ai.model || "").trim(),
+      apiFormat: ai.apiFormat === "anthropic" ? "anthropic" : "openai"
     }
   };
 }
@@ -34629,6 +34630,7 @@ function publicConfig(config2 = loadConfig()) {
     ai: {
       baseUrl: config2.ai.baseUrl,
       model: config2.ai.model,
+      apiFormat: config2.ai.apiFormat,
       hasApiKey: Boolean(config2.ai.apiKey)
     }
   };
@@ -35581,49 +35583,99 @@ ${String(error62?.message || error62)}
   const path = await writeReport(config2, name, finalText);
   return { kind, key, name, path: path.path, text: finalText, days: days.length, ai };
 }
+function aiEndpoint(baseUrl, apiFormat = "openai") {
+  const base = String(baseUrl || "").trim().replace(/\/+$/, "");
+  if (!base) return "";
+  return apiFormat === "anthropic" ? `${base}/v1/messages` : `${base}/chat/completions`;
+}
+function aiHeaders(config2, baseUrl) {
+  const apiKey = String(config2.ai.apiKey || "").trim();
+  const format = config2.ai.apiFormat === "anthropic" ? "anthropic" : "openai";
+  if (format === "anthropic") {
+    const headers = {
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01"
+    };
+    if (apiKey) {
+      headers["x-api-key"] = apiKey;
+      if (!/api\.anthropic\.com/i.test(baseUrl)) headers.authorization = `Bearer ${apiKey}`;
+    }
+    return headers;
+  }
+  return {
+    "content-type": "application/json",
+    ...apiKey ? { authorization: `Bearer ${apiKey}` } : {}
+  };
+}
+function aiBody(config2, system, user) {
+  if (config2.ai.apiFormat === "anthropic") {
+    return {
+      model: config2.ai.model,
+      max_tokens: 4096,
+      temperature: 0.3,
+      system,
+      messages: [{ role: "user", content: user }]
+    };
+  }
+  return {
+    model: config2.ai.model,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user }
+    ],
+    temperature: 0.3
+  };
+}
+function aiResult(config2, data) {
+  if (config2.ai.apiFormat === "anthropic") {
+    const content2 = Array.isArray(data?.content) ? data.content.filter((block) => block?.type === "text" && block.text).map((block) => block.text).join("") : "";
+    if (!content2) throw new Error("AI \u63A5\u53E3\u6CA1\u6709\u8FD4\u56DE content[].text");
+    const usage = data.usage || null;
+    return {
+      text: String(content2).trim(),
+      usage: usage ? {
+        prompt_tokens: usage.input_tokens || 0,
+        completion_tokens: usage.output_tokens || 0,
+        total_tokens: (usage.input_tokens || 0) + (usage.output_tokens || 0)
+      } : null
+    };
+  }
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) throw new Error("AI \u63A5\u53E3\u6CA1\u6709\u8FD4\u56DE choices[0].message.content");
+  return { text: String(content).trim(), usage: data.usage || null };
+}
 async function aiComplete(config2, system, user) {
   if (!config2.ai.baseUrl || !config2.ai.model) {
     throw new Error("\u8FD8\u6CA1\u6709\u914D\u7F6E AI \u63A5\u53E3\uFF08baseUrl/model\uFF09");
   }
-  const url2 = `${config2.ai.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+  const url2 = aiEndpoint(config2.ai.baseUrl, config2.ai.apiFormat);
   const response = await fetch(url2, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...config2.ai.apiKey ? { authorization: `Bearer ${config2.ai.apiKey}` } : {}
-    },
-    body: JSON.stringify({
-      model: config2.ai.model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user }
-      ],
-      temperature: 0.3
-    }),
+    headers: aiHeaders(config2, config2.ai.baseUrl),
+    body: JSON.stringify(aiBody(config2, system, user)),
     signal: AbortSignal.timeout(18e4)
   });
-  const text = await response.text();
+  const raw = await response.text();
   let data;
   try {
-    data = text ? JSON.parse(text) : {};
+    data = raw ? JSON.parse(raw) : {};
   } catch {
-    data = { raw: text };
+    data = { raw };
   }
   if (!response.ok) {
-    throw new Error(`AI \u63A5\u53E3 HTTP ${response.status}: ${data?.error?.message || data?.message || text.slice(0, 300)}`);
+    throw new Error(`AI \u63A5\u53E3 HTTP ${response.status}: ${data?.error?.message || data?.message || raw.slice(0, 300)}`);
   }
-  const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error("AI \u63A5\u53E3\u6CA1\u6709\u8FD4\u56DE choices[0].message.content");
-  if (data.usage) {
+  const result = aiResult(config2, data);
+  if (result.usage) {
     await recordAiUsage(config2, {
       kind: "report",
       model: data.model || config2.ai.model,
-      in: data.usage.prompt_tokens || 0,
-      out: data.usage.completion_tokens || 0,
-      total: data.usage.total_tokens || 0
+      in: result.usage.prompt_tokens || 0,
+      out: result.usage.completion_tokens || 0,
+      total: result.usage.total_tokens || 0
     });
   }
-  return { text: String(content).trim(), usage: data.usage || null };
+  return result;
 }
 async function askArchive(config2, question, { useAi = true } = {}) {
   const q = String(question || "").trim();
@@ -35678,6 +35730,262 @@ function summarizeAiUsage(entries = []) {
     bucket.total += total;
   }
   return { ...totals, byModel: [...byModel.values()] };
+}
+
+// lib/ai-detect.mjs
+import { readFileSync as readFileSync2 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join4 } from "node:path";
+function readJson2(file2) {
+  try {
+    return JSON.parse(readFileSync2(file2, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function readText(file2) {
+  try {
+    return readFileSync2(file2, "utf8");
+  } catch {
+    return null;
+  }
+}
+function maskKey(value) {
+  const key = String(value || "").trim();
+  if (!key) return "";
+  if (key.length <= 10) return `${key.slice(0, 2)}\u2026`;
+  return `${key.slice(0, 4)}\u2026${key.slice(-4)}`;
+}
+function makeCandidate(input2) {
+  const apiKey = String(input2.apiKey || "").trim();
+  return {
+    id: String(input2.id),
+    source: String(input2.source || "local"),
+    sourceLabel: String(input2.sourceLabel || input2.source || "\u672C\u5730\u914D\u7F6E"),
+    name: String(input2.name || input2.sourceLabel || ""),
+    baseUrl: String(input2.baseUrl || "").trim().replace(/\/+$/, ""),
+    model: String(input2.model || "").trim(),
+    apiFormat: input2.apiFormat === "anthropic" ? "anthropic" : "openai",
+    note: String(input2.note || ""),
+    rank: Number(input2.rank || 0),
+    apiKey
+  };
+}
+function publicCandidate(candidate) {
+  if (!candidate) return null;
+  const { apiKey, rank, ...rest } = candidate;
+  return {
+    ...rest,
+    hasKey: Boolean(apiKey),
+    keyHint: maskKey(apiKey)
+  };
+}
+function parseTomlLite(text) {
+  const root = {};
+  let current = root;
+  for (const raw of String(text || "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const section = /^\[([^\]]+)\]$/.exec(line);
+    if (section) {
+      current = root;
+      for (const rawPart of section[1].split(".")) {
+        const part = rawPart.trim().replace(/^["']|["']$/g, "");
+        if (!part) continue;
+        if (typeof current[part] !== "object" || current[part] === null) current[part] = {};
+        current = current[part];
+      }
+      continue;
+    }
+    const kv = /^([A-Za-z0-9_.-]+)\s*=\s*(.+)$/.exec(line);
+    if (!kv) continue;
+    let value = kv[2].trim();
+    if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
+      value = value.slice(1, -1);
+    }
+    if (value.startsWith("[")) continue;
+    current[kv[1]] = value;
+  }
+  return root;
+}
+function zcodeCandidates(home) {
+  const config2 = readJson2(join4(home, ".zcode", "v2", "config.json"));
+  const providers = config2?.provider;
+  if (!providers || typeof providers !== "object") return [];
+  const settings = readJson2(join4(home, ".zcode", "v2", "setting.json")) || {};
+  const selected = Object.values(settings.modelProviderFamilySelectedKeys || {}).map(String);
+  const isSelected = (key) => selected.some((value) => value === key || value.endsWith(`:${key}`));
+  const out = [];
+  for (const [key, provider] of Object.entries(providers)) {
+    if (!provider || typeof provider !== "object") continue;
+    const options = provider.options || {};
+    const baseUrl = String(options.baseURL || options.baseUrl || "").trim();
+    if (!baseUrl) continue;
+    const apiFormat = provider.kind === "anthropic" ? "anthropic" : provider.kind === "openai" ? "openai" : "";
+    if (!apiFormat) continue;
+    const models = provider.models && typeof provider.models === "object" ? provider.models : {};
+    const modelKey = Object.keys(models)[0] || "";
+    const model = String(models[modelKey]?.name || modelKey || "").trim();
+    const chosen = isSelected(key);
+    const rawKey = String(options.apiKey || "").trim();
+    const encrypted = rawKey.startsWith("enc:v1:");
+    const usableKey = Boolean(rawKey) && !encrypted;
+    const notes = [];
+    if (chosen) notes.push("ZCode \u5F53\u524D\u9009\u62E9\u7684\u4F9B\u5E94\u5546");
+    if (provider.enabled === false) notes.push("\u5728 ZCode \u4E2D\u672A\u542F\u7528");
+    if (encrypted) notes.push("OAuth \u51ED\u636E\u5DF2\u52A0\u5BC6\uFF0C\u65E0\u6CD5\u590D\u7528 Key\uFF0C\u8BF7\u624B\u52A8\u586B\u5199");
+    else if (!rawKey) notes.push("\u6CA1\u6709\u53EF\u590D\u7528\u7684 API Key");
+    out.push(
+      makeCandidate({
+        id: `zcode:${key}`,
+        source: "zcode",
+        sourceLabel: "ZCode",
+        name: provider.name || key,
+        baseUrl,
+        model,
+        apiFormat,
+        apiKey: encrypted ? "" : rawKey,
+        note: notes.join("\uFF1B"),
+        rank: chosen && usableKey ? 0 : provider.enabled === false ? 2 : usableKey ? 1 : 3
+      })
+    );
+  }
+  return out.sort((a, b) => a.rank - b.rank);
+}
+function claudeCandidates(home) {
+  const settings = readJson2(join4(home, ".claude", "settings.json"));
+  const env = settings?.env;
+  if (!env || typeof env !== "object") return [];
+  const baseUrl = String(env.ANTHROPIC_BASE_URL || "").trim();
+  const apiKey = String(env.ANTHROPIC_AUTH_TOKEN || env.ANTHROPIC_API_KEY || "").trim();
+  const model = String(
+    env.ANTHROPIC_MODEL || env.ANTHROPIC_DEFAULT_SONNET_MODEL || env.ANTHROPIC_DEFAULT_OPUS_MODEL || env.ANTHROPIC_DEFAULT_HAIKU_MODEL || ""
+  ).trim();
+  if (!baseUrl && !apiKey) return [];
+  return [
+    makeCandidate({
+      id: "claude-code",
+      source: "claude-code",
+      sourceLabel: "Claude Code",
+      name: "Claude Code settings.json",
+      baseUrl: baseUrl || "https://api.anthropic.com",
+      model,
+      apiFormat: "anthropic",
+      apiKey,
+      note: "\u6765\u81EA ~/.claude/settings.json \u7684 ANTHROPIC_* \u73AF\u5883\u53D8\u91CF",
+      rank: 3
+    })
+  ];
+}
+function codexCandidates(home, env) {
+  const text = readText(join4(home, ".codex", "config.toml"));
+  if (!text) return [];
+  const toml = parseTomlLite(text);
+  const auth = readJson2(join4(home, ".codex", "auth.json")) || {};
+  const providerId = String(toml.model_provider || "").trim();
+  const providers = toml.model_providers && typeof toml.model_providers === "object" ? toml.model_providers : {};
+  const provider = providerId && providers[providerId] || providers.openai || {};
+  const envKey = String(provider.env_key || "").trim();
+  const apiKey = String(auth.OPENAI_API_KEY || (envKey ? env[envKey] : "") || env.OPENAI_API_KEY || "").trim();
+  if (!apiKey) return [];
+  const baseUrl = String(provider.base_url || env.OPENAI_BASE_URL || "https://api.openai.com/v1").trim();
+  const wire = String(provider.wire_api || "").trim();
+  return [
+    makeCandidate({
+      id: "codex",
+      source: "codex",
+      sourceLabel: "Codex CLI",
+      name: providerId ? `Codex \xB7 ${providerId}` : "Codex CLI",
+      baseUrl,
+      model: String(toml.model || "").trim(),
+      apiFormat: "openai",
+      apiKey,
+      note: wire === "responses" ? "Codex \u4F7F\u7528 Responses API\uFF1B\u82E5\u8BE5\u7AEF\u70B9\u4E0D\u652F\u6301 chat/completions\uFF0C\u6DA6\u8272\u4F1A\u5931\u8D25" : "\u6765\u81EA ~/.codex/config.toml \u4E0E auth.json",
+      rank: 4
+    })
+  ];
+}
+function geminiCandidates(home, env) {
+  const dotenv = readText(join4(home, ".gemini", ".env")) || "";
+  const dotenvKey = /^\s*GEMINI_API_KEY\s*=\s*(.+)$/m.exec(dotenv)?.[1]?.trim().replace(/^["']|["']$/g, "");
+  const apiKey = String(env.GEMINI_API_KEY || dotenvKey || "").trim();
+  if (!apiKey) return [];
+  const settings = readJson2(join4(home, ".gemini", "settings.json")) || {};
+  return [
+    makeCandidate({
+      id: "gemini-cli",
+      source: "gemini-cli",
+      sourceLabel: "Gemini CLI",
+      name: "Gemini CLI",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+      model: String(settings.model || "gemini-2.5-flash").trim(),
+      apiFormat: "openai",
+      apiKey,
+      note: "\u6765\u81EA GEMINI_API_KEY\uFF08OpenAI \u517C\u5BB9\u7AEF\u70B9\uFF09",
+      rank: 5
+    })
+  ];
+}
+function envCandidates(env) {
+  const out = [];
+  if (env.OPENAI_API_KEY) {
+    out.push(
+      makeCandidate({
+        id: "env:openai",
+        source: "env",
+        sourceLabel: "\u73AF\u5883\u53D8\u91CF",
+        name: "OPENAI_API_KEY",
+        baseUrl: env.OPENAI_BASE_URL || "https://api.openai.com/v1",
+        model: env.OPENAI_MODEL || "gpt-4o-mini",
+        apiFormat: "openai",
+        apiKey: env.OPENAI_API_KEY,
+        note: "\u6765\u81EA\u5F53\u524D\u8FDB\u7A0B\u73AF\u5883\u53D8\u91CF",
+        rank: 6
+      })
+    );
+  }
+  if (env.ANTHROPIC_API_KEY) {
+    out.push(
+      makeCandidate({
+        id: "env:anthropic",
+        source: "env",
+        sourceLabel: "\u73AF\u5883\u53D8\u91CF",
+        name: "ANTHROPIC_API_KEY",
+        baseUrl: env.ANTHROPIC_BASE_URL || "https://api.anthropic.com",
+        model: env.ANTHROPIC_MODEL || "claude-sonnet-4-5",
+        apiFormat: "anthropic",
+        apiKey: env.ANTHROPIC_API_KEY,
+        note: "\u6765\u81EA\u5F53\u524D\u8FDB\u7A0B\u73AF\u5883\u53D8\u91CF",
+        rank: 6
+      })
+    );
+  }
+  return out;
+}
+function detectAiCandidates(options = {}) {
+  const home = options.home || homedir2();
+  const env = options.env || process.env;
+  const all = [
+    ...zcodeCandidates(home),
+    ...claudeCandidates(home),
+    ...codexCandidates(home, env),
+    ...geminiCandidates(home, env),
+    ...envCandidates(env)
+  ];
+  const seen = /* @__PURE__ */ new Set();
+  const unique = [];
+  for (const item of all) {
+    const fingerprint = [item.baseUrl, item.apiFormat, item.model, item.apiKey].join("|");
+    if (seen.has(fingerprint)) continue;
+    seen.add(fingerprint);
+    unique.push(item);
+  }
+  return unique.sort((a, b) => a.rank - b.rank);
+}
+function findAiCandidate(id, options = {}) {
+  const wanted = String(id || "").trim();
+  if (!wanted) return null;
+  return detectAiCandidates(options).find((item) => item.id === wanted) || null;
 }
 
 // src/api.mjs
@@ -35805,6 +36113,30 @@ async function configAction(args = {}) {
   if ((args.action || "get") === "get") return publicConfig(loadConfig());
   return publicConfig(saveConfig(args.patch || {}));
 }
+async function aiAction(args = {}) {
+  const action = args.action || "detect";
+  if (action === "detect") {
+    return { candidates: detectAiCandidates().map(publicCandidate) };
+  }
+  if (action === "apply") {
+    const candidate = findAiCandidate(args.id);
+    if (!candidate) throw new Error(`\u6CA1\u6709\u627E\u5230\u672C\u673A AI \u914D\u7F6E\uFF1A${args.id || "(\u7A7A)"}`);
+    if (!candidate.baseUrl) throw new Error("\u8BE5\u914D\u7F6E\u7F3A\u5C11 baseUrl");
+    if (!candidate.model) throw new Error("\u8BE5\u914D\u7F6E\u7F3A\u5C11 model");
+    const next = saveConfig({
+      ai: {
+        baseUrl: candidate.baseUrl,
+        model: candidate.model,
+        apiFormat: candidate.apiFormat,
+        // Applying a candidate means "use exactly this endpoint": never carry
+        // a key from a different provider over to a new base URL.
+        ...candidate.apiKey ? { apiKey: candidate.apiKey } : { clearApiKey: true }
+      }
+    });
+    return { applied: publicCandidate(candidate), config: publicConfig(next) };
+  }
+  throw new Error(`\u672A\u77E5 action: ${action}`);
+}
 async function dayAction(args = {}) {
   const config2 = loadConfig();
   const dateString = assertDate(args.date || localDate());
@@ -35866,6 +36198,8 @@ async function dispatch(op, args = {}) {
       return backupAction(config2, args);
     case "config":
       return configAction(args);
+    case "ai":
+      return aiAction(args);
     case "days":
       return listDays(config2);
     case "reports":
@@ -36085,7 +36419,8 @@ server.registerTool(
         "projects",
         "usage",
         "backup",
-        "config"
+        "config",
+        "ai"
       ]),
       args: external_exports.record(external_exports.string(), external_exports.unknown()).optional()
     }),
@@ -36100,7 +36435,7 @@ server.registerTool(
   }
 );
 async function asset(name) {
-  return readFile2(join4(HERE, name), "utf8");
+  return readFile2(join5(HERE, name), "utf8");
 }
 var panelHtmlPromise;
 function panelDocument() {

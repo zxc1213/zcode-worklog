@@ -16,6 +16,7 @@ delete process.env.WORKLOG_DATA_DIR
 
 const { loadConfig, saveConfig, publicConfig, dayFile, localDate, weekPathFor } = await import('../lib/config.mjs')
 const { composePanelHtml } = await import('../lib/panel.mjs')
+const { detectAiCandidates, publicCandidate, findAiCandidate, parseTomlLite } = await import('../lib/ai-detect.mjs')
 const store = await import('../lib/store.mjs')
 const reports = await import('../lib/report.mjs')
 const api = await import('../src/api.mjs')
@@ -58,6 +59,13 @@ describe('config', () => {
     assert.equal('apiKey' in pub.ai, false)
     saveConfig({ gitAuthor: '', ai: { clearApiKey: true } })
     assert.equal(publicConfig().ai.hasApiKey, false)
+  })
+
+  it('persists the AI api format', () => {
+    saveConfig({ ai: { baseUrl: 'https://api.example.com/v1', model: 'm', apiFormat: 'anthropic' } })
+    assert.equal(publicConfig().ai.apiFormat, 'anthropic')
+    saveConfig({ ai: { apiFormat: 'openai' } })
+    assert.equal(publicConfig().ai.apiFormat, 'openai')
   })
 })
 
@@ -156,6 +164,108 @@ describe('mcp api', () => {
     const again = await api.maybeAutoArchive(loadConfig())
     assert.equal(again, null)
     saveConfig({ autoArchive: false })
+  })
+})
+
+describe('ai detection', () => {
+  function makeHome() {
+    const root = mkdtempSync(join(tmpdir(), 'worklog-ai-'))
+    mkdirSync(join(root, '.zcode', 'v2'), { recursive: true })
+    writeFileSync(
+      join(root, '.zcode', 'v2', 'config.json'),
+      JSON.stringify({
+        provider: {
+          'builtin:demo': {
+            name: 'Demo Provider',
+            kind: 'anthropic',
+            enabled: true,
+            options: { apiKey: 'sk-demo-1234567890', baseURL: 'https://example.test/api/anthropic' },
+            models: { 'GLM-5.2': {} },
+          },
+          'openai-demo': {
+            name: 'OpenAI Demo',
+            kind: 'openai',
+            options: { apiKey: 'sk-oa-1234567890', baseURL: 'https://oa.test/v1' },
+            models: { m1: { name: 'model-1' } },
+          },
+          encrypted: {
+            name: 'Encrypted',
+            kind: 'anthropic',
+            options: { apiKey: 'enc:v1:abc.def.ghi', baseURL: 'https://enc.test/api/anthropic' },
+            models: { m2: {} },
+          },
+        },
+      }),
+      'utf8',
+    )
+    writeFileSync(
+      join(root, '.zcode', 'v2', 'setting.json'),
+      JSON.stringify({ modelProviderFamilySelectedKeys: { bigmodel: 'coding-plan:builtin:demo' } }),
+      'utf8',
+    )
+    mkdirSync(join(root, '.claude'), { recursive: true })
+    writeFileSync(
+      join(root, '.claude', 'settings.json'),
+      JSON.stringify({
+        env: {
+          ANTHROPIC_BASE_URL: 'https://claude.test/api/anthropic',
+          ANTHROPIC_AUTH_TOKEN: 'tok-abcdefgh',
+          ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-x',
+        },
+      }),
+      'utf8',
+    )
+    return root
+  }
+
+  it('detects ZCode and Claude Code configs, selected provider first', () => {
+    const home = makeHome()
+    const list = detectAiCandidates({ home, env: {} })
+    assert.equal(list.length, 4)
+    assert.equal(list[0].id, 'zcode:builtin:demo')
+    assert.equal(list[0].model, 'GLM-5.2')
+    assert.equal(list[0].apiFormat, 'anthropic')
+    assert.equal(list[1].model, 'model-1')
+
+    const encrypted = list.find((item) => item.id === 'zcode:encrypted')
+    assert.equal(encrypted.apiKey, '')
+    assert.match(encrypted.note, /加密/)
+
+    const claude = findAiCandidate('claude-code', { home, env: {} })
+    assert.equal(claude.baseUrl, 'https://claude.test/api/anthropic')
+    assert.equal(claude.model, 'claude-x')
+
+    const pub = publicCandidate(list[0])
+    assert.equal('apiKey' in pub, false)
+    assert.equal(pub.hasKey, true)
+    assert.match(pub.keyHint, /^sk-d/)
+    assert.match(pub.note, /当前选择/)
+  })
+
+  it('parses codex toml and reuses env keys', () => {
+    const toml = parseTomlLite(
+      'model = "gpt-x"\nmodel_provider = "openai"\n[model_providers.openai]\nbase_url = "https://api.test/v1"\nenv_key = "TEST_KEY"\n',
+    )
+    assert.equal(toml.model, 'gpt-x')
+    assert.equal(toml.model_providers.openai.base_url, 'https://api.test/v1')
+    assert.equal(toml.model_providers.openai.env_key, 'TEST_KEY')
+
+    const list = detectAiCandidates({
+      home: join(tmpdir(), 'worklog-ai-missing'),
+      env: { OPENAI_API_KEY: 'sk-env-1234567890' },
+    })
+    assert.equal(list.length, 1)
+    assert.equal(list[0].id, 'env:openai')
+    assert.equal(list[0].baseUrl, 'https://api.openai.com/v1')
+  })
+
+  it('builds the right endpoint for each api format', async () => {
+    const { aiEndpoint } = await import('../lib/report.mjs')
+    assert.equal(aiEndpoint('https://api.test/v1', 'openai'), 'https://api.test/v1/chat/completions')
+    assert.equal(
+      aiEndpoint('https://api.test/api/anthropic/', 'anthropic'),
+      'https://api.test/api/anthropic/v1/messages',
+    )
   })
 })
 

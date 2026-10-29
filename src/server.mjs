@@ -266,6 +266,7 @@ server.registerTool(
         'usage',
         'backup',
         'config',
+        'ai',
       ]),
       args: z.record(z.string(), z.unknown()).optional(),
     }),

@@ -54,6 +54,20 @@ Five tabs:
 
 The panel talks to this plugin's own MCP server through the panel-only `worklog_api` tool. The plugin inlines the panel script and stylesheet into `ui://zcode-worklog/panel.html`, so the host loads no external program or subresources. If the panel stays on the loading screen, close and reopen it; if that fails, update the plugin and restart ZCode (`zcode plugins update zcode-worklog@zcode-worklog`).
 
+## Reusing local AI configs
+
+**Settings → AI polish → Scan local AI tools** reads these locations on this machine and lists reusable endpoints. Clicking **Use** writes the endpoint into the plugin config; API keys stay inside the local server process and are never shown in the panel.
+
+| Source | What is read |
+|---|---|
+| ZCode | Providers in `~/.zcode/v2/config.json` (baseURL, apiKey, kind, model), with the currently selected provider first |
+| Claude Code | `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_DEFAULT_*_MODEL` from `~/.claude/settings.json` |
+| Codex CLI | `~/.codex/config.toml` and `auth.json` (only when an API key exists; OAuth-only logins cannot be reused) |
+| Gemini CLI | `GEMINI_API_KEY` from the environment or `~/.gemini/.env`, via its OpenAI-compatible endpoint |
+| Environment | `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, and related variables |
+
+Both **OpenAI-compatible** (`/chat/completions`) and **Anthropic-compatible** (`/v1/messages`) endpoints are supported; the BigModel / Z.ai coding plans commonly used with ZCode use the latter. Manual entry still works as before.
+
 ## Data layout
 
 ```text

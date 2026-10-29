@@ -1,19 +1,75 @@
-:root {
-  --wl-bg: var(--color-background-primary, #ffffff);
-  --wl-text: var(--color-text-primary, #1f2328);
-  --wl-muted: var(--color-text-secondary, #6b7280);
-  --wl-faint: var(--color-text-tertiary, #9aa1ab);
-  --wl-border: var(--color-border-primary, rgba(128, 128, 128, 0.24));
-  --wl-border-soft: var(--color-border-secondary, rgba(128, 128, 128, 0.16));
-  --wl-card: var(--color-background-secondary, rgba(128, 128, 128, 0.06));
-  --wl-input: var(--color-background-primary, #ffffff);
-  --wl-accent: var(--color-text-info, #4d6bfe);
-  --wl-ok: #16a34a;
-  --wl-warn: #d97706;
-  --wl-danger: #dc2626;
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+  --wl-bg: #ffffff;
+  --wl-text: #1f2328;
+  --wl-muted: #58606d;
+  --wl-faint: #858d99;
+  --wl-border: rgba(31, 35, 40, 0.22);
+  --wl-border-soft: rgba(31, 35, 40, 0.12);
+  --wl-card: rgba(31, 35, 40, 0.045);
+  --wl-input: #ffffff;
+  --wl-accent: #3b5bdb;
+  --wl-accent-fg: #ffffff;
+  --wl-accent-text: #2f49b8;
+  --wl-accent-soft: rgba(59, 91, 219, 0.1);
+  --wl-ok: #15803d;
+  --wl-ok-soft: rgba(21, 128, 61, 0.1);
+  --wl-warn: #b45309;
+  --wl-warn-soft: rgba(180, 83, 9, 0.1);
+  --wl-danger: #c62828;
+  --wl-danger-soft: rgba(198, 40, 40, 0.1);
   --wl-radius: 8px;
   --wl-mono: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace);
   --wl-sans: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif);
+}
+
+/* Own palette instead of the host's text/background variables: hosts expose
+   colors like --color-text-info that are unreadable as button backgrounds. */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --wl-bg: #1b1d22;
+  --wl-text: #e7e9ec;
+  --wl-muted: #a6adb8;
+  --wl-faint: #7e8794;
+  --wl-border: rgba(231, 233, 236, 0.22);
+  --wl-border-soft: rgba(231, 233, 236, 0.12);
+  --wl-card: rgba(231, 233, 236, 0.06);
+  --wl-input: #24272e;
+  --wl-accent: #4361ee;
+  --wl-accent-fg: #ffffff;
+  --wl-accent-text: #a5b4ff;
+  --wl-accent-soft: rgba(67, 97, 238, 0.18);
+  --wl-ok: #4ade80;
+  --wl-ok-soft: rgba(74, 222, 128, 0.14);
+  --wl-warn: #fbbf24;
+  --wl-warn-soft: rgba(251, 191, 36, 0.14);
+  --wl-danger: #f87171;
+  --wl-danger-soft: rgba(248, 113, 113, 0.14);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --wl-bg: #1b1d22;
+    --wl-text: #e7e9ec;
+    --wl-muted: #a6adb8;
+    --wl-faint: #7e8794;
+    --wl-border: rgba(231, 233, 236, 0.22);
+    --wl-border-soft: rgba(231, 233, 236, 0.12);
+    --wl-card: rgba(231, 233, 236, 0.06);
+    --wl-input: #24272e;
+    --wl-accent: #4361ee;
+    --wl-accent-fg: #ffffff;
+    --wl-accent-text: #a5b4ff;
+    --wl-accent-soft: rgba(67, 97, 238, 0.18);
+    --wl-ok: #4ade80;
+    --wl-ok-soft: rgba(74, 222, 128, 0.14);
+    --wl-warn: #fbbf24;
+    --wl-warn-soft: rgba(251, 191, 36, 0.14);
+    --wl-danger: #f87171;
+    --wl-danger-soft: rgba(248, 113, 113, 0.14);
+  }
 }
 
 * {
@@ -132,18 +188,18 @@ body {
 }
 
 .wl-notice.ok {
-  background: rgba(22, 163, 74, 0.12);
+  background: var(--wl-ok-soft);
   color: var(--wl-ok);
 }
 
 .wl-notice.err {
-  background: rgba(220, 38, 38, 0.12);
+  background: var(--wl-danger-soft);
   color: var(--wl-danger);
 }
 
 .wl-notice.info {
-  background: rgba(77, 107, 254, 0.1);
-  color: var(--wl-accent);
+  background: var(--wl-accent-soft);
+  color: var(--wl-accent-text);
 }
 
 .wl-grid {
@@ -219,10 +275,20 @@ body {
   cursor: default;
 }
 
+.wl-btn:focus-visible,
+.wl-tab:focus-visible,
+.wl-click:focus-visible,
+.wl-input:focus-visible,
+.wl-select:focus-visible,
+.wl-area:focus-visible {
+  outline: 2px solid var(--wl-accent);
+  outline-offset: 1px;
+}
+
 .wl-btn.primary {
   background: var(--wl-accent);
   border-color: transparent;
-  color: #fff;
+  color: var(--wl-accent-fg);
 }
 
 .wl-btn.primary:hover {
@@ -231,7 +297,7 @@ body {
 
 .wl-btn.danger {
   color: var(--wl-danger);
-  border-color: rgba(220, 38, 38, 0.35);
+  border-color: var(--wl-danger-soft);
 }
 
 .wl-btn.tiny {
@@ -272,6 +338,11 @@ body {
   font-family: var(--wl-sans);
 }
 
+.wl-select option {
+  background: var(--wl-input);
+  color: var(--wl-text);
+}
+
 .wl-label {
   display: block;
   font-size: 11px;
@@ -301,7 +372,7 @@ body {
 }
 
 .wl-item.overdue {
-  border-color: rgba(220, 38, 38, 0.4);
+  border-color: var(--wl-danger-soft);
 }
 
 .wl-item .grow {
@@ -335,17 +406,17 @@ body {
 
 .wl-tag.high {
   color: var(--wl-danger);
-  border-color: rgba(220, 38, 38, 0.4);
+  border-color: var(--wl-danger-soft);
 }
 
 .wl-tag.mid {
   color: var(--wl-warn);
-  border-color: rgba(217, 119, 6, 0.4);
+  border-color: var(--wl-warn-soft);
 }
 
 .wl-tag.low {
   color: var(--wl-ok);
-  border-color: rgba(22, 163, 74, 0.4);
+  border-color: var(--wl-ok-soft);
 }
 
 .wl-pre {
@@ -401,7 +472,7 @@ body {
 }
 
 .wl-click:hover .wl-item-title {
-  color: var(--wl-accent);
+  color: var(--wl-accent-text);
 }
 
 .wl-check {

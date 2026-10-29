@@ -54,6 +54,20 @@ zcode plugins install zcode-worklog@zcode-worklog
 
 面板通过插件自己的 MCP 工具 `worklog_api`（仅面板可见）读写同一份本地数据。面板脚本与样式由插件服务端内联进 `ui://zcode-worklog/panel.html`，不依赖外部程序；如果面板一直停在加载态，先关闭面板重开，仍不行就更新插件并重启 ZCode（`zcode plugins update zcode-worklog@zcode-worklog`）。
 
+## AI 配置复用
+
+**设置 → AI 润色 → 扫描本机 AI 工具** 会只在本机读取以下位置，列出可复用的接口，点「使用」即可写入插件配置（API Key 只在本机进程内传递，不会显示在面板里）：
+
+| 来源 | 读取内容 |
+|---|---|
+| ZCode | `~/.zcode/v2/config.json` 中已配置的供应商（baseURL、apiKey、kind、模型），优先显示当前选中的供应商 |
+| Claude Code | `~/.claude/settings.json` 的 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_DEFAULT_*_MODEL` |
+| Codex CLI | `~/.codex/config.toml` 与 `auth.json`（只有存在 API Key 时才会列出；OAuth 登录无法复用） |
+| Gemini CLI | `GEMINI_API_KEY`（环境变量或 `~/.gemini/.env`），走 OpenAI 兼容端点 |
+| 环境变量 | `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `ANTHROPIC_API_KEY` 等 |
+
+接口格式支持 **OpenAI 兼容**（`/chat/completions`）和 **Anthropic 兼容**（`/v1/messages`），ZCode 目前常用的 BigModel / Z.ai Coding Plan 属于后者。手动填写也照常可用。
+
 ## 数据目录
 
 ```text

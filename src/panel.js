@@ -83,6 +83,8 @@ const state = {
   reportPeriod: today(),
   reportUseAi: false,
   importDir: '',
+  aiCandidates: null,
+  aiBusy: false,
 }
 
 function h(tag, props = {}, ...children) {
@@ -157,6 +159,7 @@ function draftFromConfig(config) {
     taskTime: c.taskTime || '18:30',
     aiBaseUrl: c.ai?.baseUrl || '',
     aiModel: c.ai?.model || '',
+    aiFormat: c.ai?.apiFormat === 'anthropic' ? 'anthropic' : 'openai',
     aiKey: '',
   }
 }
@@ -203,7 +206,10 @@ function tabButton(key, label) {
             render()
           })
         }
-        if (key === 'settings' && state.config) state.settings = state.settings || draftFromConfig(state.config)
+        if (key === 'settings') {
+          if (state.config) state.settings = state.settings || draftFromConfig(state.config)
+          if (state.aiCandidates === null) detectAi()
+        }
         render()
       },
     },
@@ -832,6 +838,64 @@ function reportsTab() {
   )
 }
 
+async function detectAi() {
+  if (state.aiBusy) return
+  state.aiBusy = true
+  render()
+  try {
+    const data = await call('ai', { action: 'detect' })
+    state.aiCandidates = Array.isArray(data?.candidates) ? data.candidates : []
+    if (!state.aiCandidates.length) setNotice('info', '没有发现可复用的本机 AI 配置，可在下方手动填写。')
+  } catch (error) {
+    state.aiCandidates = []
+    setNotice('err', `扫描本机 AI 配置失败：${String(error?.message || error)}`)
+  } finally {
+    state.aiBusy = false
+    render()
+  }
+}
+
+function aiCandidateItem(candidate) {
+  return h(
+    'div',
+    { className: 'wl-item', key: candidate.id },
+    h(
+      'div',
+      { className: 'grow' },
+      h('div', { className: 'wl-item-title' }, candidate.name || candidate.id),
+      h(
+        'div',
+        { className: 'wl-item-meta' },
+        h('span', null, candidate.sourceLabel),
+        candidate.model ? h('span', null, candidate.model) : h('span', null, '未识别到模型'),
+        h('span', null, candidate.hasKey ? `Key ${candidate.keyHint}` : '无 Key'),
+        h('span', null, candidate.apiFormat === 'anthropic' ? 'Anthropic 兼容' : 'OpenAI 兼容'),
+      ),
+      h('div', { className: 'wl-hint wl-mono' }, candidate.baseUrl),
+      candidate.note ? h('div', { className: 'wl-hint' }, candidate.note) : null,
+    ),
+    h(
+      'button',
+      {
+        className: 'wl-btn primary tiny',
+        disabled: state.busy === 'ai-apply',
+        onClick: () =>
+          act(
+            'ai-apply',
+            async () => {
+              const result = await call('ai', { action: 'apply', id: candidate.id })
+              state.config = result.config
+              state.settings = draftFromConfig(result.config)
+              setNotice('ok', `已复用 ${result.applied?.name || candidate.name} 的 AI 配置`)
+            },
+            { refresh: false },
+          ),
+      },
+      '使用',
+    ),
+  )
+}
+
 function settingsTab() {
   const draft = state.settings || draftFromConfig(state.config)
   const config = state.config || {}
@@ -878,7 +942,33 @@ function settingsTab() {
       }),
     ),
 
-    h('div', { className: 'wl-section-title', style: { marginTop: '14px' } }, 'AI 润色（OpenAI 兼容）'),
+    h('div', { className: 'wl-section-title', style: { marginTop: '14px' } }, 'AI 润色'),
+    h(
+      'div',
+      { className: 'wl-toolbar' },
+      h(
+        'button',
+        {
+          className: 'wl-btn',
+          disabled: state.aiBusy,
+          onClick: detectAi,
+        },
+        state.aiBusy ? '扫描中…' : '扫描本机 AI 工具',
+      ),
+      h('span', { className: 'wl-hint' }, '只在本机读取 ZCode / Claude Code / Codex / Gemini / 环境变量'),
+    ),
+    state.aiCandidates === null
+      ? null
+      : state.aiCandidates.length
+        ? h('div', { className: 'wl-list' }, state.aiCandidates.map(aiCandidateItem))
+        : h('div', { className: 'wl-empty' }, '没有发现可复用的本机 AI 配置。'),
+    h('div', { className: 'wl-label' }, '接口格式'),
+    h(
+      'select',
+      { className: 'wl-select', onChange: set('aiFormat') },
+      h('option', { value: 'openai', selected: draft.aiFormat !== 'anthropic' }, 'OpenAI 兼容（chat/completions）'),
+      h('option', { value: 'anthropic', selected: draft.aiFormat === 'anthropic' }, 'Anthropic 兼容（v1/messages）'),
+    ),
     h('div', { className: 'wl-label' }, 'Base URL'),
     h('input', {
       className: 'wl-input',
@@ -918,6 +1008,7 @@ function settingsTab() {
                 ai: {
                   baseUrl: draft.aiBaseUrl,
                   model: draft.aiModel,
+                  apiFormat: draft.aiFormat,
                   ...(draft.aiKey ? { apiKey: draft.aiKey } : {}),
                 },
               }

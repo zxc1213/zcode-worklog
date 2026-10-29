@@ -49,7 +49,7 @@ function defaultConfig() {
     autoArchive: false,
     skipWeekends: true,
     taskTime: "18:30",
-    ai: { baseUrl: "", apiKey: "", model: "" }
+    ai: { baseUrl: "", apiKey: "", model: "", apiFormat: "openai" }
   };
 }
 function normalizeStringArray(value) {
@@ -84,7 +84,8 @@ function mergeConfig(base, patch = {}) {
     ai: {
       baseUrl: String(ai.baseUrl || "").trim().replace(/\/+$/, ""),
       apiKey: String(ai.apiKey || ""),
-      model: String(ai.model || "").trim()
+      model: String(ai.model || "").trim(),
+      apiFormat: ai.apiFormat === "anthropic" ? "anthropic" : "openai"
     }
   };
 }

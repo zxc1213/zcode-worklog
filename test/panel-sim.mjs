@@ -101,6 +101,25 @@ function respond(window, message) {
     if (op === 'bootstrap') structured = bootstrap
     else if (op === 'day') structured = { date: args.date, exists: true, text: '# 测试日志\n' }
     else if (op === 'todos' && args.action === 'list') structured = { items: bootstrap.todos }
+    else if (op === 'ai' && args.action === 'detect')
+      structured = {
+        candidates: [
+          {
+            id: 'zcode:builtin:demo',
+            source: 'zcode',
+            sourceLabel: 'ZCode',
+            name: 'Demo Provider',
+            baseUrl: 'https://example.test/api/anthropic',
+            model: 'GLM-5.2',
+            apiFormat: 'anthropic',
+            hasKey: true,
+            keyHint: 'sk-d…7890',
+            note: 'ZCode 当前选择的供应商',
+          },
+        ],
+      }
+    else if (op === 'ai' && args.action === 'apply')
+      structured = { applied: { name: 'Demo Provider' }, config: bootstrap.config }
     else structured = { ok: true }
     reply(
       window,
@@ -171,6 +190,10 @@ console.log('reports OK')
 
 await clickTab('设置')
 assert.ok(text().includes('扫描根目录'), 'settings tab renders')
+await wait(250)
+assert.ok(text().includes('扫描本机 AI 工具'), 'settings tab offers AI reuse')
+assert.ok(text().includes('Demo Provider'), 'settings tab lists detected AI configs')
+assert.ok(text().includes('Anthropic 兼容'), 'settings tab shows the API format')
 console.log('settings OK')
 
 const ops = messages

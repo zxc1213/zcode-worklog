@@ -36,6 +36,7 @@ import {
   updateTodo,
 } from '../lib/store.mjs'
 import { askArchive, generateReport, summarizeAiUsage } from '../lib/report.mjs'
+import { detectAiCandidates, findAiCandidate, publicCandidate } from '../lib/ai-detect.mjs'
 
 export async function statusPayload(config = loadConfig()) {
   const [days, todos, state, backups, projects] = await Promise.all([
@@ -173,6 +174,31 @@ export async function configAction(args = {}) {
   return publicConfig(saveConfig(args.patch || {}))
 }
 
+export async function aiAction(args = {}) {
+  const action = args.action || 'detect'
+  if (action === 'detect') {
+    return { candidates: detectAiCandidates().map(publicCandidate) }
+  }
+  if (action === 'apply') {
+    const candidate = findAiCandidate(args.id)
+    if (!candidate) throw new Error(`没有找到本机 AI 配置：${args.id || '(空)'}`)
+    if (!candidate.baseUrl) throw new Error('该配置缺少 baseUrl')
+    if (!candidate.model) throw new Error('该配置缺少 model')
+    const next = saveConfig({
+      ai: {
+        baseUrl: candidate.baseUrl,
+        model: candidate.model,
+        apiFormat: candidate.apiFormat,
+        // Applying a candidate means "use exactly this endpoint": never carry
+        // a key from a different provider over to a new base URL.
+        ...(candidate.apiKey ? { apiKey: candidate.apiKey } : { clearApiKey: true }),
+      },
+    })
+    return { applied: publicCandidate(candidate), config: publicConfig(next) }
+  }
+  throw new Error(`未知 action: ${action}`)
+}
+
 export async function dayAction(args = {}) {
   const config = loadConfig()
   const dateString = assertDate(args.date || localDate())
@@ -243,6 +269,8 @@ export async function dispatch(op, args = {}) {
       return backupAction(config, args)
     case 'config':
       return configAction(args)
+    case 'ai':
+      return aiAction(args)
     case 'days':
       return listDays(config)
     case 'reports':
