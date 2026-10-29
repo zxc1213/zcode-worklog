@@ -58,6 +58,10 @@ const panelTool = tools.tools.find((tool) => tool.name === 'worklog_api')
 if (!panelTool?._meta?.ui?.visibility?.includes('app')) {
   throw new Error('worklog_api must be app-visible only')
 }
+const openTool = tools.tools.find((tool) => tool.name === 'worklog_open')
+if (openTool?._meta?.ui?.resourceUri !== 'ui://zcode-worklog/panel.html') {
+  throw new Error('worklog_open must target the panel resource')
+}
 
 const status = await request('tools/call', { name: 'worklog_status', arguments: {} })
 console.log('status:', status.content[0].text.slice(0, 300))

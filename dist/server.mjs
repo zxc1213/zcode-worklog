@@ -36029,6 +36029,16 @@ tool(
   },
   (args) => configAction(args)
 );
+tool(
+  "worklog_open",
+  {
+    title: "\u6253\u5F00 WorkLog \u9762\u677F",
+    description: "\u5728 ZCode \u4FA7\u8FB9\u9762\u677F\u4E2D\u6253\u5F00 WorkLog \u4EA4\u4E92\u754C\u9762\u3002\u7528\u6237\u8BF4\u201C\u6253\u5F00 WorkLog / \u5DE5\u4F5C\u65E5\u5FD7\u9762\u677F / \u770B\u770B\u5DE5\u4F5C\u65E5\u5FD7\u9762\u677F\u201D\u65F6\u8C03\u7528\u3002",
+    inputSchema: external_exports.object({}),
+    _meta: { ui: { resourceUri: PANEL_URI } }
+  },
+  () => ({ opened: true, panel: PANEL_URI, hint: "WorkLog \u9762\u677F\u5DF2\u5728\u4FA7\u680F\u6253\u5F00\u3002" })
+);
 server.registerTool(
   "worklog_api",
   {

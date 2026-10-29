@@ -31,6 +31,14 @@ zcode plugins install zcode-worklog@zcode-worklog
 
 > The repository root is both the plugin root (`.zcode-plugin/plugin.json`) and the marketplace catalog (`marketplace.json`), so one GitHub source adds the market and installs the plugin. The local dev catalog at `E:\AI_Project\research\marketplace.json` still works for local iteration.
 
+### Opening the panel
+
+- **From chat**: say "open the WorkLog panel"; the agent calls `worklog_open` and the panel opens in the right side pane.
+- **Manual**: right side pane → **Add tab (+)** → **App plugins** → **View all plugins** → **WorkLog** → Open.
+- Or **Settings → Plugins → Plugin Marketplace → Personal/Installed → App plugins** → WorkLog → Open.
+
+> The right-side "App plugins" quick section only lists ZCode-recommended plugins. WorkLog is a community plugin, so use "View all plugins" or the App plugins section in the marketplace.
+
 ## Panel
 
 Five tabs:

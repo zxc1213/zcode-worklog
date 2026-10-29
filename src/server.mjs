@@ -231,6 +231,18 @@ tool(
   (args) => configAction(args),
 )
 
+tool(
+  'worklog_open',
+  {
+    title: '打开 WorkLog 面板',
+    description:
+      '在 ZCode 侧边面板中打开 WorkLog 交互界面。用户说“打开 WorkLog / 工作日志面板 / 看看工作日志面板”时调用。',
+    inputSchema: z.object({}),
+    _meta: { ui: { resourceUri: PANEL_URI } },
+  },
+  () => ({ opened: true, panel: PANEL_URI, hint: 'WorkLog 面板已在侧栏打开。' }),
+)
+
 // Panel-only API: hidden from the model, called by the side panel.
 server.registerTool(
   'worklog_api',

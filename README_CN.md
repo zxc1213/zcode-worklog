@@ -31,6 +31,14 @@ zcode plugins install zcode-worklog@zcode-worklog
 
 > 仓库根目录同时是插件根目录（`.zcode-plugin/plugin.json`）和市场清单（`marketplace.json`），所以一条 GitHub 源即可完成添加市场和安装插件。本地开发时也可以继续用 `E:\AI_Project\research\marketplace.json`。
 
+### 打开面板
+
+- **对话里直接说**：“打开 WorkLog 面板”，Agent 会调用 `worklog_open`，在右侧侧栏打开。
+- **手动入口**：右侧面板点 **新增标签（+）** → **应用插件** → **查看所有插件** → **WorkLog** → 打开。
+- 也可以在 **设置 → 插件 → 插件市场 → 个人/已安装 → 应用插件** 里找到 WorkLog 并点「打开」。
+
+> 右侧「应用插件」快捷区只显示 ZCode 官方推荐的插件；WorkLog 属于社区插件，需要走「查看所有插件」或插件市场里的「应用插件」区域。
+
 ## 面板
 
 侧栏 **WorkLog**，五个页签：
