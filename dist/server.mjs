@@ -34472,7 +34472,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 var PLUGIN_NAME = "zcode-worklog";
-var PLUGIN_VERSION = "0.1.0";
+var PLUGIN_VERSION = "0.1.1";
 function pluginHome() {
   const explicit = String(process.env.WORKLOG_HOME || "").trim();
   if (explicit) return resolve(explicit);
