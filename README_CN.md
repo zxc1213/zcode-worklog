@@ -85,7 +85,7 @@ zcode plugins install zcode-worklog@zcode-worklog
 
 ## Agent 工具
 
-`worklog_status`、`worklog_day`、`worklog_search`、`worklog_todos`、`worklog_archive`、`worklog_report`、`worklog_ask`、`worklog_projects`、`worklog_usage`、`worklog_backup`、`worklog_config`。
+`worklog_status`、`worklog_day`、`worklog_search`、`worklog_todos`、`worklog_archive`、`worklog_report`、`worklog_ask`、`worklog_projects`、`worklog_usage`、`worklog_backup`、`worklog_config`、`worklog_open`。
 
 工具名在会话里通常带 `mcp__plugin_zcode-worklog_worklog__` 前缀。
 

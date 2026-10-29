@@ -85,7 +85,7 @@ Auto-archive: when enabled, the MCP server process checks every minute and archi
 
 ## Agent tools
 
-`worklog_status`, `worklog_day`, `worklog_search`, `worklog_todos`, `worklog_archive`, `worklog_report`, `worklog_ask`, `worklog_projects`, `worklog_usage`, `worklog_backup`, `worklog_config`.
+`worklog_status`, `worklog_day`, `worklog_search`, `worklog_todos`, `worklog_archive`, `worklog_report`, `worklog_ask`, `worklog_projects`, `worklog_usage`, `worklog_backup`, `worklog_config`, `worklog_open`.
 
 Session tool names are usually prefixed with `mcp__plugin_zcode-worklog_worklog__`.
 
