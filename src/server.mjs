@@ -12,6 +12,7 @@ import { McpServer } from '@modelcontextprotocol/server'
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
 import { z } from 'zod'
 import { PLUGIN_NAME, PLUGIN_VERSION, loadConfig, localDate } from '../lib/config.mjs'
+import { composePanelHtml } from '../lib/panel.mjs'
 import {
   archiveAction,
   backupAction,
@@ -283,6 +284,16 @@ async function asset(name) {
   return readFile(join(HERE, name), 'utf8')
 }
 
+// The sandbox only serves the HTML returned here, so inline the stylesheet and
+// script instead of pointing at sibling ui:// resources it cannot fetch.
+let panelHtmlPromise
+function panelDocument() {
+  panelHtmlPromise ??= Promise.all([asset('panel.html'), asset('panel.css'), asset('panel.js')]).then(
+    ([html, css, js]) => composePanelHtml(html, css, js),
+  )
+  return panelHtmlPromise
+}
+
 const panelMeta = { ui: { prefersBorder: true } }
 
 server.registerResource(
@@ -290,7 +301,7 @@ server.registerResource(
   PANEL_URI,
   { title: 'WorkLog 面板', mimeType: HTML_MIME, _meta: panelMeta },
   async () => ({
-    contents: [{ uri: PANEL_URI, mimeType: HTML_MIME, text: await asset('panel.html'), _meta: panelMeta }],
+    contents: [{ uri: PANEL_URI, mimeType: HTML_MIME, text: await panelDocument(), _meta: panelMeta }],
   }),
 )
 

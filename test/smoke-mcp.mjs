@@ -88,7 +88,14 @@ const resources = await request('resources/list', {})
 console.log('resources:', resources.resources.map((item) => item.uri).join(', '))
 
 const panel = await request('resources/read', { uri: 'ui://zcode-worklog/panel.html' })
-console.log('panel html bytes:', panel.contents[0].text.length)
+const panelHtml = panel.contents[0].text
+console.log('panel html bytes:', panelHtml.length)
+if (/<script[^>]+src="ui:\/\//.test(panelHtml) || /<link[^>]+href="ui:\/\//.test(panelHtml)) {
+  throw new Error('panel html must not reference ui:// subresources (the sandbox cannot serve them)')
+}
+if (!panelHtml.includes('__worklogMounted') || panelHtml.length < 50000) {
+  throw new Error('panel html must inline the panel bundle and boot fallback')
+}
 
 const panelJs = await request('resources/read', { uri: 'ui://zcode-worklog/panel.js' })
 console.log('panel js bytes:', panelJs.contents[0].text.length)

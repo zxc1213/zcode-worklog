@@ -3,6 +3,7 @@
 **独立 WorkLog for ZCode**：本机工作日志、Git/文档归档、待办、日报/周报/月报/季报/绩效素材，以及一个可交互的侧边面板。
 
 - 不依赖 `WorkLog.exe`，不访问 `127.0.0.1:8377`。
+- 侧边面板完全内置：脚本与样式内联在插件返回的 HTML 中，宿主只负责显示，不加载任何外部应用或子资源。
 - 数据在 ZCode 的插件数据目录（`ZCODE_PLUGIN_DATA`，面板顶部会显示实际路径），不会写回安装目录。
 - 归档目录规则与原 WorkLog 一致，旧 `data\archive` 可直接导入。
 
@@ -51,7 +52,7 @@ zcode plugins install zcode-worklog@zcode-worklog
 | 汇报 | 日报、周报、月报、季报、绩效素材、项目档案；可选 AI 润色；查看已生成报告 |
 | 设置 | 数据目录、Git 扫描根、文档目录、Git 作者、自动归档时间、AI 接口、备份/恢复、从旧 WorkLog 导入 |
 
-面板通过插件自己的 MCP 工具 `worklog_api`（仅面板可见）读写同一份本地数据。
+面板通过插件自己的 MCP 工具 `worklog_api`（仅面板可见）读写同一份本地数据。面板脚本与样式由插件服务端内联进 `ui://zcode-worklog/panel.html`，不依赖外部程序；如果面板一直停在加载态，先关闭面板重开，仍不行就更新插件并重启 ZCode（`zcode plugins update zcode-worklog@zcode-worklog`）。
 
 ## 数据目录
 

@@ -15,6 +15,7 @@ delete process.env.WORKLOG_DOC_ROOTS
 delete process.env.WORKLOG_DATA_DIR
 
 const { loadConfig, saveConfig, publicConfig, dayFile, localDate, weekPathFor } = await import('../lib/config.mjs')
+const { composePanelHtml } = await import('../lib/panel.mjs')
 const store = await import('../lib/store.mjs')
 const reports = await import('../lib/report.mjs')
 const api = await import('../src/api.mjs')
@@ -155,6 +156,32 @@ describe('mcp api', () => {
     const again = await api.maybeAutoArchive(loadConfig())
     assert.equal(again, null)
     saveConfig({ autoArchive: false })
+  })
+})
+
+describe('panel document', () => {
+  it('inlines the panel script and stylesheet', () => {
+    const html = composePanelHtml(
+      '<html><head><!-- ZCODE_WORKLOG_STYLE --></head><body><!-- ZCODE_WORKLOG_SCRIPT --></body></html>',
+      '.wl-root { color: red }',
+      'window.ok = true',
+    )
+    assert.match(html, /<style>\n\.wl-root \{ color: red \}\n<\/style>/)
+    assert.match(html, /<script>\nwindow\.ok = true\n<\/script>/)
+    assert.equal(html.includes('ui://'), false)
+  })
+
+  it('escapes closing tags inside the bundled script and stylesheet', () => {
+    const html = composePanelHtml(
+      '<html><head><!-- ZCODE_WORKLOG_STYLE --></head><body><!-- ZCODE_WORKLOG_SCRIPT --></body></html>',
+      'a::after { content: "</style>" }',
+      'const tpl = "</script>"; const keep = "$& $` $\'"',
+    )
+    assert.equal(html.includes('</style></style>'), false)
+    assert.equal(html.includes('</script></script>'), false)
+    assert.match(html, /<\\\/script>/)
+    assert.match(html, /<\\\/style>/)
+    assert.ok(html.includes(`$& $\` $'`), 'replacement must not expand $-patterns')
   })
 })
 

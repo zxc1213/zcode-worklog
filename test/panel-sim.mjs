@@ -4,6 +4,9 @@
  * ui/initialize handshake, bootstrap call, tab rendering and a per-tab tool
  * call without needing the ZCode desktop host.
  *
+ * The built panel.html must be self-contained: the plugin sandbox only serves
+ * the HTML document and does not resolve sibling ui:// resources.
+ *
  *   npm install && npm run build && npm run test:panel
  */
 import assert from 'node:assert/strict'
@@ -11,13 +14,20 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM, VirtualConsole } from 'jsdom'
+import { composePanelHtml } from '../lib/panel.mjs'
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist')
-const css = readFileSync(join(DIST, 'panel.css'), 'utf8')
-const js = readFileSync(join(DIST, 'panel.js'), 'utf8').replace(/<\/script/gi, '<\\/script')
-const html = readFileSync(join(DIST, 'panel.html'), 'utf8')
-  .replace(/<link[^>]*panel\.css[^>]*>/, () => `<style>${css}</style>`)
-  .replace(/<script[^>]*panel\.js[^>]*><\/script>/, () => `<script>${js}</script>`)
+const html = composePanelHtml(
+  readFileSync(join(DIST, 'panel.html'), 'utf8'),
+  readFileSync(join(DIST, 'panel.css'), 'utf8'),
+  readFileSync(join(DIST, 'panel.js'), 'utf8'),
+)
+
+assert.equal(/<script[^>]+src="ui:\/\//.test(html), false, 'panel must not reference ui:// scripts')
+assert.equal(/<link[^>]+href="ui:\/\//.test(html), false, 'panel must not reference ui:// stylesheets')
+assert.ok(html.includes('__worklogMounted'), 'panel ships the boot fallback')
+assert.ok(html.includes('.wl-root'), 'panel styles are inlined')
+assert.ok(html.includes('zcode-worklog panel (bundled)'), 'panel script is inlined')
 
 const config = {
   dataDir: 'D:\\tmp\\worklog\\data',

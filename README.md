@@ -3,6 +3,7 @@
 **Standalone WorkLog for ZCode**: a local work journal with daily Git/document archiving, todos, daily/weekly/monthly/quarterly reports, and an interactive side panel.
 
 - No `WorkLog.exe`, no `127.0.0.1:8377` service.
+- The side panel is fully self-contained: its script and stylesheet are inlined into the HTML the plugin serves, so the host only displays it and loads no external app or subresources.
 - Data lives in ZCode's plugin data directory (`ZCODE_PLUGIN_DATA`; the panel header shows the exact path), never in the install directory.
 - The weekly archive layout matches the original WorkLog, so an existing `data\archive` can be imported as-is.
 
@@ -51,7 +52,7 @@ Five tabs:
 | Reports | Daily, weekly, monthly, quarterly, performance material, project dossier; optional AI polish; view generated reports |
 | Settings | Data directory, Git/document roots, Git author, auto-archive time, AI endpoint, backup/restore, import from old WorkLog |
 
-The panel talks to this plugin's own MCP server through the panel-only `worklog_api` tool.
+The panel talks to this plugin's own MCP server through the panel-only `worklog_api` tool. The plugin inlines the panel script and stylesheet into `ui://zcode-worklog/panel.html`, so the host loads no external program or subresources. If the panel stays on the loading screen, close and reopen it; if that fails, update the plugin and restart ZCode (`zcode plugins update zcode-worklog@zcode-worklog`).
 
 ## Data layout
 

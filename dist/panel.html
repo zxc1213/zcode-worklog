@@ -4,12 +4,26 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>WorkLog</title>
-    <link rel="stylesheet" href="ui://zcode-worklog/panel.css" />
+    <!-- ZCODE_WORKLOG_STYLE -->
   </head>
   <body>
     <div id="app" class="wl-root">
-      <div class="wl-loading">正在连接 WorkLog…</div>
+      <div class="wl-loading">
+        <div>正在加载 WorkLog…</div>
+        <div class="wl-hint">面板由插件内置提供，不依赖外部 WorkLog 应用</div>
+      </div>
     </div>
-    <script src="ui://zcode-worklog/panel.js"></script>
+    <script>
+      // 兜底：如果内联的 panel.js 没能执行（例如面板资源被宿主拦截），
+      // 不要把用户永远留在加载态，直接给出可操作的原因。
+      window.__worklogBootTimer = setTimeout(function () {
+        if (window.__worklogMounted) return
+        var root = document.getElementById('app')
+        if (!root) return
+        root.innerHTML =
+          '<div class="wl-notice err" style="margin:16px">WorkLog 面板脚本未能启动。请关闭面板后重新打开；仍然失败时更新插件（zcode plugins update zcode-worklog@zcode-worklog）并重启 ZCode。</div>'
+      }, 15000)
+    </script>
+    <!-- ZCODE_WORKLOG_SCRIPT -->
   </body>
 </html>

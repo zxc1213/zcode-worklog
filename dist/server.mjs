@@ -34472,7 +34472,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 var PLUGIN_NAME = "zcode-worklog";
-var PLUGIN_VERSION = "0.1.2";
+var PLUGIN_VERSION = "0.1.3";
 function pluginHome() {
   const explicit = String(process.env.WORKLOG_HOME || "").trim();
   if (explicit) return resolve(explicit);
@@ -34704,6 +34704,32 @@ function isDateString(value) {
 function assertDate(value) {
   if (!isDateString(value)) throw new Error(`\u65E5\u671F\u683C\u5F0F\u5E94\u4E3A YYYY-MM-DD\uFF1A${value}`);
   return value;
+}
+
+// lib/panel.mjs
+var STYLE_SLOT = "<!-- ZCODE_WORKLOG_STYLE -->";
+var SCRIPT_SLOT = "<!-- ZCODE_WORKLOG_SCRIPT -->";
+function escapeStyle(css) {
+  return String(css).replace(/<\/style/gi, "<\\/style");
+}
+function escapeScript(js) {
+  return String(js).replace(/<\/script/gi, "<\\/script");
+}
+function composePanelHtml(html, css, js) {
+  const style = `<style>
+${escapeStyle(css)}
+</style>`;
+  const script = `<script>
+${escapeScript(js)}
+</script>`;
+  let out = String(html);
+  if (out.includes(STYLE_SLOT)) out = out.replace(STYLE_SLOT, () => style);
+  else if (/<\/head>/i.test(out)) out = out.replace(/<\/head>/i, () => `${style}
+</head>`);
+  if (out.includes(SCRIPT_SLOT)) out = out.replace(SCRIPT_SLOT, () => script);
+  else if (/<\/body>/i.test(out)) out = out.replace(/<\/body>/i, () => `${script}
+</body>`);
+  return out;
 }
 
 // lib/archive.mjs
@@ -36076,13 +36102,20 @@ server.registerTool(
 async function asset(name) {
   return readFile2(join4(HERE, name), "utf8");
 }
+var panelHtmlPromise;
+function panelDocument() {
+  panelHtmlPromise ??= Promise.all([asset("panel.html"), asset("panel.css"), asset("panel.js")]).then(
+    ([html, css, js]) => composePanelHtml(html, css, js)
+  );
+  return panelHtmlPromise;
+}
 var panelMeta = { ui: { prefersBorder: true } };
 server.registerResource(
   "worklog-panel",
   PANEL_URI,
   { title: "WorkLog \u9762\u677F", mimeType: HTML_MIME, _meta: panelMeta },
   async () => ({
-    contents: [{ uri: PANEL_URI, mimeType: HTML_MIME, text: await asset("panel.html"), _meta: panelMeta }]
+    contents: [{ uri: PANEL_URI, mimeType: HTML_MIME, text: await panelDocument(), _meta: panelMeta }]
   })
 );
 server.registerResource(

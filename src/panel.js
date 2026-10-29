@@ -14,6 +14,22 @@ import {
 
 const app = new App({ name: 'zcode-worklog', version: '0.1.0' }, {})
 
+const CONNECT_TIMEOUT_MS = 8000
+const CALL_TIMEOUT_MS = 30000
+
+function withTimeout(promise, ms, message) {
+  let timer
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms)
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
+function markMounted() {
+  window.__worklogMounted = true
+  clearTimeout(window.__worklogBootTimer)
+}
+
 const TABS = [
   ['overview', '概览'],
   ['logs', '日志'],
@@ -98,7 +114,11 @@ function setNotice(type, text) {
 }
 
 async function call(op, args = {}) {
-  const result = await app.callServerTool({ name: 'worklog_api', arguments: { op, args } })
+  const result = await withTimeout(
+    app.callServerTool({ name: 'worklog_api', arguments: { op, args } }),
+    CALL_TIMEOUT_MS,
+    `调用 ${op} 超时。WorkLog 面板由插件内置提供，请确认插件已启用后重开面板。`,
+  )
   const text = result?.content?.find?.((item) => item.type === 'text')?.text
   if (result?.isError) throw new Error(text || '操作失败')
   const structured = result?.structuredContent
@@ -1079,8 +1099,15 @@ app.onhostcontextchanged = (context) => {
 }
 
 async function main() {
+  // The boot fallback in panel.html only covers "this bundle never ran";
+  // bridge and call timeouts below produce their own messages.
+  markMounted()
   try {
-    await app.connect()
+    await withTimeout(
+      app.connect(),
+      CONNECT_TIMEOUT_MS,
+      '连接 ZCode 面板桥超时。面板由插件内置提供，不需要外部 WorkLog 应用；请关闭面板后重开，或重启 ZCode。',
+    )
     applyHostContext(app.getHostContext())
     await refreshAll()
     render()
