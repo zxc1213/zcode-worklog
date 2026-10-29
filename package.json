@@ -1,6 +1,6 @@
 {
   "name": "zcode-worklog",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "WorkLog for ZCode: local daily journal, git/doc archiving, todos, reports and a side panel.",
