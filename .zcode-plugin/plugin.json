@@ -1,0 +1,97 @@
+{
+  "name": "zcode-worklog",
+  "version": "0.1.0",
+  "description": "Local work journal for ZCode: archive daily Git commits and document changes, edit daily logs, manage todos, generate daily/weekly/monthly/quarterly reports, search the archive, and open a WorkLog side panel. Data stays on this machine.",
+  "description_i18n": {
+    "en": "Local work journal for ZCode: archive daily Git commits and document changes, edit daily logs, manage todos, generate daily/weekly/monthly/quarterly reports, search the archive, and open a WorkLog side panel. Data stays on this machine.",
+    "zh-CN": "本机工作日志：归档每天的 Git 提交与文档变更，读写日日志、管理待办、生成日报/周报/月报/季报/绩效素材，检索归档，并提供 WorkLog 侧边面板。数据只保存在本机。"
+  },
+  "author": {
+    "name": "Ray"
+  },
+  "license": "MIT",
+  "keywords": [
+    "worklog",
+    "journal",
+    "report",
+    "todo",
+    "archive",
+    "git",
+    "mcp-app",
+    "zcode-plugin"
+  ],
+  "skills": "skills",
+  "commands": "commands",
+  "userConfig": {
+    "dataDir": {
+      "type": "directory",
+      "default": "",
+      "title": "数据目录",
+      "description": "可选。留空使用插件数据目录下的 data/。修改后不会自动搬移旧数据。"
+    },
+    "scanRoots": {
+      "type": "string",
+      "default": "",
+      "title": "Git 扫描根目录",
+      "description": "可选。每行一个目录，归档时最多向下 3 层查找 Git 仓库。留空则扫描当前工作区。"
+    },
+    "docRoots": {
+      "type": "string",
+      "default": "",
+      "title": "文档扫描目录",
+      "description": "可选。每行一个目录，归档时收集当天修改过的 md/docx/xlsx/pptx/pdf 等文档。留空则扫描当前工作区。"
+    },
+    "gitAuthor": {
+      "type": "string",
+      "default": "",
+      "title": "Git 作者过滤",
+      "description": "可选。只统计该作者的提交；留空使用各仓库 git config user.name。"
+    },
+    "autoArchive": {
+      "type": "boolean",
+      "default": false,
+      "title": "自动归档",
+      "description": "开启后，ZCode 运行期间到点且当天未归档时自动执行一次归档。"
+    },
+    "taskTime": {
+      "type": "string",
+      "default": "18:30",
+      "title": "自动归档时间",
+      "description": "HH:MM，默认 18:30。只在 ZCode 运行且已过该时间时触发。"
+    }
+  },
+  "mcpServers": {
+    "worklog": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${ZCODE_PLUGIN_ROOT}/dist/server.mjs"],
+      "cwd": "${ZCODE_PROJECT_DIR}",
+      "env": {
+        "WORKLOG_HOME": "${ZCODE_PLUGIN_DATA}",
+        "WORKLOG_DATA_DIR": "${user_config.dataDir}",
+        "WORKLOG_SCAN_ROOTS": "${user_config.scanRoots}",
+        "WORKLOG_DOC_ROOTS": "${user_config.docRoots}",
+        "WORKLOG_GIT_AUTHOR": "${user_config.gitAuthor}",
+        "WORKLOG_AUTO_ARCHIVE": "${user_config.autoArchive}",
+        "WORKLOG_TASK_TIME": "${user_config.taskTime}",
+        "ZCODE_PROJECT_DIR": "${ZCODE_PROJECT_DIR}"
+      },
+      "timeoutMs": 30000
+    }
+  },
+  "ui": {
+    "surfaces": [
+      {
+        "id": "worklog",
+        "title": {
+          "zh-CN": "WorkLog",
+          "en-US": "WorkLog"
+        },
+        "icon": "notebook-pen",
+        "server": "worklog",
+        "resourceUri": "ui://zcode-worklog/panel.html",
+        "availability": "session"
+      }
+    ]
+  }
+}

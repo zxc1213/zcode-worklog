@@ -1,0 +1,22 @@
+{
+  "name": "zcode-worklog",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WorkLog for ZCode: local daily journal, git/doc archiving, todos, reports and a side panel.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:panel": "node test/panel-sim.mjs",
+    "smoke": "node test/smoke.mjs",
+    "smoke:mcp": "node test/smoke-mcp.mjs"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/core": "^2.0.0",
+    "@modelcontextprotocol/ext-apps": "2.0.4",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "esbuild": "0.28.2",
+    "jsdom": "^30.1.3",
+    "zod": "^4.2.0"
+  }
+}

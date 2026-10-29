@@ -1,0 +1,142 @@
+# zcode-worklog
+
+**独立 WorkLog for ZCode**：本机工作日志、Git/文档归档、待办、日报/周报/月报/季报/绩效素材，以及一个可交互的侧边面板。
+
+- 不依赖 `WorkLog.exe`，不访问 `127.0.0.1:8377`。
+- 数据在 ZCode 的插件数据目录（`ZCODE_PLUGIN_DATA`，面板顶部会显示实际路径），不会写回安装目录。
+- 归档目录规则与原 WorkLog 一致，旧 `data\archive` 可直接导入。
+
+## 安装（从 GitHub）
+
+市场仓库：<https://github.com/zxc1213/zcode-worklog>
+
+**方式一：命令行**
+
+```bash
+zcode plugins marketplace add zxc1213/zcode-worklog
+zcode plugins install zcode-worklog@zcode-worklog
+```
+
+**方式二：图形界面**
+
+1. 打开 ZCode **设置 → 插件市场 → 添加 → 添加插件市场**，粘贴：
+
+   ```text
+   zxc1213/zcode-worklog
+   ```
+
+2. 在 **个人 → zcode-worklog → zcode-worklog → 安装**（完整插件 ID：`zcode-worklog@zcode-worklog`）。
+3. 安装后新开一个会话（或重启 ZCode）。
+4. 在对话侧栏的面板入口打开 **WorkLog**；看不到入口时先确认插件已启用。
+
+> 仓库根目录同时是插件根目录（`.zcode-plugin/plugin.json`）和市场清单（`marketplace.json`），所以一条 GitHub 源即可完成添加市场和安装插件。本地开发时也可以继续用 `E:\AI_Project\research\marketplace.json`。
+
+## 面板
+
+侧栏 **WorkLog**，五个页签：
+
+| 页签 | 内容 |
+|---|---|
+| 概览 | 今天是否归档、日志/待办/项目/备份统计、最近运行、一键归档今天 |
+| 日志 | 读取/编辑/保存某天 Markdown、搜索归档、重新归档、生成日报 |
+| 待办 | 添加、完成、重开、删除、清空已完成；支持 `!高`、`@2026-10-30` 快捷语法 |
+| 汇报 | 日报、周报、月报、季报、绩效素材、项目档案；可选 AI 润色；查看已生成报告 |
+| 设置 | 数据目录、Git 扫描根、文档目录、Git 作者、自动归档时间、AI 接口、备份/恢复、从旧 WorkLog 导入 |
+
+面板通过插件自己的 MCP 工具 `worklog_api`（仅面板可见）读写同一份本地数据。
+
+## 数据目录
+
+```text
+<plugin-data>/
+  config.json                  # 配置（含可选 AI API Key，明文，仅本机）
+  data/
+    archive/
+      2026-10/
+        第5周(10.26-11.01)/
+          2026-10-29.md       # 每天一篇 Markdown
+      reports/                # 日报/周报/月报/季报/绩效素材
+    todos.json
+    state.json                # 最近归档、运行历史、AI 用量
+    backups/                  # JSON 备份
+```
+
+周目录规则：周一~周日，整周归周四所在月。旧 WorkLog 的 `data\archive` 可以直接复制或用「设置 → 从旧 WorkLog 导入」。
+
+## 每日归档
+
+`worklog_archive`（或面板「归档今天」）会：
+
+1. 在 `scanRoots` 下最多 3 层查找 Git 仓库，取当天提交（按 `gitAuthor` 过滤；留空用各仓库 `git config user.name`）。
+2. 在 `docRoots` 下最多 6 层扫描当天修改过的 `.md/.docx/.xlsx/.pptx/.pdf/...`。
+3. 生成「今日概览 / 项目进展 / 文档变更 / 备注」四节 Markdown，写入归档路径。
+
+未配置扫描目录时默认扫描当前工作区（`ZCODE_PROJECT_DIR`）。当天已有归档时默认不覆盖，只有 `force: true` 才会重写（会覆盖手写备注）。
+
+自动归档：开启后，MCP 服务进程每分钟检查一次；到 `taskTime`（默认 18:30）且当天未归档就执行一次。**ZCode 没运行就不会自动归档。**
+
+## Agent 工具
+
+`worklog_status`、`worklog_day`、`worklog_search`、`worklog_todos`、`worklog_archive`、`worklog_report`、`worklog_ask`、`worklog_projects`、`worklog_usage`、`worklog_backup`、`worklog_config`。
+
+工具名在会话里通常带 `mcp__plugin_zcode-worklog_worklog__` 前缀。
+
+## 快捷命令
+
+命令面板里通常显示为 `/zcode-worklog:status`；如果你的客户端用斜杠分隔，则是 `/zcode-worklog/status`。
+
+```text
+/zcode-worklog:status
+/zcode-worklog:today [YYYY-MM-DD]
+/zcode-worklog:search <关键词>
+/zcode-worklog:todo list | add <标题> [!高] [@YYYY-MM-DD] | done <id> | reopen <id> | del <id> | clear
+/zcode-worklog:archive run | backfill <日期...> | status
+/zcode-worklog:report daily|weekly|month|quarter|perf|project [参数]
+/zcode-worklog:ask <问题>
+/zcode-worklog:backup list|create|restore <name>|delete <name>|import <旧WorkLog目录>
+/zcode-worklog:config
+/zcode-worklog:open
+```
+
+## 初始化钩子
+
+`SessionStart` 钩子会在会话开始时：
+
+- 注入一行状态（今天是否归档、待办数量与逾期数、最近归档日期）；
+- 如果 `autoArchive` 已开启且到点，顺带执行当天的自动归档（最多一次）。
+
+钩子失败不会阻塞会话，错误只写到 stderr。
+
+## 从旧 WorkLog 迁移
+
+面板「设置 → 从旧 WorkLog 导入」，填旧安装目录（例如 `E:\WorkLog`），点「导入」。插件只复制 `data\archive`，不删除源目录。旧的 `settings.json`、待办、绩效模板不会自动迁移。
+
+## 与旧版 / dsh-worklog 的区别
+
+- 独立维护，不依赖 WorkLog 的 Python 后端、Claude CLI、8377 端口。
+- 已实现：Git/文档归档、日志编辑/搜索、待办、确定性汇报、可选 AI 润色/问答、备份、旧归档导入、自动归档、侧边面板。
+- 尚未实现：AI 会话记录扫描、Word/Excel 导出、绩效模板 Excel 还原、飞书工时、业务流程图。
+
+## 开发
+
+```bash
+npm install        # 仅构建/测试需要（esbuild + MCP SDK + ext-apps + jsdom）
+npm run build      # 生成 dist/：server.mjs、session-start.mjs、panel.js、panel.html、panel.css
+npm test           # 本地存储/归档/报告/MCP API
+npm run test:panel # jsdom 里模拟 MCP App 宿主，验证握手、bootstrap 和五个页签
+npm run smoke      # 临时目录下跑通归档+待办+备份
+node test/smoke-mcp.mjs   # 真实 stdio JSON-RPC：initialize/tools/list/tools/call/resources/read
+```
+
+`dist/` 已经提交，安装时不需要 Node 依赖；`node_modules` 只在重新构建时需要。
+
+## 安全
+
+- 数据只在本机插件数据目录。
+- AI API Key 明文保存在 `config.json`；不配置就完全不发外部请求。
+- 恢复备份会覆盖同名日日志与待办；删除备份不可恢复。
+- 没有暴露删除归档目录、重置全部数据之类的破坏性接口。
+
+## License
+
+MIT

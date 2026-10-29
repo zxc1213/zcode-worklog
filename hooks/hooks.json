@@ -1,0 +1,19 @@
+{
+  "description": "WorkLog: inject today's archive/todo status at session start and run the daily auto-archive when due.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "process",
+            "command": "node",
+            "args": ["${ZCODE_PLUGIN_ROOT}/dist/session-start.mjs", "${ZCODE_PLUGIN_DATA}"],
+            "timeoutMs": 60000,
+            "statusMessage": "WorkLog: 检查今日归档与待办…"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "zcode-worklog",
+  "plugins": [
+    {
+      "name": "zcode-worklog",
+      "source": {
+        "source": "github",
+        "repo": "zxc1213/zcode-worklog"
+      },
+      "version": "0.1.0",
+      "description": "Local work journal for ZCode: archive daily Git commits and document changes, edit daily logs, manage todos, generate daily/weekly/monthly/quarterly reports, search the archive, and open a WorkLog side panel. Data stays on this machine.",
+      "displayName": "WorkLog",
+      "displayName_i18n": {
+        "zh-CN": "WorkLog 工作日志"
+      },
+      "description_i18n": {
+        "zh-CN": "本机工作日志：归档 Git 提交与文档变更、待办、日报/周报/月报/季报、侧边面板。"
+      },
+      "category": "productivity"
+    }
+  ]
+}
