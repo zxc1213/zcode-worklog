@@ -223,7 +223,7 @@ tool(
   {
     title: 'WorkLog 配置',
     description:
-      '读取或修改插件配置：dataDir、scanRoots、docRoots、gitAuthor、sources、autoArchive、skipWeekends、taskTime、ai（baseUrl/model/apiKey）。action=set 时 patch 为要合并的对象。',
+      '读取或修改插件配置：dataDir、scanRoots、docRoots、gitAuthor、sources、autoArchive、skipWeekends、taskTime、ai（baseUrl/model/apiKey/apiFormat=openai|anthropic）。action=set 时 patch 为要合并的对象。',
     inputSchema: z.object({
       action: z.enum(['get', 'set']),
       patch: z.record(z.string(), z.unknown()).optional(),

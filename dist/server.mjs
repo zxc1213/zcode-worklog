@@ -34472,7 +34472,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 var PLUGIN_NAME = "zcode-worklog";
-var PLUGIN_VERSION = "0.1.4";
+var PLUGIN_VERSION = "0.1.5";
 function pluginHome() {
   const explicit = String(process.env.WORKLOG_HOME || "").trim();
   if (explicit) return resolve(explicit);
@@ -36381,7 +36381,7 @@ tool(
   "worklog_config",
   {
     title: "WorkLog \u914D\u7F6E",
-    description: "\u8BFB\u53D6\u6216\u4FEE\u6539\u63D2\u4EF6\u914D\u7F6E\uFF1AdataDir\u3001scanRoots\u3001docRoots\u3001gitAuthor\u3001sources\u3001autoArchive\u3001skipWeekends\u3001taskTime\u3001ai\uFF08baseUrl/model/apiKey\uFF09\u3002action=set \u65F6 patch \u4E3A\u8981\u5408\u5E76\u7684\u5BF9\u8C61\u3002",
+    description: "\u8BFB\u53D6\u6216\u4FEE\u6539\u63D2\u4EF6\u914D\u7F6E\uFF1AdataDir\u3001scanRoots\u3001docRoots\u3001gitAuthor\u3001sources\u3001autoArchive\u3001skipWeekends\u3001taskTime\u3001ai\uFF08baseUrl/model/apiKey/apiFormat=openai|anthropic\uFF09\u3002action=set \u65F6 patch \u4E3A\u8981\u5408\u5E76\u7684\u5BF9\u8C61\u3002",
     inputSchema: external_exports.object({
       action: external_exports.enum(["get", "set"]),
       patch: external_exports.record(external_exports.string(), external_exports.unknown()).optional()
