@@ -63,7 +63,7 @@ The panel talks to this plugin's own MCP server through the panel-only `worklog_
 | Source | What is read |
 |---|---|
 | ZCode | Providers in `~/.zcode/v2/config.json` (baseURL, apiKey, kind, model), with the currently selected provider first |
-| DeepSeek Harness | `llm-pi-ai.providers` in `~/.dsh/settings.yaml` (or `settings-legacy.yaml`), with keys resolved from `.credentials.yaml` `refs`, including `DEEPSEEK_API_KEY` |
+| DeepSeek Harness | `llm-pi-ai` providers in the active profile (`~/.dsh/profiles/web/cordis.patch.yml` or `cordis.yml`), falling back to `settings.yaml` / `settings-legacy.yaml`; keys resolved from `.credentials.yaml` `refs`, including `DEEPSEEK_API_KEY` |
 | Claude Code | `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_DEFAULT_*_MODEL` from `~/.claude/settings.json` |
 | Codex CLI | `~/.codex/config.toml` and `auth.json` (only when an API key exists; OAuth-only logins cannot be reused) |
 | Gemini CLI | `GEMINI_API_KEY` from the environment or `~/.gemini/.env`, via its OpenAI-compatible endpoint |

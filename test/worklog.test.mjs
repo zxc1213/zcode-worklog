@@ -271,36 +271,55 @@ describe('ai detection', () => {
     )
   })
 
-  it('detects DeepSeek Harness providers and credential refs', () => {
+  it('detects DeepSeek Harness providers from the active profile', () => {
     const dshHome = mkdtempSync(join(tmpdir(), 'worklog-dsh-'))
-    mkdirSync(join(dshHome, '.dsh'), { recursive: true })
+    const profileDir = join(dshHome, '.dsh', 'profiles', 'web')
+    mkdirSync(profileDir, { recursive: true })
+    writeFileSync(
+      join(profileDir, 'cordis.patch.yml'),
+      [
+        '- insert:',
+        '    - id: agent-default-model',
+        '      name: "@deepseek-ai/dsh-agent-default-model"',
+        '      config:',
+        '        provider: zai-coding-cn',
+        '        model: glm-5.3',
+        '    - id: llm-pi-ai',
+        '      name: "@deepseek-ai/dsh-llm-pi-ai"',
+        '      config:',
+        '        providers:',
+        '          zai-coding-cn:',
+        '            displayName: Z.ai Coding CN',
+        '            baseURL: https://profile.example/api/coding/paas/v4',
+        '            apiKeyEnv: ZAI_CODING_CN_API_KEY',
+        '            api: openai-completions',
+        '            models:',
+        '              - id: glm-5.3',
+        '                name: GLM-5.3',
+        '          headroom:',
+        '            apiKeyEnv: HEADROOM_API_KEY',
+        '            api: anthropic-messages',
+        '            baseURL: http://127.0.0.1:8787',
+        '            models:',
+        '              - id: glm-5.3',
+        '          keyless:',
+        '            apiKeyEnv: MISSING_KEY',
+        '            baseURL: https://missing.example/v1',
+        '            models:',
+        '              - id: m',
+      ].join('\n'),
+      'utf8',
+    )
+    // A stale legacy file must not win over the active profile.
     writeFileSync(
       join(dshHome, '.dsh', 'settings-legacy.yaml'),
       [
-        'agent-default-model:',
-        '  provider: zai-coding-cn',
-        '  model: glm-5.3',
         'llm-pi-ai:',
         '  providers:',
-        '    zai-coding-cn:',
-        '      displayName: Z.ai Coding CN',
-        '      baseURL: https://open.example/api/coding/paas/v4',
-        '      apiKeyEnv: ZAI_CODING_CN_API_KEY',
-        '      api: openai-completions',
+        '    legacy:',
+        '      baseURL: https://legacy.example/v1',
         '      models:',
-        '        - id: glm-5.3',
-        '          name: GLM-5.3',
-        '    headroom:',
-        '      apiKeyEnv: HEADROOM_API_KEY',
-        '      api: anthropic-messages',
-        '      baseURL: http://127.0.0.1:8787',
-        '      models:',
-        '        - id: glm-5.3',
-        '    keyless:',
-        '      apiKeyEnv: MISSING_KEY',
-        '      baseURL: https://missing.example/v1',
-        '      models:',
-        '        - id: m',
+        '        - id: old',
       ].join('\n'),
       'utf8',
     )
@@ -320,6 +339,7 @@ describe('ai detection', () => {
     const zai = list.find((item) => item.id === 'dsh:zai-coding-cn')
     assert.equal(zai.apiFormat, 'openai')
     assert.equal(zai.model, 'glm-5.3')
+    assert.equal(zai.baseUrl, 'https://profile.example/api/coding/paas/v4')
     assert.equal(zai.apiKey, 'sk-zai-1234567890')
     assert.match(zai.note, /默认/)
     const headroom = list.find((item) => item.id === 'dsh:headroom')
@@ -331,27 +351,57 @@ describe('ai detection', () => {
     assert.equal(deepseek.baseUrl, 'https://api.deepseek.com')
     assert.equal(deepseek.model, 'deepseek-chat')
     assert.equal('apiKey' in publicCandidate(zai), false)
+    assert.equal(list.some((item) => item.id === 'dsh:legacy'), false)
+  })
+
+  it('falls back to legacy dsh settings without a profile config', () => {
+    const dshHome = mkdtempSync(join(tmpdir(), 'worklog-dsh-legacy-'))
+    mkdirSync(join(dshHome, '.dsh'), { recursive: true })
+    writeFileSync(
+      join(dshHome, '.dsh', 'settings-legacy.yaml'),
+      [
+        'agent-default-model:',
+        '  provider: legacy',
+        '  model: old',
+        'llm-pi-ai:',
+        '  providers:',
+        '    legacy:',
+        '      baseURL: https://legacy.example/v1',
+        '      models:',
+        '        - id: old',
+      ].join('\n'),
+      'utf8',
+    )
+    const list = detectAiCandidates({ home: dshHome, env: {} })
+    assert.equal(list.length, 1)
+    assert.equal(list[0].id, 'dsh:legacy')
+    assert.equal(list[0].model, 'old')
   })
 
   it('parses dsh yaml structure', () => {
     const parsed = parseYamlLite(
       [
-        'agent-default-model:',
-        '  provider: p1',
-        'llm-pi-ai:',
-        '  providers:',
-        '    p1:',
-        '      api: openai-completions',
-        '      models:',
-        '        - id: m1',
-        '          name: M1',
-        '        - id: m2',
+        '- insert:',
+        '    - id: agent-default-model',
+        '      config:',
+        '        provider: p1',
+        '    - id: llm-pi-ai',
+        '      config:',
+        '        providers:',
+        '          p1:',
+        '            api: openai-completions',
+        '            models:',
+        '              - id: m1',
+        '                name: M1',
+        '              - id: m2',
       ].join('\n'),
     )
-    assert.equal(parsed['agent-default-model'].provider, 'p1')
-    assert.equal(parsed['llm-pi-ai'].providers.p1.api, 'openai-completions')
+    assert.ok(Array.isArray(parsed))
+    const entries = parsed[0].insert
+    assert.equal(entries[0].config.provider, 'p1')
+    assert.equal(entries[1].config.providers.p1.api, 'openai-completions')
     assert.deepEqual(
-      parsed['llm-pi-ai'].providers.p1.models.map((model) => model.id),
+      entries[1].config.providers.p1.models.map((model) => model.id),
       ['m1', 'm2'],
     )
   })

@@ -34472,7 +34472,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 var PLUGIN_NAME = "zcode-worklog";
-var PLUGIN_VERSION = "0.2.1";
+var PLUGIN_VERSION = "0.2.2";
 function pluginHome() {
   const explicit = String(process.env.WORKLOG_HOME || "").trim();
   if (explicit) return resolve(explicit);
@@ -36431,7 +36431,7 @@ function summarizeAiUsage(entries = []) {
 }
 
 // lib/ai-detect.mjs
-import { readFileSync as readFileSync2 } from "node:fs";
+import { readdirSync, readFileSync as readFileSync2 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
 import { join as join5 } from "node:path";
 function readJson3(file2) {
@@ -36604,7 +36604,8 @@ function parseYamlLite(text) {
         item[key] = value ? parseScalar(value) : {};
         if (pos < lines.length && lines[pos].indent > indent) {
           const more = parseBlock(lines[pos].indent);
-          if (more && typeof more === "object" && !Array.isArray(more)) Object.assign(item, more);
+          if (Array.isArray(more)) item[key] = more;
+          else if (more && typeof more === "object") Object.assign(item, more);
         }
         node2.push(item);
       } else {
@@ -36615,20 +36616,74 @@ function parseYamlLite(text) {
     return node2;
   };
   const root = parseBlock(lines[0]?.indent ?? 0);
-  return root && typeof root === "object" && !Array.isArray(root) ? root : {};
+  return root && typeof root === "object" ? root : {};
+}
+function readDshSettings(dshHome) {
+  const empty = { providers: null, defaultProvider: "", defaultModelId: "" };
+  const pluginEntries = (parsed) => {
+    const roots = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.plugins) ? parsed.plugins : [];
+    const out = [];
+    const walk2 = (items) => {
+      for (const item of items) {
+        if (!item || typeof item !== "object") continue;
+        if (Array.isArray(item.insert)) walk2(item.insert);
+        if (item.id) out.push(item);
+      }
+    };
+    walk2(roots);
+    return out;
+  };
+  let profiles = [];
+  try {
+    profiles = readdirSync(join5(dshHome, "profiles"), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  } catch {
+    profiles = [];
+  }
+  const order = (name) => ["web", "headless", "acp"].indexOf(name);
+  profiles.sort((a, b) => {
+    const rankA = order(a);
+    const rankB = order(b);
+    if (rankA !== rankB) return (rankA < 0 ? 99 : rankA) - (rankB < 0 ? 99 : rankB);
+    return a.localeCompare(b);
+  });
+  for (const name of profiles) {
+    for (const file2 of ["cordis.patch.yml", "cordis.yml"]) {
+      const text = readText(join5(dshHome, "profiles", name, file2));
+      if (!text) continue;
+      const entries = pluginEntries(parseYamlLite(text));
+      const llm = entries.find((entry) => entry?.id === "llm-pi-ai" && entry?.config?.providers);
+      if (!llm) continue;
+      const defaults = entries.find((entry) => entry?.id === "agent-default-model")?.config || {};
+      return {
+        providers: llm.config.providers,
+        defaultProvider: String(defaults.provider || "").trim(),
+        defaultModelId: String(defaults.model || "").trim(),
+        source: `~/.dsh/profiles/${name}/${file2}`
+      };
+    }
+  }
+  const settingsText = readText(join5(dshHome, "settings.yaml")) || readText(join5(dshHome, "settings-legacy.yaml"));
+  if (!settingsText) return empty;
+  const settings = parseYamlLite(settingsText);
+  const providers = settings["llm-pi-ai"]?.providers;
+  if (!providers || typeof providers !== "object") return empty;
+  const defaultModel = settings["agent-default-model"] || {};
+  return {
+    providers,
+    defaultProvider: String(defaultModel.provider || "").trim(),
+    defaultModelId: String(defaultModel.model || "").trim(),
+    source: "~/.dsh/settings-legacy.yaml"
+  };
 }
 function dshCandidates(home, env) {
   const dshHome = String(env.DSH_HOME || "").trim() || join5(home, ".dsh");
-  const settingsText = readText(join5(dshHome, "settings.yaml")) || readText(join5(dshHome, "settings-legacy.yaml"));
-  if (!settingsText) return [];
-  const settings = parseYamlLite(settingsText);
-  const providers = settings["llm-pi-ai"]?.providers;
+  const settings = readDshSettings(dshHome);
+  const providers = settings.providers;
   if (!providers || typeof providers !== "object") return [];
   const credentials = parseYamlLite(readText(join5(dshHome, ".credentials.yaml")) || "");
   const refs = credentials.refs && typeof credentials.refs === "object" ? credentials.refs : {};
-  const defaultModel = settings["agent-default-model"] || {};
-  const defaultProvider = String(defaultModel.provider || "").trim();
-  const defaultModelId = String(defaultModel.model || "").trim();
+  const defaultProvider = settings.defaultProvider;
+  const defaultModelId = settings.defaultModelId;
   const out = [];
   for (const [id, provider] of Object.entries(providers)) {
     if (!provider || typeof provider !== "object") continue;

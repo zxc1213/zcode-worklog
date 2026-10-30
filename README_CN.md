@@ -63,7 +63,7 @@ zcode plugins install zcode-worklog@zcode-worklog
 | 来源 | 读取内容 |
 |---|---|
 | ZCode | `~/.zcode/v2/config.json` 中已配置的供应商（baseURL、apiKey、kind、模型），优先显示当前选中的供应商 |
-| DeepSeek Harness | `~/.dsh/settings.yaml`（或 `settings-legacy.yaml`）的 `llm-pi-ai.providers`，密钥取自 `.credentials.yaml` 的 `refs`，含 `DEEPSEEK_API_KEY` |
+| DeepSeek Harness | 活动 profile（`~/.dsh/profiles/web/cordis.patch.yml` 或 `cordis.yml`）里 `llm-pi-ai` 的 `providers`，旧版回退到 `settings.yaml` / `settings-legacy.yaml`；密钥取自 `.credentials.yaml` 的 `refs`，含 `DEEPSEEK_API_KEY` |
 | Claude Code | `~/.claude/settings.json` 的 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_DEFAULT_*_MODEL` |
 | Codex CLI | `~/.codex/config.toml` 与 `auth.json`（只有存在 API Key 时才会列出；OAuth 登录无法复用） |
 | Gemini CLI | `GEMINI_API_KEY`（环境变量或 `~/.gemini/.env`），走 OpenAI 兼容端点 |
