@@ -34472,7 +34472,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 var PLUGIN_NAME = "zcode-worklog";
-var PLUGIN_VERSION = "0.2.0";
+var PLUGIN_VERSION = "0.2.1";
 function pluginHome() {
   const explicit = String(process.env.WORKLOG_HOME || "").trim();
   if (explicit) return resolve(explicit);
@@ -36550,6 +36550,140 @@ function zcodeCandidates(home) {
   }
   return out.sort((a, b) => a.rank - b.rank);
 }
+function parseYamlLite(text) {
+  const lines = [];
+  for (const raw of String(text || "").split(/\r?\n/)) {
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.startsWith("#") || trimmed === "---") continue;
+    lines.push({ indent: raw.match(/^\s*/)[0].length, content: trimmed });
+  }
+  let pos = 0;
+  const parseScalar = (value) => {
+    let textValue = value;
+    if (textValue.startsWith('"') && textValue.endsWith('"') || textValue.startsWith("'") && textValue.endsWith("'")) {
+      return textValue.slice(1, -1);
+    }
+    const comment = textValue.indexOf(" #");
+    if (comment >= 0) textValue = textValue.slice(0, comment).trim();
+    if (textValue === "true") return true;
+    if (textValue === "false") return false;
+    if (textValue === "null" || textValue === "~") return null;
+    if (/^-?\d+(?:\.\d+)?$/.test(textValue)) return Number(textValue);
+    return textValue;
+  };
+  const parseBlock = (indent) => {
+    if (pos >= lines.length) return null;
+    return lines[pos].content.startsWith("- ") ? parseSeq(indent) : parseMap(indent);
+  };
+  const parseMap = (indent) => {
+    const node2 = {};
+    while (pos < lines.length && lines[pos].indent === indent && !lines[pos].content.startsWith("- ")) {
+      const content = lines[pos].content;
+      const colon = content.indexOf(":");
+      pos += 1;
+      if (colon < 0) continue;
+      const key = content.slice(0, colon).trim();
+      const value = content.slice(colon + 1).trim();
+      if (!key) continue;
+      if (value) node2[key] = parseScalar(value);
+      else if (pos < lines.length && lines[pos].indent > indent) node2[key] = parseBlock(lines[pos].indent);
+      else node2[key] = {};
+    }
+    return node2;
+  };
+  const parseSeq = (indent) => {
+    const node2 = [];
+    while (pos < lines.length && lines[pos].indent === indent && lines[pos].content.startsWith("- ")) {
+      const content = lines[pos].content.slice(2).trim();
+      pos += 1;
+      const colon = content.indexOf(":");
+      if (colon > 0) {
+        const item = {};
+        const key = content.slice(0, colon).trim();
+        const value = content.slice(colon + 1).trim();
+        item[key] = value ? parseScalar(value) : {};
+        if (pos < lines.length && lines[pos].indent > indent) {
+          const more = parseBlock(lines[pos].indent);
+          if (more && typeof more === "object" && !Array.isArray(more)) Object.assign(item, more);
+        }
+        node2.push(item);
+      } else {
+        node2.push(parseScalar(content));
+        if (pos < lines.length && lines[pos].indent > indent) parseBlock(lines[pos].indent);
+      }
+    }
+    return node2;
+  };
+  const root = parseBlock(lines[0]?.indent ?? 0);
+  return root && typeof root === "object" && !Array.isArray(root) ? root : {};
+}
+function dshCandidates(home, env) {
+  const dshHome = String(env.DSH_HOME || "").trim() || join5(home, ".dsh");
+  const settingsText = readText(join5(dshHome, "settings.yaml")) || readText(join5(dshHome, "settings-legacy.yaml"));
+  if (!settingsText) return [];
+  const settings = parseYamlLite(settingsText);
+  const providers = settings["llm-pi-ai"]?.providers;
+  if (!providers || typeof providers !== "object") return [];
+  const credentials = parseYamlLite(readText(join5(dshHome, ".credentials.yaml")) || "");
+  const refs = credentials.refs && typeof credentials.refs === "object" ? credentials.refs : {};
+  const defaultModel = settings["agent-default-model"] || {};
+  const defaultProvider = String(defaultModel.provider || "").trim();
+  const defaultModelId = String(defaultModel.model || "").trim();
+  const out = [];
+  for (const [id, provider] of Object.entries(providers)) {
+    if (!provider || typeof provider !== "object") continue;
+    const baseUrl = String(provider.baseURL || "").trim();
+    if (!baseUrl) continue;
+    const api = String(provider.api || "").trim();
+    const apiFormat = api === "anthropic-messages" ? "anthropic" : "openai";
+    const apiKeyEnv = String(provider.apiKeyEnv || "").trim();
+    const rawKey = String(
+      provider.apiKey || (apiKeyEnv ? refs[apiKeyEnv] : "") || (apiKeyEnv ? env[apiKeyEnv] : "") || ""
+    ).trim();
+    const usable = Boolean(rawKey) && !rawKey.startsWith("{") && !rawKey.startsWith("enc:");
+    const models = Array.isArray(provider.models) ? provider.models : [];
+    const modelIds = models.map((model2) => String(model2?.id || model2?.name || "").trim()).filter(Boolean);
+    const model = defaultProvider === id && modelIds.includes(defaultModelId) ? defaultModelId : modelIds[0] || "";
+    const notes = [];
+    if (defaultProvider === id) notes.push("DeepSeek Harness \u9ED8\u8BA4\u4F9B\u5E94\u5546");
+    if (apiKeyEnv && !usable) notes.push(`\u7F3A\u5C11 ${apiKeyEnv}`);
+    if (api && api !== "openai-completions" && api !== "anthropic-messages") {
+      notes.push(`\u63A5\u53E3\u7C7B\u578B ${api}\uFF0C\u6309 OpenAI \u517C\u5BB9\u5904\u7406`);
+    }
+    out.push(
+      makeCandidate({
+        id: `dsh:${id}`,
+        source: "deepseek-harness",
+        sourceLabel: "DeepSeek Harness",
+        name: String(provider.displayName || id),
+        baseUrl,
+        model,
+        apiFormat,
+        apiKey: usable ? rawKey : "",
+        note: notes.join("\uFF1B"),
+        rank: defaultProvider === id && usable ? 1 : usable ? 4 : 6
+      })
+    );
+  }
+  const deepseekKey = String(refs.DEEPSEEK_API_KEY || env.DEEPSEEK_API_KEY || "").trim();
+  if (deepseekKey && !deepseekKey.startsWith("{") && !deepseekKey.startsWith("enc:")) {
+    out.push(
+      makeCandidate({
+        id: "dsh:deepseek-api",
+        source: "deepseek-harness",
+        sourceLabel: "DeepSeek Harness",
+        name: "DeepSeek API\uFF08DEEPSEEK_API_KEY\uFF09",
+        baseUrl: String(env.DEEPSEEK_BASE_URL || "https://api.deepseek.com").trim(),
+        model: "deepseek-chat",
+        apiFormat: "openai",
+        apiKey: deepseekKey,
+        note: "\u6765\u81EA ~/.dsh/.credentials.yaml \u7684 DEEPSEEK_API_KEY",
+        rank: 5
+      })
+    );
+  }
+  return out;
+}
 function claudeCandidates(home) {
   const settings = readJson3(join5(home, ".claude", "settings.json"));
   const env = settings?.env;
@@ -36665,6 +36799,7 @@ function detectAiCandidates(options = {}) {
   const env = options.env || process.env;
   const all = [
     ...zcodeCandidates(home),
+    ...dshCandidates(home, env),
     ...claudeCandidates(home),
     ...codexCandidates(home, env),
     ...geminiCandidates(home, env),

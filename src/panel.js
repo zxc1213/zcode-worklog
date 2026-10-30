@@ -1120,7 +1120,7 @@ function settingsTab() {
         },
         state.aiBusy ? '扫描中…' : '扫描本机 AI 工具',
       ),
-      h('span', { className: 'wl-hint' }, '只在本机读取 ZCode / Claude Code / Codex / Gemini / 环境变量'),
+      h('span', { className: 'wl-hint' }, '只在本机读取 ZCode / DeepSeek Harness / Claude Code / Codex / Gemini / 环境变量'),
     ),
     state.aiCandidates === null
       ? null

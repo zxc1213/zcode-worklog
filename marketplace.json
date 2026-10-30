@@ -7,7 +7,7 @@
         "source": "github",
         "repo": "zxc1213/zcode-worklog"
       },
-      "version": "0.2.0",
+      "version": "0.2.1",
       "description": "Local work journal for ZCode: archive daily Git commits and document changes, edit daily logs, manage todos, generate daily/weekly/monthly/quarterly reports, search the archive, and open a WorkLog side panel. Data stays on this machine.",
       "displayName": "WorkLog",
       "displayName_i18n": {
