@@ -911,7 +911,7 @@ async function loadAiModels() {
       apiKey: draft.aiKey || undefined,
     })
     state.aiModels = Array.isArray(data?.models) ? data.models : []
-    let note = state.aiModels.length ? `已加载 ${state.aiModels.length} 个模型，可下拉选择或直接填写` : '接口没有返回模型列表'
+    let note = state.aiModels.length ? `已加载 ${state.aiModels.length} 个模型` : '接口没有返回模型列表'
     if (data?.source === 'local') {
       note += `；接口不支持 /models，已用本机配置里的模型${data.warning ? `（${String(data.warning).slice(0, 120)}）` : ''}`
     }
@@ -1309,13 +1309,32 @@ function settingsTab() {
       h(
         'div',
         { className: 'wl-date-row' },
-        h('input', {
-          className: 'wl-input',
-          value: draft.aiModel,
-          placeholder: 'gpt-4o-mini',
-          list: 'wl-ai-models',
-          onInput: set('aiModel'),
-        }),
+        state.aiModels.length
+          ? h(
+              'select',
+              {
+                className: 'wl-select',
+                id: 'wl-ai-model-pick',
+                onChange: (event) => {
+                  const current = state.settings || draftFromConfig(state.config)
+                  state.settings = { ...current, aiModel: event.target.value }
+                  render()
+                },
+              },
+              h('option', { value: '' }, `— 从 ${state.aiModels.length} 个模型中选择 —`),
+              state.aiModels.map((model) =>
+                h('option', { value: model, selected: model === draft.aiModel }, model),
+              ),
+              draft.aiModel && !state.aiModels.includes(draft.aiModel)
+                ? h('option', { value: draft.aiModel, selected: true }, `${draft.aiModel}（当前填写）`)
+                : null,
+            )
+          : h('input', {
+              className: 'wl-input',
+              value: draft.aiModel,
+              placeholder: 'gpt-4o-mini，加载后可下拉选择',
+              onInput: set('aiModel'),
+            }),
         h(
           'button',
           {
@@ -1326,9 +1345,14 @@ function settingsTab() {
           state.aiModelsBusy ? '加载中…' : '加载模型',
         ),
       ),
-      h('datalist', { id: 'wl-ai-models' }, state.aiModels.map((model) => h('option', { value: model }))),
       state.aiModels.length
-        ? h('div', { className: 'wl-hint' }, `已加载 ${state.aiModels.length} 个模型，可下拉选择或直接填写`)
+        ? h('input', {
+            className: 'wl-input',
+            value: draft.aiModel,
+            placeholder: '或手动填写模型名',
+            onInput: set('aiModel'),
+            style: { marginTop: '6px' },
+          })
         : null,
       state.aiModelsNote ? h('div', { className: 'wl-hint' }, state.aiModelsNote) : null,
       h('div', { className: 'wl-label' }, 'API Key'),
