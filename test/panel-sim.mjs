@@ -109,7 +109,7 @@ function respond(window, message) {
             source: 'zcode',
             sourceLabel: 'ZCode',
             name: 'Demo Provider',
-            baseUrl: 'https://example.test/api/anthropic',
+            baseUrl: 'https://pick.test/api/anthropic',
             model: 'GLM-5.2',
             apiFormat: 'anthropic',
             hasKey: true,
@@ -247,6 +247,12 @@ const pick = doc.querySelector('#wl-ai-pick')
 assert.ok(pick, 'AI candidate dropdown renders')
 assert.ok(pick.textContent.includes('Demo Provider'), 'dropdown lists the candidate')
 assert.ok(pick.textContent.includes('2 模型'), 'dropdown shows the model count')
+pick.value = 'zcode:builtin:demo'
+pick.dispatchEvent(new window.Event('change', { bubbles: true }))
+await wait(200)
+const linkedInput = [...doc.querySelectorAll('input')].find((el) => el.value === 'https://pick.test/api/anthropic')
+assert.ok(linkedInput, 'selecting a candidate links Base URL into the form')
+assert.ok(text().includes('已带入 2 个模型'), 'selecting a candidate brings its models')
 const modelInput = [...doc.querySelectorAll('input')].find((el) => el.getAttribute('list') === 'wl-ai-models')
 assert.ok(modelInput, 'model input has a datalist')
 const loadBtn = [...doc.querySelectorAll('button')].find((el) => el.textContent === '加载模型')

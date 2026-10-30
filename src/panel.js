@@ -926,6 +926,21 @@ async function loadAiModels() {
 
 function aiCandidateRow(candidates) {
   const current = candidates.find((candidate) => candidate.id === state.aiPick) || candidates[0]
+  const pickCandidate = (id) => {
+    state.aiPick = id
+    const picked = candidates.find((candidate) => candidate.id === id)
+    if (!picked) return
+    // 联动：选中即把 Base URL / 接口格式 / 模型填进下方表单（不写入配置）。
+    const draft = state.settings || draftFromConfig(state.config)
+    state.settings = {
+      ...draft,
+      aiBaseUrl: picked.baseUrl,
+      aiModel: picked.model || draft.aiModel,
+      aiFormat: picked.apiFormat,
+    }
+    state.aiModels = Array.isArray(picked.models) ? picked.models : []
+    state.aiModelsNote = state.aiModels.length ? `已带入 ${state.aiModels.length} 个模型` : ''
+  }
   return h(
     'div',
     null,
@@ -938,7 +953,7 @@ function aiCandidateRow(candidates) {
           className: 'wl-select',
           id: 'wl-ai-pick',
           onChange: (event) => {
-            state.aiPick = event.target.value
+            pickCandidate(event.target.value)
             render()
           },
         },
@@ -986,7 +1001,7 @@ function aiCandidateRow(candidates) {
           { className: 'wl-hint' },
           `${current.baseUrl}${current.note ? ` · ${current.note}` : ''}`,
         )
-      : null,
+      : h('div', { className: 'wl-hint' }, '选择后自动填到下方 Base URL / 接口格式 / 模型；点「使用」直接写入配置并带上 Key。'),
   )
 }
 
