@@ -37,6 +37,7 @@ import {
 } from '../lib/store.mjs'
 import { askArchive, generateReport, summarizeAiUsage } from '../lib/report.mjs'
 import { detectAiCandidates, findAiCandidate, publicCandidate } from '../lib/ai-detect.mjs'
+import { listSessionSources, parseSessionLines, scanSessions } from '../lib/sessions.mjs'
 
 export async function statusPayload(config = loadConfig()) {
   const [days, todos, state, backups, projects] = await Promise.all([
@@ -48,6 +49,7 @@ export async function statusPayload(config = loadConfig()) {
   ])
   const today = localDate()
   const todayDay = days.find((day) => day.date === today)
+  const todaySessions = todayDay ? parseSessionLines((await getDay(config, today)).text) : []
   return {
     version: PLUGIN_VERSION,
     home: publicConfig(config).home,
@@ -56,6 +58,11 @@ export async function statusPayload(config = loadConfig()) {
     config: publicConfig(config),
     projectDir: publicConfig(config).projectDir,
     today: { date: today, archived: Boolean(todayDay), path: todayDay?.path || '' },
+    sessions: {
+      count: todaySessions.length,
+      turns: todaySessions.reduce((sum, item) => sum + item.turns, 0),
+      items: todaySessions.slice(0, 10),
+    },
     days: {
       count: days.length,
       latest: days.slice(0, 12).map((day) => ({ date: day.date, size: day.size, mtime: day.mtime })),
@@ -100,10 +107,12 @@ export async function archiveAction(config, args = {}) {
       mode: args.mode === 'auto' ? 'auto' : 'manual',
       status: result.created ? 'ok' : 'skip',
       note: result.created
-        ? `${result.commitCount} 提交 / ${result.docCount} 文档`
+        ? `${result.commitCount} 提交 / ${result.docCount} 文档 / ${result.sessionCount || 0} 会话`
         : '当天已有归档',
       commitCount: result.commitCount || 0,
       docCount: result.docCount || 0,
+      sessionCount: result.sessionCount || 0,
+      turnCount: result.turnCount || 0,
     })
     return result
   }
@@ -199,6 +208,13 @@ export async function aiAction(args = {}) {
   throw new Error(`未知 action: ${action}`)
 }
 
+export async function sessionAction(config, args = {}) {
+  const action = args.action || 'list'
+  if (action === 'sources') return { sources: await listSessionSources(config) }
+  const dateString = assertDate(args.date || localDate())
+  return scanSessions(config, dateString, { force: action === 'refresh' })
+}
+
 export async function dayAction(args = {}) {
   const config = loadConfig()
   const dateString = assertDate(args.date || localDate())
@@ -225,9 +241,9 @@ export async function maybeAutoArchive(config = loadConfig()) {
     date: today,
     mode: 'auto',
     status: result.created ? 'ok' : 'skip',
-    note: result.created
-      ? `自动归档：${result.commitCount} 提交 / ${result.docCount} 文档`
-      : '当天已有归档',
+      note: result.created
+        ? `自动归档：${result.commitCount} 提交 / ${result.docCount} 文档 / ${result.sessionCount || 0} 会话`
+        : '当天已有归档',
     commitCount: result.commitCount || 0,
     docCount: result.docCount || 0,
   })
@@ -257,6 +273,8 @@ export async function dispatch(op, args = {}) {
       return todoAction(config, args)
     case 'archive':
       return archiveAction(config, args)
+    case 'sessions':
+      return sessionAction(config, args)
     case 'report':
       return reportAction(config, args)
     case 'ask':

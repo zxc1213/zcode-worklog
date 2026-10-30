@@ -21,6 +21,7 @@ import {
   dispatch,
   maybeAutoArchive,
   reportAction,
+  sessionAction,
   statusPayload,
   todoAction,
   usagePayload,
@@ -37,7 +38,7 @@ const server = new McpServer(
   { name: PLUGIN_NAME, version: PLUGIN_VERSION },
   {
     instructions:
-      'WorkLog 是本机工作日志插件：归档每天 Git 提交与文档变更，管理待办，生成日报/周报/月报/季报/绩效素材，可选用 OpenAI 兼容接口润色。所有数据只在本机。',
+      'WorkLog 是本机工作日志插件：归档每天 Git 提交、文档变更与本机 AI 工具会话，管理待办，生成日报/周报/月报/季报/绩效素材，可选用 OpenAI 兼容接口润色。所有数据只在本机。',
   },
 )
 
@@ -136,7 +137,7 @@ tool(
   {
     title: '归档工作日志',
     description:
-      '本地归档：run=扫描配置的 Git 仓库和文档目录，生成当天 Markdown；backfill=补录多天；status=最近归档历史。未配置扫描目录时默认扫描当前工作区。',
+      '本地归档：run=扫描配置的 Git 仓库、文档目录与本机 AI 工具会话，生成当天 Markdown；backfill=补录多天；status=最近归档历史。未配置扫描目录时默认扫描当前工作区。',
     inputSchema: z.object({
       action: z.enum(['run', 'backfill', 'status']),
       date: z.string().optional().describe('run 的日期，默认今天'),
@@ -146,6 +147,20 @@ tool(
     }),
   },
   (args) => archiveAction(loadConfig(), args),
+)
+
+tool(
+  'worklog_sessions',
+  {
+    title: '本机 AI 会话汇总',
+    description:
+      '读取本机 AI 工具会话记录并按天汇总：Claude Code、Codex、DeepSeek Harness、WorkBuddy、ZCode、OpenCode、Gemini CLI、config.sessionRoots 自定义目录。action=list 返回某天的会话（来源/标题/轮数/时间/项目），sources 列出会话源路径与存在性，refresh 强制重扫（忽略缓存）。只读本机文件，摘录缓存在插件数据目录。',
+    inputSchema: z.object({
+      action: z.enum(['list', 'sources', 'refresh']).optional(),
+      date: z.string().optional().describe('YYYY-MM-DD，默认今天'),
+    }),
+  },
+  (args) => sessionAction(loadConfig(), args),
 )
 
 tool(
@@ -259,6 +274,7 @@ server.registerTool(
         'search',
         'todos',
         'archive',
+        'sessions',
         'report',
         'reports',
         'ask',

@@ -20,6 +20,9 @@ const { detectAiCandidates, publicCandidate, findAiCandidate, parseTomlLite } = 
 const store = await import('../lib/store.mjs')
 const reports = await import('../lib/report.mjs')
 const api = await import('../src/api.mjs')
+const { cleanUserText, sessionMarkdownSection, parseSessionLines, scanSessions, listSessionSources } = await import(
+  '../lib/sessions.mjs'
+)
 
 function makeRepo(dir, name) {
   mkdirSync(dir, { recursive: true })
@@ -118,7 +121,7 @@ describe('archive and reports', () => {
   })
 
   it('archives git commits and documents', async () => {
-    saveConfig({ scanRoots: [workspace], docRoots: [workspace], gitAuthor: 'Ray', sources: { git: true, docs: true } })
+    saveConfig({ scanRoots: [workspace], docRoots: [workspace], gitAuthor: 'Ray', sources: { git: true, docs: true, sessions: false } })
     const config = loadConfig()
     const result = await api.archiveAction(config, { action: 'run', date: localDate(), force: true })
     assert.equal(result.created, true)
@@ -292,6 +295,77 @@ describe('panel document', () => {
     assert.match(html, /<\\\/script>/)
     assert.match(html, /<\\\/style>/)
     assert.ok(html.includes(`$& $\` $'`), 'replacement must not expand $-patterns')
+  })
+})
+
+describe('sessions', () => {
+  it('cleanUserText strips runtime noise and keeps real prompts', () => {
+    assert.equal(cleanUserText('<system-reminder>x</system-reminder>真正的提问'), '真正的提问')
+    assert.equal(cleanUserText('<command-name>/worklog</command-name>'), '')
+    assert.equal(cleanUserText('[Request interrupted by user]'), '')
+    assert.equal(cleanUserText('   '), '')
+  })
+
+  it('writes and re-parses the AI session section', () => {
+    const text = sessionMarkdownSection({
+      sessions: [
+        { label: 'Claude Code', title: '调试会话扫描', turns: 3, timeRange: '09:12–09:40', cwd: 'E:\\Demo`x' },
+      ],
+    }).join('\n')
+    assert.match(text, /## AI 会话/)
+    const items = parseSessionLines(text)
+    assert.equal(items.length, 1)
+    assert.equal(items[0].source, 'Claude Code')
+    assert.equal(items[0].turns, 3)
+    assert.equal(items[0].title, '调试会话扫描')
+  })
+
+  it('scans a fake Claude project file for the requested day', async () => {
+    const fakeHome = mkdtempSync(join(tmpdir(), 'worklog-sessions-'))
+    const day = localDate()
+    const stamp = `${day}T09:30:00`
+    const projectDir = join(fakeHome, '.claude', 'projects', 'demo')
+    mkdirSync(projectDir, { recursive: true })
+    writeFileSync(
+      join(projectDir, 'demo.jsonl'),
+      [
+        JSON.stringify({ type: 'ai-title', aiTitle: '测试会话标题' }),
+        JSON.stringify({
+          type: 'user',
+          timestamp: stamp,
+          cwd: 'E:\\Demo',
+          message: { content: [{ type: 'text', text: '扫描器要能解析这一行' }] },
+        }),
+        JSON.stringify({
+          type: 'user',
+          timestamp: stamp,
+          isMeta: true,
+          message: { content: [{ type: 'text', text: '元信息不该计数' }] },
+        }),
+        JSON.stringify({
+          type: 'user',
+          timestamp: `${day}T09:31:00`,
+          message: { content: [{ type: 'text', text: '<system-reminder>注入</system-reminder>第二条提问' }] },
+        }),
+      ].join('\n'),
+      'utf8',
+    )
+    const config = { ...loadConfig(), sources: { git: true, docs: true, sessions: true } }
+    const result = await scanSessions(config, day, { home: fakeHome, dshHome: join(fakeHome, '.dsh') })
+    assert.equal(result.totals.sessions, 1)
+    assert.equal(result.totals.turns, 2)
+    assert.equal(result.sessions[0].title, '测试会话标题')
+    assert.equal(result.sessions[0].cwd, 'E:\\Demo')
+    const again = await scanSessions(config, day, { home: fakeHome, dshHome: join(fakeHome, '.dsh') })
+    assert.equal(again.totals.sessions, 1)
+  })
+
+  it('respects sources.sessions=false and lists session sources', async () => {
+    const config = { ...loadConfig(), sources: { git: true, docs: true, sessions: false } }
+    const result = await scanSessions(config, localDate(), { home: join(tmpdir(), 'worklog-sessions-missing') })
+    assert.equal(result.totals.sessions, 0)
+    const sources = await listSessionSources(config, { home: join(tmpdir(), 'worklog-sessions-missing') })
+    assert.ok(sources.every((source) => source.enabled === false))
   })
 })
 

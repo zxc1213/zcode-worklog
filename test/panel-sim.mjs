@@ -120,6 +120,30 @@ function respond(window, message) {
       }
     else if (op === 'ai' && args.action === 'apply')
       structured = { applied: { name: 'Demo Provider' }, config: bootstrap.config }
+    else if (op === 'sessions' && args.action === 'sources')
+      structured = {
+        sources: [
+          { id: 'claude', label: 'Claude Code', path: '~/.claude/projects', kind: 'dir', exists: true, enabled: true },
+          { id: 'zcode', label: 'ZCode', path: '~/.zcode/cli/db/db.sqlite', kind: 'db', exists: false, enabled: true },
+        ],
+      }
+    else if (op === 'sessions')
+      structured = {
+        date: args.date || '2026-10-29',
+        sessions: [
+          {
+            source: 'claude',
+            label: 'Claude Code',
+            title: '调整 zcode worklog 会话扫描',
+            turns: 2,
+            timeRange: '09:12–09:40',
+            cwd: 'E:\\AI_Project\\research',
+            texts: [],
+          },
+        ],
+        totals: { sessions: 1, turns: 2 },
+        errors: [],
+      }
     else structured = { ok: true }
     reply(
       window,
@@ -187,6 +211,15 @@ await clickTab('汇报')
 assert.ok(text().includes('周报'), 'reports tab renders')
 assert.ok(text().includes('weekly-2026-10-26.md'), 'reports list rendered')
 console.log('reports OK')
+
+await clickTab('会话')
+const scanButton = [...doc.querySelectorAll('button')].find((item) => item.textContent === '扫描会话')
+assert.ok(scanButton, 'sessions tab renders scan button')
+scanButton.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+await wait(450)
+assert.ok(text().includes('调整 zcode worklog 会话扫描'), 'sessions scan renders session title')
+assert.ok(text().includes('1 场'), 'sessions totals card rendered')
+console.log('sessions OK')
 
 await clickTab('设置')
 assert.ok(text().includes('扫描根目录'), 'settings tab renders')

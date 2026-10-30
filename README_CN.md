@@ -1,10 +1,11 @@
 # zcode-worklog
 
-**独立 WorkLog for ZCode**：本机工作日志、Git/文档归档、待办、日报/周报/月报/季报/绩效素材，以及一个可交互的侧边面板。
+**独立 WorkLog for ZCode**：本机工作日志、Git/文档/AI 会话归档、待办、日报/周报/月报/季报/绩效素材，以及一个可交互的侧边面板。
 
 - 不依赖 `WorkLog.exe`，不访问 `127.0.0.1:8377`。
 - 侧边面板完全内置：脚本与样式内联在插件返回的 HTML 中，宿主只负责显示，不加载任何外部应用或子资源。
 - 数据在 ZCode 的插件数据目录（`ZCODE_PLUGIN_DATA`，面板顶部会显示实际路径），不会写回安装目录。
+- 归档时自动汇总本机 AI 工具会话（Claude Code、Codex、DSH、WorkBuddy、ZCode、OpenCode、Gemini CLI 等）。
 - 归档目录规则与原 WorkLog 一致，旧 `data\archive` 可直接导入。
 
 ## 安装（从 GitHub）
@@ -42,15 +43,16 @@ zcode plugins install zcode-worklog@zcode-worklog
 
 ## 面板
 
-侧栏 **WorkLog**，五个页签：
+侧栏 **WorkLog**，六个页签：
 
 | 页签 | 内容 |
 |---|---|
-| 概览 | 今天是否归档、日志/待办/项目/备份统计、最近运行、一键归档今天 |
+| 概览 | 今天是否归档、日志/待办/项目/备份/AI 会话统计、今天的 AI 会话列表、最近运行、一键归档今天 |
 | 日志 | 读取/编辑/保存某天 Markdown、搜索归档、重新归档、生成日报 |
 | 待办 | 添加、完成、重开、删除、清空已完成；支持 `!高`、`@2026-10-30` 快捷语法 |
 | 汇报 | 日报、周报、月报、季报、绩效素材、项目档案；可选 AI 润色；查看已生成报告 |
-| 设置 | 数据目录、Git 扫描根、文档目录、Git 作者、自动归档时间、AI 接口、备份/恢复、从旧 WorkLog 导入 |
+| 会话 | 按日期扫描本机 AI 工具会话，查看来源/标题/轮数/项目/会话源；只读，不写归档 |
+| 设置 | 数据目录、Git 扫描根、文档目录、额外 AI 会话目录、Git 作者、自动归档时间、AI 接口、备份/恢复、从旧 WorkLog 导入 |
 
 面板通过插件自己的 MCP 工具 `worklog_api`（仅面板可见）读写同一份本地数据。面板脚本与样式由插件服务端内联进 `ui://zcode-worklog/panel.html`，不依赖外部程序；如果面板一直停在加载态，先关闭面板重开，仍不行就更新插件并重启 ZCode（`zcode plugins update zcode-worklog@zcode-worklog`）。
 
@@ -81,6 +83,7 @@ zcode plugins install zcode-worklog@zcode-worklog
       reports/                # 日报/周报/月报/季报/绩效素材
     todos.json
     state.json                # 最近归档、运行历史、AI 用量
+    session-cache.json        # AI 会话解析缓存（按文件 mtime+size 增量刷新）
     backups/                  # JSON 备份
 ```
 
@@ -92,15 +95,48 @@ zcode plugins install zcode-worklog@zcode-worklog
 
 1. 在 `scanRoots` 下最多 3 层查找 Git 仓库，取当天提交（按 `gitAuthor` 过滤；留空用各仓库 `git config user.name`）。
 2. 在 `docRoots` 下最多 6 层扫描当天修改过的 `.md/.docx/.xlsx/.pptx/.pdf/...`。
-3. 生成「今日概览 / 项目进展 / 文档变更 / 备注」四节 Markdown，写入归档路径。
+3. 扫描本机 AI 工具会话，汇总当天有真实用户提问的会话（来源、标题、轮数、时间、项目）。
+4. 生成「今日概览 / 项目进展 / 文档变更 / AI 会话 / 备注」五节 Markdown，写入归档路径。
 
 未配置扫描目录时默认扫描当前工作区（`ZCODE_PROJECT_DIR`）。当天已有归档时默认不覆盖，只有 `force: true` 才会重写（会覆盖手写备注）。
 
 自动归档：开启后，MCP 服务进程每分钟检查一次；到 `taskTime`（默认 18:30）且当天未归档就执行一次。**ZCode 没运行就不会自动归档。**
 
+## AI 会话汇总
+
+归档时只读扫描本机 AI 工具当天的真实用户提问，写入日文档的「## AI 会话」小节：
+
+| 来源 | 读取位置 |
+|---|---|
+| Claude Code | `~/.claude/projects/**/*.jsonl`（只取真实用户提问，标题取 `ai-title`） |
+| Codex | `~/.codex/sessions/**/*.jsonl`（`session_meta.cwd`、`user_message`） |
+| DeepSeek Harness | `$DSH_HOME/sessions/**/session*.jsonl[.zstd]`（按 zstd 帧解压） |
+| WorkBuddy | `~/.workbuddy/projects/**/*.jsonl`（`<user_query>` 提取真实提问） |
+| ZCode | `~/.zcode/cli/db/db.sqlite` 的 session/message/part（只取用户消息，过滤 model-only 注入） |
+| OpenCode | `~/.local/share/opencode/storage/{session,message,part}` |
+| Gemini CLI | `~/.gemini|.qwen|.iflow/tmp/*/chats/*.json` |
+| 自定义 | 设置里的「额外 AI 会话目录」，支持 jsonl/json 通用 user 消息解析 |
+
+- 只统计有真实用户提问的会话；`<system-reminder>`、`<environment_context>`、model-only 运行时注入等会被过滤。
+- 每个会话每天最多保留 3 条提问摘录（缓存里），日文档只写来源/时间/轮数/标题与项目目录，避免日志变成聊天记录。
+- 解析结果按文件 `mtime + size` 缓存在 `data/session-cache.json`，只有变化的文件会重新解析；`worklog_sessions` 的 `refresh` 可强制重扫。
+- 面板「会话」页签可按天扫描查看；设置里可以关闭「归档时汇总 AI 会话」，也可以用「额外 AI 会话目录」添加其他工具的导出目录。
+- 会话内容只在本机读取和写入归档，不会自动上传；只有你主动勾选 AI 润色时，素材才会发给已配置的 AI 接口。
+
+日文档格式：
+
+```markdown
+## AI 会话
+
+- [Claude Code] 09:12–09:40 · 3 轮 · 会话标题
+  - 项目：`E:\AI_Project\research`
+- [ZCode] 10:57–11:00 · 2 轮 · 另一个会话标题
+  - 项目：`E:\AI_Project\research\zcode-worklog`
+```
+
 ## Agent 工具
 
-`worklog_status`、`worklog_day`、`worklog_search`、`worklog_todos`、`worklog_archive`、`worklog_report`、`worklog_ask`、`worklog_projects`、`worklog_usage`、`worklog_backup`、`worklog_config`、`worklog_open`。
+`worklog_status`、`worklog_day`、`worklog_search`、`worklog_todos`、`worklog_archive`、`worklog_sessions`、`worklog_report`、`worklog_ask`、`worklog_projects`、`worklog_usage`、`worklog_backup`、`worklog_config`、`worklog_open`。
 
 工具名在会话里通常带 `mcp__plugin_zcode-worklog_worklog__` 前缀。
 
@@ -114,6 +150,7 @@ zcode plugins install zcode-worklog@zcode-worklog
 /zcode-worklog:search <关键词>
 /zcode-worklog:todo list | add <标题> [!高] [@YYYY-MM-DD] | done <id> | reopen <id> | del <id> | clear
 /zcode-worklog:archive run | backfill <日期...> | status
+/zcode-worklog:sessions [YYYY-MM-DD] | sources | refresh [YYYY-MM-DD]
 /zcode-worklog:report daily|weekly|month|quarter|perf|project [参数]
 /zcode-worklog:ask <问题>
 /zcode-worklog:backup list|create|restore <name>|delete <name>|import <旧WorkLog目录>
@@ -137,8 +174,8 @@ zcode plugins install zcode-worklog@zcode-worklog
 ## 与旧版 / dsh-worklog 的区别
 
 - 独立维护，不依赖 WorkLog 的 Python 后端、Claude CLI、8377 端口。
-- 已实现：Git/文档归档、日志编辑/搜索、待办、确定性汇报、可选 AI 润色/问答、备份、旧归档导入、自动归档、侧边面板。
-- 尚未实现：AI 会话记录扫描、Word/Excel 导出、绩效模板 Excel 还原、飞书工时、业务流程图。
+- 已实现：Git/文档归档、日志编辑/搜索、待办、确定性汇报、可选 AI 润色/问答、AI 会话汇总、备份、旧归档导入、自动归档、侧边面板。
+- 尚未实现：Cursor/Trae/Windsurf 的 VS Code 数据库会话扫描、Word/Excel 导出、绩效模板 Excel 还原、飞书工时、业务流程图。后续可以按需从 dsh-worklog 继续移植。
 
 ## 开发
 
@@ -146,7 +183,7 @@ zcode plugins install zcode-worklog@zcode-worklog
 npm install        # 仅构建/测试需要（esbuild + MCP SDK + ext-apps + jsdom）
 npm run build      # 生成 dist/：server.mjs、session-start.mjs、panel.js、panel.html、panel.css
 npm test           # 本地存储/归档/报告/MCP API
-npm run test:panel # jsdom 里模拟 MCP App 宿主，验证握手、bootstrap 和五个页签
+npm run test:panel # jsdom 里模拟 MCP App 宿主，验证握手、bootstrap 和六个页签
 npm run smoke      # 临时目录下跑通归档+待办+备份
 node test/smoke-mcp.mjs   # 真实 stdio JSON-RPC：initialize/tools/list/tools/call/resources/read
 ```

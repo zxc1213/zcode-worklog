@@ -35,6 +35,7 @@ const TABS = [
   ['logs', '日志'],
   ['todos', '待办'],
   ['reports', '汇报'],
+  ['sessions', '会话'],
   ['settings', '设置'],
 ]
 
@@ -83,6 +84,7 @@ const state = {
   reportPeriod: today(),
   reportUseAi: false,
   importDir: '',
+  sessions: { date: today(), result: null, sources: null },
   aiCandidates: null,
   aiBusy: false,
 }
@@ -151,9 +153,11 @@ function draftFromConfig(config) {
     dataDir: c.dataDir || '',
     scanRoots: (c.scanRoots || []).join('\n'),
     docRoots: (c.docRoots || []).join('\n'),
+    sessionRoots: (c.sessionRoots || []).join('\n'),
     gitAuthor: c.gitAuthor || '',
     git: c.sources?.git !== false,
     docs: c.sources?.docs !== false,
+    sessions: c.sources?.sessions !== false,
     autoArchive: Boolean(c.autoArchive),
     skipWeekends: Boolean(c.skipWeekends),
     taskTime: c.taskTime || '18:30',
@@ -260,6 +264,7 @@ function overviewTab() {
         status.todos?.overdue ? `${status.todos.overdue} 条已逾期` : `共 ${status.todos?.count || 0} 条`,
       ),
       card('项目', `${projects.length} 个`, `${status.backups?.count || 0} 份备份`),
+      card('AI 会话', `${status.sessions?.count || 0} 场`, `${status.sessions?.turns || 0} 轮`),
     ),
     h(
       'div',
@@ -275,7 +280,7 @@ function overviewTab() {
               setNotice(
                 'ok',
                 result.created
-                  ? `已归档 ${result.date}：${result.commitCount} 个提交 / ${result.docCount} 个文档`
+                  ? `已归档 ${result.date}：${result.commitCount} 个提交 / ${result.docCount} 个文档 / ${result.sessionCount || 0} 个会话`
                   : `${result.date} 已有归档，未覆盖。可在「日志」页强制重新归档。`,
               )
               if (state.log.date === today()) state.log.loaded = false
@@ -354,6 +359,32 @@ function overviewTab() {
           ),
         )
       : h('div', { className: 'wl-empty' }, '还没有从归档中解析到项目。'),
+    h('div', { className: 'wl-label' }, '今天的 AI 会话'),
+    status.sessions?.items?.length
+      ? h(
+          'div',
+          { className: 'wl-list' },
+          status.sessions.items.map((session, index) =>
+            h(
+              'div',
+              { className: 'wl-item', key: index },
+              h(
+                'div',
+                { className: 'grow' },
+                h('div', { className: 'wl-item-title' }, session.title),
+                h(
+                  'div',
+                  { className: 'wl-item-meta' },
+                  h('span', { className: 'wl-tag low' }, session.source),
+                  h('span', null, `${session.turns} 轮`),
+                  h('span', null, `${session.turns} 轮`),
+                  h('span', null, session.start === session.end ? session.start : `${session.start}–${session.end}`),
+                ),
+              ),
+            ),
+          ),
+        )
+      : h('div', { className: 'wl-empty' }, status.today?.archived ? '今天的归档里没有 AI 会话记录。' : '今天还没归档；归档时会自动汇总本机 AI 会话。'),
     status.runHistory?.length
       ? h(
           'div',
@@ -896,6 +927,135 @@ function aiCandidateItem(candidate) {
   )
 }
 
+async function scanSessionsNow() {
+  await act('sessions-scan', async () => {
+    const data = await call('sessions', { date: state.sessions.date || today() })
+    state.sessions.result = data
+    setNotice('ok', `已扫描 ${data.date || state.sessions.date}：${data.totals?.sessions || 0} 场会话 / ${data.totals?.turns || 0} 轮`)
+  }, { refresh: false })
+}
+
+async function loadSessionSources() {
+  await act('sessions-sources', async () => {
+    const data = await call('sessions', { action: 'sources' })
+    state.sessions.sources = data.sources || []
+  }, { refresh: false })
+}
+
+function sessionsTab() {
+  const sessions = state.sessions
+  const result = sessions.result
+  return h(
+    'div',
+    null,
+    noticeNode(),
+    h(
+      'div',
+      { className: 'wl-date-row' },
+      h('input', {
+        className: 'wl-input',
+        value: sessions.date,
+        placeholder: 'YYYY-MM-DD',
+        onInput: (event) => {
+          sessions.date = event.target.value
+        },
+      }),
+      h(
+        'button',
+        {
+          className: 'wl-btn primary',
+          disabled: state.busy === 'sessions-scan',
+          onClick: scanSessionsNow,
+        },
+        state.busy === 'sessions-scan' ? '扫描中…' : '扫描会话',
+      ),
+      h(
+        'button',
+        {
+          className: 'wl-btn',
+          disabled: state.busy === 'sessions-sources',
+          onClick: loadSessionSources,
+        },
+        '会话源',
+      ),
+    ),
+    h('div', { className: 'wl-hint' }, '只读本机 AI 工具会话（Claude Code / Codex / DeepSeek Harness / WorkBuddy / ZCode / OpenCode / Gemini CLI）；归档时会自动写入日文档。首次扫描解析历史文件，之后按文件 mtime+size 增量缓存。'),
+    result
+      ? h(
+          'div',
+          null,
+          h(
+            'div',
+            { className: 'wl-grid', style: { marginTop: '8px' } },
+            card('会话', `${result.totals?.sessions || 0} 场`),
+            card('用户轮数', `${result.totals?.turns || 0} 轮`),
+          ),
+          result.errors?.length
+            ? h(
+                'div',
+                { className: 'wl-notice err', style: { marginTop: '7px' } },
+                `部分来源读取失败：${result.errors.map((item) => item.source).join('、')}`,
+              )
+            : null,
+          result.sessions?.length
+            ? h(
+                'div',
+                { className: 'wl-list' },
+                result.sessions.map((session, index) =>
+                  h(
+                    'div',
+                    { className: 'wl-item', key: index },
+                    h(
+                      'div',
+                      { className: 'grow' },
+                      h('div', { className: 'wl-item-title' }, session.title),
+                      h(
+                        'div',
+                        { className: 'wl-item-meta' },
+                        h('span', { className: 'wl-tag low' }, session.label),
+                        h('span', null, `${session.turns} 轮`),
+                        h('span', null, session.timeRange || ''),
+                      ),
+                      session.cwd
+                        ? h('div', { className: 'wl-hint', style: { fontFamily: 'var(--wl-mono)' } }, session.cwd)
+                        : null,
+                      session.texts?.[0] && session.texts[0] !== session.title
+                        ? h('div', { className: 'wl-item-meta' }, session.texts[0])
+                        : null,
+                    ),
+                  ),
+                ),
+              )
+            : h('div', { className: 'wl-empty' }, '这一天没有扫描到 AI 会话。'),
+        )
+      : null,
+    sessions.sources
+      ? h(
+          'div',
+          null,
+          h('div', { className: 'wl-label' }, '会话源'),
+          h(
+            'div',
+            { className: 'wl-list' },
+            sessions.sources.map((source) =>
+              h(
+                'div',
+                { className: 'wl-item', key: source.id + source.path },
+                h(
+                  'div',
+                  { className: 'grow' },
+                  h('div', { className: 'wl-item-title' }, source.label),
+                  h('div', { className: 'wl-item-meta', style: { fontFamily: 'var(--wl-mono)' } }, source.path),
+                ),
+                h('span', { className: `wl-tag ${source.exists ? 'low' : ''}` }, source.exists ? '已找到' : '未安装'),
+              ),
+            ),
+          ),
+        )
+      : null,
+  )
+}
+
 function settingsTab() {
   const draft = state.settings || draftFromConfig(state.config)
   const config = state.config || {}
@@ -915,6 +1075,9 @@ function settingsTab() {
     h('textarea', { className: 'wl-area small', value: draft.scanRoots, onInput: set('scanRoots') }),
     h('div', { className: 'wl-label' }, '文档扫描目录（每行一个，最多向下 6 层）'),
     h('textarea', { className: 'wl-area small', value: draft.docRoots, onInput: set('docRoots') }),
+    h('div', { className: 'wl-label' }, '额外 AI 会话目录（每行一个，可选）'),
+    h('textarea', { className: 'wl-area small', value: draft.sessionRoots, onInput: set('sessionRoots') }),
+    h('div', { className: 'wl-hint' }, '自动扫描：~/.claude/projects、~/.codex/sessions、$DSH_HOME/sessions、~/.workbuddy/projects、~/.zcode（数据库）、~/.local/share/opencode、~/.gemini/tmp。'),
     h('div', { className: 'wl-label' }, 'Git 作者（留空 = 各仓库 git config user.name）'),
     h('input', { className: 'wl-input', value: draft.gitAuthor, onInput: set('gitAuthor') }),
 
@@ -925,6 +1088,8 @@ function settingsTab() {
       '扫描 Git 提交',
       h('input', { type: 'checkbox', checked: draft.docs, onChange: set('docs'), style: { marginLeft: '10px' } }),
       '扫描文档变更',
+      h('input', { type: 'checkbox', checked: draft.sessions, onChange: set('sessions'), style: { marginLeft: '10px' } }),
+      '归档时汇总 AI 会话',
     ),
     h(
       'div',
@@ -1000,8 +1165,9 @@ function settingsTab() {
                 dataDir: draft.dataDir,
                 scanRoots: splitLines(draft.scanRoots),
                 docRoots: splitLines(draft.docRoots),
+                sessionRoots: splitLines(draft.sessionRoots),
                 gitAuthor: draft.gitAuthor,
-                sources: { git: draft.git, docs: draft.docs },
+                sources: { git: draft.git, docs: draft.docs, sessions: draft.sessions },
                 autoArchive: draft.autoArchive,
                 skipWeekends: draft.skipWeekends,
                 taskTime: draft.taskTime,
@@ -1174,7 +1340,9 @@ function render() {
             ? todosTab()
             : state.tab === 'reports'
               ? reportsTab()
-              : settingsTab(),
+              : state.tab === 'sessions'
+                ? sessionsTab()
+                : settingsTab(),
     ),
   )
 }

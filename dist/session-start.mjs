@@ -44,8 +44,9 @@ function defaultConfig() {
     dataDir: defaultDataDir(),
     scanRoots: [],
     docRoots: [],
+    sessionRoots: [],
     gitAuthor: "",
-    sources: { git: true, docs: true },
+    sources: { git: true, docs: true, sessions: true },
     autoArchive: false,
     skipWeekends: true,
     taskTime: "18:30",
@@ -76,8 +77,9 @@ function mergeConfig(base, patch = {}) {
     dataDir,
     scanRoots: normalizeStringArray(patch.scanRoots ?? base.scanRoots),
     docRoots: normalizeStringArray(patch.docRoots ?? base.docRoots),
+    sessionRoots: normalizeStringArray(patch.sessionRoots ?? base.sessionRoots),
     gitAuthor: String(patch.gitAuthor ?? base.gitAuthor ?? "").trim(),
-    sources: { git: Boolean(sources.git), docs: Boolean(sources.docs) },
+    sources: { git: Boolean(sources.git), docs: Boolean(sources.docs), sessions: sources.sessions !== false },
     autoArchive: Boolean(patch.autoArchive ?? base.autoArchive),
     skipWeekends: Boolean(patch.skipWeekends ?? base.skipWeekends),
     taskTime: normalizeTime(patch.taskTime ?? base.taskTime, base.taskTime || "18:30"),
@@ -252,10 +254,638 @@ async function listDays(config) {
 
 // lib/archive.mjs
 import { execFile } from "node:child_process";
-import { existsSync as existsSync2 } from "node:fs";
-import { mkdir as mkdir2, readdir as readdir2, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
-import { basename as basename2, dirname as dirname2, extname, join as join3, relative as relative2, resolve as resolve2 } from "node:path";
+import { existsSync as existsSync3 } from "node:fs";
+import { mkdir as mkdir3, readdir as readdir3, stat as stat3, writeFile as writeFile3 } from "node:fs/promises";
+import { basename as basename2, dirname as dirname3, extname, join as join4, relative as relative2, resolve as resolve2 } from "node:path";
 import { promisify } from "node:util";
+
+// lib/sessions.mjs
+import { existsSync as existsSync2 } from "node:fs";
+import { mkdir as mkdir2, readFile as readFile2, readdir as readdir2, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
+import { homedir as homedir2 } from "node:os";
+import { dirname as dirname2, join as join3 } from "node:path";
+var CACHE_VERSION = 1;
+var MAX_TEXT = 220;
+var MAX_TEXTS = 3;
+var MAX_FILE_BYTES = 40 * 1024 * 1024;
+var SOURCE_LABELS = {
+  claude: "Claude Code",
+  codex: "Codex",
+  dsh: "DeepSeek Harness",
+  workbuddy: "WorkBuddy",
+  zcode: "ZCode",
+  opencode: "OpenCode",
+  gemini: "Gemini CLI",
+  custom: "\u81EA\u5B9A\u4E49"
+};
+function labelFor(source) {
+  return SOURCE_LABELS[source] || source;
+}
+function sessionCacheFile(config) {
+  return join3(config.dataDir, "session-cache.json");
+}
+async function readJson2(file) {
+  try {
+    return JSON.parse(await readFile2(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function toMs(value) {
+  if (value == null || value === "") return 0;
+  if (typeof value === "number") return value < 1e12 ? Math.round(value * 1e3) : Math.round(value);
+  if (value instanceof Date) return value.getTime();
+  const text = String(value).trim();
+  if (!text) return 0;
+  if (/^\d+$/.test(text)) return toMs(Number(text));
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+function dayBounds(dateString) {
+  const [year, month, day] = String(dateString).split("-").map(Number);
+  const start = new Date(year, (month || 1) - 1, day || 1).getTime();
+  const end = new Date(year, (month || 1) - 1, (day || 1) + 1).getTime();
+  return [start, end];
+}
+function textBlocks(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.filter((part) => part && ["text", "input_text", "output_text"].includes(part.type)).map((part) => part.text || "").join("\n");
+}
+var NOISE_PREFIXES = [
+  "<command-message",
+  "<command-name",
+  "<command-args",
+  "<local-command",
+  "<system-reminder",
+  "<environment_context",
+  "<agents-instructions",
+  "<user_instructions",
+  "<project_instructions",
+  "Available agent types for the Agent tool",
+  "The following deferred tools are available via LocalToolSearch",
+  "Base directory for this skill",
+  "# Project Instructions",
+  "# AGENTS.md",
+  "Caveat: The messages below",
+  "[Request interrupted by user]"
+];
+function cleanUserText(raw) {
+  let text = String(raw ?? "").replace(/\r/g, "");
+  if (!text.trim()) return "";
+  const query = /<user_query>([\s\S]*?)<\/user_query>/i.exec(text);
+  if (query) text = query[1];
+  text = text.replace(/<system-reminder[\s\S]*?<\/system-reminder>/gi, "").replace(/<environment_context[\s\S]*?<\/environment_context>/gi, "").replace(/<agents-instructions[\s\S]*?<\/agents-instructions>/gi, "").replace(/<user_instructions[\s\S]*?<\/user_instructions>/gi, "").replace(/<project_instructions[\s\S]*?<\/project_instructions>/gi, "");
+  text = text.replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  const lower = text.toLowerCase();
+  if (NOISE_PREFIXES.some((prefix) => lower.startsWith(prefix.toLowerCase()))) return "";
+  if (/^<[a-z][\w-]*[\s>]/i.test(text) && text.endsWith(">")) return "";
+  if (text.length < 2) return "";
+  return text.slice(0, MAX_TEXT);
+}
+function addTurn(session, timestamp, text, seen) {
+  const ms = toMs(timestamp);
+  if (!ms) return;
+  const key = text || "";
+  if (key && seen) {
+    if (seen.has(key)) return;
+    seen.add(key);
+  }
+  const date = localDate(new Date(ms));
+  if (!session.dates[date]) session.dates[date] = { turns: 0, first: ms, last: ms, texts: [] };
+  const day = session.dates[date];
+  day.turns += 1;
+  if (ms < day.first) day.first = ms;
+  if (ms > day.last) day.last = ms;
+  if (key && day.texts.length < MAX_TEXTS && !day.texts.includes(key)) day.texts.push(key);
+}
+function newSession(source, file) {
+  return { source, label: labelFor(source), file, title: "", cwd: "", dates: {} };
+}
+function finishSession(session, fallbackTitle = "") {
+  if (!session) return null;
+  if (!Object.keys(session.dates).length) return null;
+  if (!session.title) {
+    const dates = Object.keys(session.dates).sort();
+    session.title = fallbackTitle || session.dates[dates[0]]?.texts[0] || "(\u65E0\u6807\u9898)";
+  }
+  return session;
+}
+async function listFiles(root, { maxDepth = 4, match = () => true, limit = 2e4 } = {}) {
+  const out = [];
+  if (!root || !existsSync2(root)) return out;
+  const queue = [{ dir: root, depth: 0 }];
+  while (queue.length && out.length < limit) {
+    const { dir, depth } = queue.shift();
+    let entries;
+    try {
+      entries = await readdir2(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = join3(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (depth < maxDepth && !entry.name.startsWith(".") && entry.name !== "node_modules") {
+          queue.push({ dir: full, depth: depth + 1 });
+        }
+      } else if (entry.isFile() && match(full)) {
+        out.push(full);
+      }
+    }
+  }
+  return out;
+}
+function latestDshFiles(files) {
+  const byDir = /* @__PURE__ */ new Map();
+  for (const file of files) {
+    const match = /session\.v(\d+)\.jsonl/.exec(file);
+    const score = match ? Number(match[1]) : 0;
+    const previous = byDir.get(dirname2(file));
+    if (!previous || score > previous.score) byDir.set(dirname2(file), { file, score });
+  }
+  return [...byDir.values()].map((entry) => entry.file);
+}
+async function parseClaudeFile(file) {
+  const text = await readFile2(file, "utf8");
+  const session = newSession("claude", file);
+  const seen = /* @__PURE__ */ new Set();
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let data;
+    try {
+      data = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (data.type === "ai-title" && data.aiTitle) session.title = String(data.aiTitle);
+    if (!session.cwd && data.cwd) session.cwd = String(data.cwd);
+    if (data.type !== "user" || data.isMeta) continue;
+    if (data.origin?.kind && data.origin.kind !== "human") continue;
+    if (data.promptSource && data.promptSource !== "typed") continue;
+    const clean = cleanUserText(textBlocks(data.message?.content ?? data.content));
+    if (clean) addTurn(session, data.timestamp, clean, seen);
+  }
+  return finishSession(session);
+}
+async function parseCodexFile(file) {
+  const text = await readFile2(file, "utf8");
+  const session = newSession("codex", file);
+  const seen = /* @__PURE__ */ new Set();
+  let header = null;
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let data;
+    try {
+      data = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (data.type === "session_meta") {
+      header = data.payload || {};
+      if (!session.cwd && header.cwd) session.cwd = String(header.cwd);
+      continue;
+    }
+    if (data.type === "event_msg" && data.payload?.type === "user_message") {
+      const clean = cleanUserText(data.payload.message);
+      if (clean) addTurn(session, data.timestamp || header?.timestamp, clean, seen);
+      continue;
+    }
+    if (data.type === "response_item" && data.payload?.role === "user") {
+      const clean = cleanUserText(textBlocks(data.payload.content));
+      if (clean) addTurn(session, data.timestamp, clean, seen);
+    }
+  }
+  return finishSession(session);
+}
+async function zstdDecompress(buffer) {
+  let zlib;
+  try {
+    zlib = await import("node:zlib");
+  } catch {
+    return "";
+  }
+  if (typeof zlib.zstdDecompressSync !== "function") return "";
+  const magic = Buffer.from([40, 181, 47, 253]);
+  const parts = [];
+  let start = buffer.indexOf(magic);
+  if (start < 0) return "";
+  while (start >= 0) {
+    const next = buffer.indexOf(magic, start + 4);
+    const end = next < 0 ? buffer.length : next;
+    try {
+      parts.push(zlib.zstdDecompressSync(buffer.subarray(start, end)));
+    } catch {
+    }
+    start = next;
+  }
+  return Buffer.concat(parts).toString("utf8");
+}
+async function parseDshFile(file) {
+  const buffer = await readFile2(file);
+  const text = file.endsWith(".zstd") ? await zstdDecompress(buffer) : buffer.toString("utf8");
+  if (!text) return null;
+  const session = newSession("dsh", file);
+  const seen = /* @__PURE__ */ new Set();
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let data;
+    try {
+      data = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (data.type === "session") {
+      if (!session.cwd && data.cwd) session.cwd = String(data.cwd);
+      continue;
+    }
+    if (data.type === "session/title" && data.data?.title) {
+      session.title = String(data.data.title);
+      continue;
+    }
+    if (data.type !== "user/message") continue;
+    const sourceKind = data.data?.source?.kind;
+    if (sourceKind && sourceKind !== "user") continue;
+    const clean = cleanUserText(textBlocks(data.data?.content));
+    if (clean) addTurn(session, data.time, clean, seen);
+  }
+  return finishSession(session);
+}
+async function parseWorkBuddyFile(file) {
+  const text = await readFile2(file, "utf8");
+  const session = newSession("workbuddy", file);
+  const seen = /* @__PURE__ */ new Set();
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let data;
+    try {
+      data = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!session.cwd && data.cwd) session.cwd = String(data.cwd);
+    if (data.type !== "message" || data.role !== "user") continue;
+    const clean = cleanUserText(textBlocks(data.content) || data.content);
+    if (clean) addTurn(session, data.timestamp, clean, seen);
+  }
+  return finishSession(session);
+}
+async function parseGeminiFile(file) {
+  const data = await readJson2(file);
+  if (!data) return null;
+  const messages = Array.isArray(data) ? data : data.messages;
+  if (!Array.isArray(messages)) return null;
+  const session = newSession("gemini", file);
+  session.title = String(data.title || "");
+  session.cwd = String(data.workspace || data.cwd || data.directory || "");
+  const seen = /* @__PURE__ */ new Set();
+  for (const message of messages) {
+    const role = message?.role || message?.type;
+    if (role !== "user") continue;
+    const clean = cleanUserText(textBlocks(message.content) || message.content || message.text);
+    if (clean) addTurn(session, message.timestamp ?? message.time ?? message.createdAt, clean, seen);
+  }
+  return finishSession(session);
+}
+async function parseGenericFile(file) {
+  if (file.endsWith(".json")) {
+    const data = await readJson2(file);
+    if (!data) return null;
+    if (Array.isArray(data)) {
+      const session2 = newSession("custom", file);
+      const seen2 = /* @__PURE__ */ new Set();
+      for (const message of data) {
+        if ((message?.role || message?.type) !== "user") continue;
+        const clean = cleanUserText(textBlocks(message.content) || message.content || message.text);
+        if (clean) addTurn(session2, message.timestamp ?? message.time, clean, seen2);
+      }
+      return finishSession(session2);
+    }
+    if (Array.isArray(data.messages)) {
+      const session2 = newSession("custom", file);
+      session2.title = String(data.title || "");
+      session2.cwd = String(data.cwd || data.directory || "");
+      const seen2 = /* @__PURE__ */ new Set();
+      for (const message of data.messages) {
+        if ((message?.role || message?.type) !== "user") continue;
+        const clean = cleanUserText(textBlocks(message.content) || message.content || message.text);
+        if (clean) addTurn(session2, message.timestamp ?? message.time, clean, seen2);
+      }
+      return finishSession(session2);
+    }
+    return null;
+  }
+  const text = await readFile2(file, "utf8");
+  const session = newSession("custom", file);
+  const seen = /* @__PURE__ */ new Set();
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let data;
+    try {
+      data = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (data.cwd && !session.cwd) session.cwd = String(data.cwd);
+    const role = data.role || data.message?.role || data.payload?.role || data.data?.role;
+    if (role !== "user") continue;
+    const clean = cleanUserText(
+      textBlocks(data.content ?? data.message?.content ?? data.payload?.content ?? data.data?.content)
+    );
+    if (clean) addTurn(session, data.timestamp ?? data.time ?? data.createdAt, clean, seen);
+  }
+  return finishSession(session);
+}
+async function parseOpenCodeSession(root, sessionFile, dateString) {
+  const data = await readJson2(sessionFile);
+  if (!data?.id) return null;
+  const [start, end] = dayBounds(dateString);
+  const created = toMs(data.time?.created);
+  const updated = toMs(data.time?.updated) || created;
+  if (created && created >= end || updated && updated < start) return null;
+  const session = newSession("opencode", sessionFile);
+  session.title = String(data.title || "");
+  session.cwd = String(data.directory || "");
+  const seen = /* @__PURE__ */ new Set();
+  const messageDir = join3(root, "message", data.id);
+  for (const file of await listFiles(messageDir, { maxDepth: 0, match: (path) => path.endsWith(".json") })) {
+    const message = await readJson2(file);
+    if (!message || message.role !== "user") continue;
+    const createdMs = toMs(message.time?.created);
+    if (createdMs < start || createdMs >= end) continue;
+    const partDir = join3(root, "part", message.id);
+    const parts = [];
+    for (const partFile of await listFiles(partDir, { maxDepth: 0, match: (path) => path.endsWith(".json") })) {
+      const part = await readJson2(partFile);
+      if (part?.type === "text" && typeof part.text === "string") parts.push(part.text);
+    }
+    const clean = cleanUserText(parts.join("\n"));
+    if (clean) addTurn(session, createdMs, clean, seen);
+  }
+  return finishSession(session);
+}
+async function scanOpenCode(config, dateString, home = homedir2()) {
+  const root = join3(home, ".local", "share", "opencode", "storage");
+  const sessionRoot = join3(root, "session");
+  if (!existsSync2(sessionRoot)) return [];
+  const sessions = [];
+  for (const file of await listFiles(sessionRoot, { maxDepth: 2, match: (path) => path.endsWith(".json") })) {
+    const session = await parseOpenCodeSession(root, file, dateString);
+    if (session) sessions.push(session);
+  }
+  return sessions;
+}
+async function scanZcode(config, dateString, home = homedir2()) {
+  const dbFile = join3(home, ".zcode", "cli", "db", "db.sqlite");
+  if (!existsSync2(dbFile)) return [];
+  let DatabaseSync;
+  try {
+    ({ DatabaseSync } = await import("node:sqlite"));
+  } catch {
+    return [];
+  }
+  const [start, end] = dayBounds(dateString);
+  let db;
+  try {
+    db = new DatabaseSync(dbFile, { readOnly: true });
+    const rows = db.prepare(`
+      select m.id as mid, m.session_id as sid, m.data as mdata, m.time_created as mt,
+             p.data as pdata, s.title as title, s.directory as dir
+      from message m
+      join session s on s.id = m.session_id
+      join part p on p.message_id = m.id
+      where m.time_created >= ? and m.time_created < ?
+      order by m.time_created
+    `).all(start, end);
+    const bySession = /* @__PURE__ */ new Map();
+    const byMessage = /* @__PURE__ */ new Map();
+    for (const row of rows) {
+      let message;
+      try {
+        message = JSON.parse(row.mdata || "{}");
+      } catch {
+        continue;
+      }
+      if (message.role !== "user") continue;
+      const meta = message.metadata || {};
+      if (meta.visibility === "model-only" || meta.runtimeMessage) continue;
+      if (message.semantics?.origin === "agent_runtime") continue;
+      let part;
+      try {
+        part = JSON.parse(row.pdata || "{}");
+      } catch {
+        continue;
+      }
+      if (part.type !== "text" || typeof part.text !== "string") continue;
+      const clean = cleanUserText(part.text);
+      if (!clean) continue;
+      let session = bySession.get(row.sid);
+      if (!session) {
+        session = newSession("zcode", dbFile);
+        session.title = String(row.title || "");
+        session.cwd = String(row.dir || "");
+        bySession.set(row.sid, session);
+      }
+      const key = `${row.sid}|${row.mid}`;
+      if (!byMessage.has(key)) byMessage.set(key, { session, ms: row.mt, texts: [] });
+      const bucket = byMessage.get(key);
+      if (!bucket.texts.includes(clean)) bucket.texts.push(clean);
+    }
+    for (const bucket of byMessage.values()) {
+      addTurn(bucket.session, bucket.ms, bucket.texts.join(" "));
+    }
+    return [...bySession.values()].map((session) => finishSession(session)).filter(Boolean);
+  } catch {
+    return [];
+  } finally {
+    try {
+      db?.close();
+    } catch {
+    }
+  }
+}
+async function loadCache(config) {
+  const data = await readJson2(sessionCacheFile(config));
+  if (!data || data.version !== CACHE_VERSION || typeof data.files !== "object") {
+    return { version: CACHE_VERSION, files: {} };
+  }
+  return { version: CACHE_VERSION, files: data.files || {} };
+}
+async function saveCache(config, cache) {
+  await mkdir2(config.dataDir, { recursive: true });
+  await writeFile2(sessionCacheFile(config), JSON.stringify(cache) + "\n", "utf8");
+}
+async function parseWithCache(file, source, parser, cache, force, seen) {
+  seen.add(file);
+  let info;
+  try {
+    info = await stat2(file);
+  } catch {
+    return null;
+  }
+  if (info.size > MAX_FILE_BYTES) return null;
+  const previous = cache.files[file];
+  if (!force && previous && previous.source === source && previous.mtimeMs === info.mtimeMs && previous.size === info.size) {
+    return previous.session || null;
+  }
+  let session = null;
+  try {
+    session = await parser(file);
+  } catch {
+    session = null;
+  }
+  cache.files[file] = { source, mtimeMs: info.mtimeMs, size: info.size, session };
+  return session;
+}
+async function scanFileRoot(config, cache, options, seen, force) {
+  const { root, match, source, parser, maxDepth = 4 } = options;
+  const sessions = [];
+  let files = await listFiles(root, { maxDepth, match });
+  if (source === "dsh") files = latestDshFiles(files);
+  for (const file of files) {
+    const session = await parseWithCache(file, source, parser, cache, force, seen);
+    if (session) sessions.push(session);
+  }
+  return sessions;
+}
+function sessionForDay(session, dateString) {
+  const day = session.dates?.[dateString];
+  if (!day) return null;
+  const first = day.first || day.last;
+  const last = day.last || day.first;
+  const range = first && last ? `${localTime(new Date(first))}${localTime(new Date(first)) === localTime(new Date(last)) ? "" : "\u2013" + localTime(new Date(last))}` : "";
+  return {
+    source: session.source,
+    label: session.label || labelFor(session.source),
+    title: String(session.title || "(\u65E0\u6807\u9898)").slice(0, 120),
+    cwd: session.cwd || "",
+    turns: day.turns,
+    first,
+    last,
+    timeRange: range,
+    texts: day.texts || [],
+    file: session.file
+  };
+}
+async function scanSessions(config, dateString, { force = false, home = homedir2(), dshHome } = {}) {
+  if (config.sources?.sessions === false) {
+    return { date: dateString, sessions: [], totals: { sessions: 0, turns: 0 }, errors: [] };
+  }
+  const resolvedDshHome = dshHome || process.env.DSH_HOME || join3(home, ".dsh");
+  const cache = force ? { version: CACHE_VERSION, files: {} } : await loadCache(config);
+  const seen = /* @__PURE__ */ new Set();
+  const all = [];
+  const errors = [];
+  const roots = [
+    {
+      source: "claude",
+      label: "Claude Code",
+      root: join3(home, ".claude", "projects"),
+      maxDepth: 3,
+      match: (file) => file.endsWith(".jsonl"),
+      parser: parseClaudeFile
+    },
+    {
+      source: "codex",
+      label: "Codex",
+      root: join3(home, ".codex", "sessions"),
+      maxDepth: 6,
+      match: (file) => file.endsWith(".jsonl"),
+      parser: parseCodexFile
+    },
+    {
+      source: "dsh",
+      label: "DeepSeek Harness",
+      root: join3(resolvedDshHome, "sessions"),
+      maxDepth: 4,
+      match: (file) => /session.*\.jsonl(\.zstd)?$/.test(file),
+      parser: parseDshFile
+    },
+    {
+      source: "workbuddy",
+      label: "WorkBuddy",
+      root: join3(home, ".workbuddy", "projects"),
+      maxDepth: 3,
+      match: (file) => file.endsWith(".jsonl") && !file.includes(".file-rollback."),
+      parser: parseWorkBuddyFile
+    }
+  ];
+  for (const source of roots) {
+    try {
+      all.push(...await scanFileRoot(config, cache, source, seen, force));
+    } catch (error) {
+      errors.push({ source: source.source, error: String(error?.message || error) });
+    }
+  }
+  for (const family of ["gemini", "qwen", "iflow"]) {
+    const base = join3(home, `.${family}`, "tmp");
+    if (!existsSync2(base)) continue;
+    try {
+      all.push(...await scanFileRoot(config, cache, {
+        source: "gemini",
+        root: base,
+        maxDepth: 4,
+        match: (file) => file.endsWith(".json") && /[\\/]chats[\\/]/.test(file),
+        parser: parseGeminiFile
+      }, seen, force));
+    } catch (error) {
+      errors.push({ source: family, error: String(error?.message || error) });
+    }
+  }
+  const customRoots = Array.isArray(config.sessionRoots) ? config.sessionRoots : [];
+  for (const root of customRoots) {
+    try {
+      all.push(...await scanFileRoot(config, cache, {
+        source: "custom",
+        root,
+        maxDepth: 5,
+        match: (file) => file.endsWith(".jsonl") || file.endsWith(".json"),
+        parser: parseGenericFile
+      }, seen, force));
+    } catch (error) {
+      errors.push({ source: "custom", root, error: String(error?.message || error) });
+    }
+  }
+  try {
+    all.push(...await scanZcode(config, dateString, home));
+  } catch (error) {
+    errors.push({ source: "zcode", error: String(error?.message || error) });
+  }
+  try {
+    all.push(...await scanOpenCode(config, dateString, home));
+  } catch (error) {
+    errors.push({ source: "opencode", error: String(error?.message || error) });
+  }
+  for (const key of Object.keys(cache.files)) {
+    if (!seen.has(key)) delete cache.files[key];
+  }
+  try {
+    await saveCache(config, cache);
+  } catch {
+  }
+  const sessions = all.map((session) => sessionForDay(session, dateString)).filter(Boolean).sort((a, b) => a.first - b.first || a.label.localeCompare(b.label));
+  const turns = sessions.reduce((sum, session) => sum + session.turns, 0);
+  return { date: dateString, sessions, totals: { sessions: sessions.length, turns }, errors };
+}
+function sessionMarkdownSection(result) {
+  const sessions = result?.sessions || [];
+  const lines = ["## AI \u4F1A\u8BDD", ""];
+  if (!sessions.length) {
+    lines.push("\u4ECA\u5929\u6CA1\u6709\u626B\u63CF\u5230 AI \u4F1A\u8BDD\u3002", "");
+    return lines;
+  }
+  for (const session of sessions) {
+    const title = String(session.title || "(\u65E0\u6807\u9898)").replace(/\s+/g, " ").slice(0, 120);
+    const range = session.timeRange ? ` ${session.timeRange} \xB7` : "";
+    lines.push(`- [${session.label}]${range} ${session.turns} \u8F6E \xB7 ${title}`);
+    if (session.cwd) lines.push(`  - \u9879\u76EE\uFF1A\`${String(session.cwd).replace(/`/g, "'")}\``);
+  }
+  lines.push("");
+  return lines;
+}
+
+// lib/archive.mjs
 var execFileAsync = promisify(execFile);
 var SKIP_DIRS = /* @__PURE__ */ new Set([
   ".git",
@@ -294,20 +924,20 @@ function isSkippedDir(name) {
 }
 async function walk(root, maxDepth, visitDir, visitFile) {
   const base = resolve2(root);
-  if (!existsSync2(base)) return;
+  if (!existsSync3(base)) return;
   const queue = [{ dir: base, depth: 0 }];
   let seen = 0;
   while (queue.length) {
     const { dir, depth } = queue.shift();
     let entries;
     try {
-      entries = await readdir2(dir, { withFileTypes: true });
+      entries = await readdir3(dir, { withFileTypes: true });
     } catch {
       continue;
     }
     await visitDir?.(dir, depth);
     for (const entry of entries) {
-      const full = join3(dir, entry.name);
+      const full = join4(dir, entry.name);
       if (entry.isDirectory()) {
         if (depth < maxDepth && !isSkippedDir(entry.name)) queue.push({ dir: full, depth: depth + 1 });
       } else if (entry.isFile()) {
@@ -330,7 +960,7 @@ async function findGitRepos(roots = []) {
   const repos = [];
   for (const root of roots) {
     await walk(root, 3, async (dir) => {
-      if (existsSync2(join3(dir, ".git"))) repos.push(dir);
+      if (existsSync3(join4(dir, ".git"))) repos.push(dir);
     });
   }
   return [...new Set(repos)];
@@ -377,7 +1007,7 @@ async function scanDocs(roots, dateString) {
       await walk(root, 6, null, async (full) => {
         if (!DOC_EXTS.has(extname(full).toLowerCase())) return;
         try {
-          const info = await stat2(full);
+          const info = await stat3(full);
           if (localDate(info.mtime) !== dateString) return;
           files.push({
             path: full,
@@ -400,9 +1030,11 @@ function sizeText(bytes) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
-function buildDayMarkdown(dateString, gitResult, docResult, note = "") {
+function buildDayMarkdown(dateString, gitResult, docResult, note = "", sessionResult = null) {
   const repos = gitResult.repos || [];
   const docs = docResult.files || [];
+  const sessions = sessionResult?.sessions || [];
+  const turns = sessionResult?.totals?.turns || 0;
   const commitCount = repos.reduce((sum, repo) => sum + repo.commits.length, 0);
   const lines = [
     `# ${dateString} \u5DE5\u4F5C\u65E5\u5FD7`,
@@ -413,6 +1045,7 @@ function buildDayMarkdown(dateString, gitResult, docResult, note = "") {
     "",
     `- Git \u63D0\u4EA4\uFF1A${commitCount} \u4E2A\uFF0C\u6D89\u53CA ${repos.length} \u4E2A\u9879\u76EE`,
     `- \u6587\u6863\u53D8\u66F4\uFF1A${docs.length} \u4E2A`,
+    ...sessionResult ? [`- AI \u4F1A\u8BDD\uFF1A${sessions.length} \u573A\uFF0C${turns} \u8F6E`] : [],
     ""
   ];
   if (repos.length) {
@@ -436,19 +1069,27 @@ function buildDayMarkdown(dateString, gitResult, docResult, note = "") {
   } else {
     lines.push("## \u6587\u6863\u53D8\u66F4", "", "\u4ECA\u5929\u6CA1\u6709\u626B\u63CF\u5230\u6587\u6863\u53D8\u66F4\u3002", "");
   }
+  if (sessionResult) lines.push(...sessionMarkdownSection(sessionResult));
   lines.push("## \u5907\u6CE8", "", note.trim() || "\uFF08\u53EF\u5728\u6B64\u8865\u5145\u4ECA\u5929\u7684\u5DE5\u4F5C\u8BF4\u660E\uFF09", "");
   return lines.join("\n");
 }
 async function archiveDay(config, dateString, { force = false, note = "" } = {}) {
   const target = dayFile(config, dateString);
-  if (!force && existsSync2(target)) {
+  if (!force && existsSync3(target)) {
     return { date: dateString, path: target, created: false, existing: true };
   }
-  const gitResult = config.sources?.git === false ? { repos: [], errors: [] } : await scanGit(scanRootsOf(config), dateString, config.gitAuthor || "");
-  const docResult = config.sources?.docs === false ? { files: [], errors: [] } : await scanDocs(docRootsOf(config), dateString);
-  const text = buildDayMarkdown(dateString, gitResult, docResult, note);
-  await mkdir2(dirname2(target), { recursive: true });
-  await writeFile2(target, text, "utf8");
+  const [gitResult, docResult, sessionResult] = await Promise.all([
+    config.sources?.git === false ? Promise.resolve({ repos: [], errors: [] }) : scanGit(scanRootsOf(config), dateString, config.gitAuthor || ""),
+    config.sources?.docs === false ? Promise.resolve({ files: [], errors: [] }) : scanDocs(docRootsOf(config), dateString),
+    config.sources?.sessions === false ? Promise.resolve(null) : scanSessions(config, dateString).catch((error) => ({
+      sessions: [],
+      totals: { sessions: 0, turns: 0 },
+      errors: [{ source: "sessions", error: String(error?.message || error) }]
+    }))
+  ]);
+  const text = buildDayMarkdown(dateString, gitResult, docResult, note, sessionResult);
+  await mkdir3(dirname3(target), { recursive: true });
+  await writeFile3(target, text, "utf8");
   return {
     date: dateString,
     path: target,
@@ -458,12 +1099,14 @@ async function archiveDay(config, dateString, { force = false, note = "" } = {})
     commitCount: gitResult.repos.reduce((sum, repo) => sum + repo.commits.length, 0),
     repoCount: gitResult.repos.length,
     docCount: docResult.files.length,
+    sessionCount: sessionResult?.sessions?.length || 0,
+    turnCount: sessionResult?.totals?.turns || 0,
     repos: gitResult.repos.map((repo) => ({
       name: repo.name,
       path: repo.path,
       commits: repo.commits.length
     })),
-    errors: [...gitResult.errors, ...docResult.errors]
+    errors: [...gitResult.errors, ...docResult.errors, ...sessionResult?.errors || []]
   };
 }
 
@@ -482,7 +1125,7 @@ async function maybeAutoArchive(config = loadConfig()) {
     date: today,
     mode: "auto",
     status: result.created ? "ok" : "skip",
-    note: result.created ? `\u81EA\u52A8\u5F52\u6863\uFF1A${result.commitCount} \u63D0\u4EA4 / ${result.docCount} \u6587\u6863` : "\u5F53\u5929\u5DF2\u6709\u5F52\u6863",
+    note: result.created ? `\u81EA\u52A8\u5F52\u6863\uFF1A${result.commitCount} \u63D0\u4EA4 / ${result.docCount} \u6587\u6863 / ${result.sessionCount || 0} \u4F1A\u8BDD` : "\u5F53\u5929\u5DF2\u6709\u5F52\u6863",
     commitCount: result.commitCount || 0,
     docCount: result.docCount || 0
   });
