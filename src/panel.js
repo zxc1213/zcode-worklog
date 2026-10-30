@@ -87,6 +87,7 @@ const state = {
   sessions: { date: today(), result: null, sources: null },
   aiCandidates: null,
   aiBusy: false,
+  settingsOpen: { data: false, ai: false, backup: false, import: false },
 }
 
 function h(tag, props = {}, ...children) {
@@ -915,8 +916,15 @@ function aiCandidateItem(candidate) {
             'ai-apply',
             async () => {
               const result = await call('ai', { action: 'apply', id: candidate.id })
+              const base = state.settings || draftFromConfig(result.config)
               state.config = result.config
-              state.settings = draftFromConfig(result.config)
+              state.settings = {
+                ...base,
+                aiBaseUrl: result.config.ai.baseUrl,
+                aiModel: result.config.ai.model,
+                aiFormat: result.config.ai.apiFormat,
+                aiKey: '',
+              }
               setNotice('ok', `已复用 ${result.applied?.name || candidate.name} 的 AI 配置`)
             },
             { refresh: false },
@@ -1056,157 +1064,213 @@ function sessionsTab() {
   )
 }
 
+function settingsSection(key, title, hint, ...children) {
+  const open = Boolean(state.settingsOpen[key])
+  return h(
+    'div',
+    { className: `wl-fold${open ? ' open' : ''}` },
+    h(
+      'button',
+      {
+        className: 'wl-fold-head',
+        type: 'button',
+        'aria-expanded': open ? 'true' : 'false',
+        onClick: () => {
+          state.settingsOpen[key] = !state.settingsOpen[key]
+          render()
+        },
+      },
+      h('span', { className: 'wl-fold-caret' }, open ? '▾' : '▸'),
+      h('span', { className: 'wl-fold-title' }, title),
+      hint ? h('span', { className: 'wl-hint' }, hint) : null,
+    ),
+    open ? h('div', { className: 'wl-fold-body' }, ...children) : null,
+  )
+}
+
+async function saveSettings() {
+  const draft = state.settings
+  if (!draft) return
+  await act('config-save', async () => {
+    const patch = {
+      dataDir: draft.dataDir,
+      scanRoots: splitLines(draft.scanRoots),
+      docRoots: splitLines(draft.docRoots),
+      sessionRoots: splitLines(draft.sessionRoots),
+      gitAuthor: draft.gitAuthor,
+      sources: { git: draft.git, docs: draft.docs, sessions: draft.sessions },
+      autoArchive: draft.autoArchive,
+      skipWeekends: draft.skipWeekends,
+      taskTime: draft.taskTime,
+      ai: {
+        baseUrl: draft.aiBaseUrl,
+        model: draft.aiModel,
+        apiFormat: draft.aiFormat,
+        ...(draft.aiKey ? { apiKey: draft.aiKey } : {}),
+      },
+    }
+    await call('config', { action: 'set', patch })
+    state.settings = null
+    setNotice('ok', '设置已保存')
+  })
+}
+
 function settingsTab() {
   const draft = state.settings || draftFromConfig(state.config)
   const config = state.config || {}
   const set = (key) => (event) => {
     draft[key] = event.target.type === 'checkbox' ? event.target.checked : event.target.value
   }
+  const aiHint = config.ai?.model
+    ? `${config.ai.model}${config.ai.hasApiKey ? ' · 已配置 Key' : ' · 无 Key'}`
+    : '未配置'
+  const dataHint = draft.dataDir || config.dataDir || ''
 
   return h(
     'div',
     null,
     noticeNode(),
-    h('div', { className: 'wl-label' }, '数据目录'),
-    h('input', { className: 'wl-input', value: draft.dataDir, onInput: set('dataDir') }),
-    h('div', { className: 'wl-hint' }, `配置：${config.configFile || ''}`),
-
-    h('div', { className: 'wl-label' }, 'Git 扫描根目录（每行一个，最多向下 3 层）'),
-    h('textarea', { className: 'wl-area small', value: draft.scanRoots, onInput: set('scanRoots') }),
-    h('div', { className: 'wl-label' }, '文档扫描目录（每行一个，最多向下 6 层）'),
-    h('textarea', { className: 'wl-area small', value: draft.docRoots, onInput: set('docRoots') }),
-    h('div', { className: 'wl-label' }, '额外 AI 会话目录（每行一个，可选）'),
-    h('textarea', { className: 'wl-area small', value: draft.sessionRoots, onInput: set('sessionRoots') }),
-    h('div', { className: 'wl-hint' }, '自动扫描：~/.claude/projects、~/.codex/sessions、$DSH_HOME/sessions、~/.workbuddy/projects、~/.zcode（数据库）、~/.local/share/opencode、~/.gemini/tmp。'),
-    h('div', { className: 'wl-label' }, 'Git 作者（留空 = 各仓库 git config user.name）'),
-    h('input', { className: 'wl-input', value: draft.gitAuthor, onInput: set('gitAuthor') }),
-
     h(
       'div',
-      { className: 'wl-checkline' },
-      h('input', { type: 'checkbox', checked: draft.git, onChange: set('git') }),
-      '扫描 Git 提交',
-      h('input', { type: 'checkbox', checked: draft.docs, onChange: set('docs'), style: { marginLeft: '10px' } }),
-      '扫描文档变更',
-      h('input', { type: 'checkbox', checked: draft.sessions, onChange: set('sessions'), style: { marginLeft: '10px' } }),
-      '归档时汇总 AI 会话',
-    ),
-    h(
-      'div',
-      { className: 'wl-checkline' },
-      h('input', { type: 'checkbox', checked: draft.autoArchive, onChange: set('autoArchive') }),
-      '自动归档',
-      h('input', { type: 'checkbox', checked: draft.skipWeekends, onChange: set('skipWeekends'), style: { marginLeft: '10px' } }),
-      '跳过周末',
-      h('input', {
-        className: 'wl-input',
-        type: 'time',
-        value: draft.taskTime,
-        onInput: set('taskTime'),
-        style: { width: '96px', marginLeft: 'auto' },
-      }),
-    ),
-
-    h('div', { className: 'wl-section-title', style: { marginTop: '14px' } }, 'AI 润色'),
-    h(
-      'div',
-      { className: 'wl-toolbar' },
+      { className: 'wl-savebar' },
+      h(
+        'button',
+        { className: 'wl-btn primary', disabled: state.busy === 'config-save', onClick: saveSettings },
+        state.busy === 'config-save' ? '保存中…' : '保存设置',
+      ),
       h(
         'button',
         {
           className: 'wl-btn',
-          disabled: state.aiBusy,
-          onClick: detectAi,
+          onClick: () => {
+            state.settings = draftFromConfig(state.config)
+            setNotice('info', '已恢复为上次保存的设置')
+            render()
+          },
         },
-        state.aiBusy ? '扫描中…' : '扫描本机 AI 工具',
+        '撤销修改',
       ),
-      h('span', { className: 'wl-hint' }, '只在本机读取 ZCode / DeepSeek Harness / Claude Code / Codex / Gemini / 环境变量'),
+      h('span', { className: 'wl-hint' }, '折叠分块，改完点保存'),
     ),
-    state.aiCandidates === null
-      ? null
-      : state.aiCandidates.length
-        ? h('div', { className: 'wl-list' }, state.aiCandidates.map(aiCandidateItem))
-        : h('div', { className: 'wl-empty' }, '没有发现可复用的本机 AI 配置。'),
-    h('div', { className: 'wl-label' }, '接口格式'),
-    h(
-      'select',
-      { className: 'wl-select', onChange: set('aiFormat') },
-      h('option', { value: 'openai', selected: draft.aiFormat !== 'anthropic' }, 'OpenAI 兼容（chat/completions）'),
-      h('option', { value: 'anthropic', selected: draft.aiFormat === 'anthropic' }, 'Anthropic 兼容（v1/messages）'),
-    ),
-    h('div', { className: 'wl-label' }, 'Base URL'),
-    h('input', {
-      className: 'wl-input',
-      value: draft.aiBaseUrl,
-      placeholder: 'https://api.openai.com/v1',
-      onInput: set('aiBaseUrl'),
-    }),
-    h('div', { className: 'wl-label' }, '模型'),
-    h('input', { className: 'wl-input', value: draft.aiModel, placeholder: 'gpt-4o-mini', onInput: set('aiModel') }),
-    h('div', { className: 'wl-label' }, 'API Key'),
-    h('input', {
-      className: 'wl-input',
-      type: 'password',
-      value: draft.aiKey,
-      placeholder: config.ai?.hasApiKey ? '已保存，留空保持不变' : 'sk-...',
-      onInput: set('aiKey'),
-    }),
-    h(
-      'div',
-      { className: 'wl-toolbar' },
+
+    settingsSection(
+      'data',
+      '数据与扫描',
+      dataHint,
+      h('div', { className: 'wl-label' }, '数据目录'),
+      h('input', { className: 'wl-input', value: draft.dataDir, onInput: set('dataDir') }),
+      h('div', { className: 'wl-hint' }, `配置：${config.configFile || ''}`),
+
+      h('div', { className: 'wl-label' }, 'Git 扫描根目录（每行一个，最多向下 3 层）'),
+      h('textarea', { className: 'wl-area small', value: draft.scanRoots, onInput: set('scanRoots') }),
+      h('div', { className: 'wl-label' }, '文档扫描目录（每行一个，最多向下 6 层）'),
+      h('textarea', { className: 'wl-area small', value: draft.docRoots, onInput: set('docRoots') }),
+      h('div', { className: 'wl-label' }, '额外 AI 会话目录（每行一个，可选）'),
+      h('textarea', { className: 'wl-area small', value: draft.sessionRoots, onInput: set('sessionRoots') }),
+      h('div', { className: 'wl-hint' }, '自动扫描：~/.claude/projects、~/.codex/sessions、$DSH_HOME/sessions、~/.workbuddy/projects、~/.zcode（数据库）、~/.local/share/opencode、~/.gemini/tmp。'),
+      h('div', { className: 'wl-label' }, 'Git 作者（留空 = 各仓库 git config user.name）'),
+      h('input', { className: 'wl-input', value: draft.gitAuthor, onInput: set('gitAuthor') }),
+
       h(
-        'button',
-        {
-          className: 'wl-btn primary',
-          disabled: state.busy === 'config-save',
-          onClick: () =>
-            act('config-save', async () => {
-              const patch = {
-                dataDir: draft.dataDir,
-                scanRoots: splitLines(draft.scanRoots),
-                docRoots: splitLines(draft.docRoots),
-                sessionRoots: splitLines(draft.sessionRoots),
-                gitAuthor: draft.gitAuthor,
-                sources: { git: draft.git, docs: draft.docs, sessions: draft.sessions },
-                autoArchive: draft.autoArchive,
-                skipWeekends: draft.skipWeekends,
-                taskTime: draft.taskTime,
-                ai: {
-                  baseUrl: draft.aiBaseUrl,
-                  model: draft.aiModel,
-                  apiFormat: draft.aiFormat,
-                  ...(draft.aiKey ? { apiKey: draft.aiKey } : {}),
-                },
-              }
-              await call('config', { action: 'set', patch })
-              state.settings = null
-              setNotice('ok', '设置已保存')
-            }),
-        },
-        '保存设置',
+        'div',
+        { className: 'wl-checkline' },
+        h('input', { type: 'checkbox', checked: draft.git, onChange: set('git') }),
+        '扫描 Git 提交',
+        h('input', { type: 'checkbox', checked: draft.docs, onChange: set('docs'), style: { marginLeft: '10px' } }),
+        '扫描文档变更',
+        h('input', { type: 'checkbox', checked: draft.sessions, onChange: set('sessions'), style: { marginLeft: '10px' } }),
+        '归档时汇总 AI 会话',
       ),
+      h(
+        'div',
+        { className: 'wl-checkline' },
+        h('input', { type: 'checkbox', checked: draft.autoArchive, onChange: set('autoArchive') }),
+        '自动归档',
+        h('input', { type: 'checkbox', checked: draft.skipWeekends, onChange: set('skipWeekends'), style: { marginLeft: '10px' } }),
+        '跳过周末',
+        h('input', {
+          className: 'wl-input',
+          type: 'time',
+          value: draft.taskTime,
+          onInput: set('taskTime'),
+          style: { width: '96px', marginLeft: 'auto' },
+        }),
+      ),
+    ),
+
+    settingsSection(
+      'ai',
+      'AI 润色',
+      aiHint,
+      h(
+        'div',
+        { className: 'wl-toolbar' },
+        h(
+          'button',
+          {
+            className: 'wl-btn',
+            disabled: state.aiBusy,
+            onClick: detectAi,
+          },
+          state.aiBusy ? '扫描中…' : '扫描本机 AI 工具',
+        ),
+        h('span', { className: 'wl-hint' }, '只在本机读取 ZCode / DeepSeek Harness / Claude Code / Codex / Gemini / 环境变量'),
+      ),
+      state.aiCandidates === null
+        ? null
+        : state.aiCandidates.length
+          ? h('div', { className: 'wl-list' }, state.aiCandidates.map(aiCandidateItem))
+          : h('div', { className: 'wl-empty' }, '没有发现可复用的本机 AI 配置。'),
+      h('div', { className: 'wl-label' }, '接口格式'),
+      h(
+        'select',
+        { className: 'wl-select', onChange: set('aiFormat') },
+        h('option', { value: 'openai', selected: draft.aiFormat !== 'anthropic' }, 'OpenAI 兼容（chat/completions）'),
+        h('option', { value: 'anthropic', selected: draft.aiFormat === 'anthropic' }, 'Anthropic 兼容（v1/messages）'),
+      ),
+      h('div', { className: 'wl-label' }, 'Base URL'),
+      h('input', {
+        className: 'wl-input',
+        value: draft.aiBaseUrl,
+        placeholder: 'https://api.openai.com/v1',
+        onInput: set('aiBaseUrl'),
+      }),
+      h('div', { className: 'wl-label' }, '模型'),
+      h('input', { className: 'wl-input', value: draft.aiModel, placeholder: 'gpt-4o-mini', onInput: set('aiModel') }),
+      h('div', { className: 'wl-label' }, 'API Key'),
+      h('input', {
+        className: 'wl-input',
+        type: 'password',
+        value: draft.aiKey,
+        placeholder: config.ai?.hasApiKey ? '已保存，留空保持不变' : 'sk-...',
+        onInput: set('aiKey'),
+      }),
       config.ai?.hasApiKey
         ? h(
-            'button',
-            {
-              className: 'wl-btn danger',
-              disabled: state.busy === 'config-clear',
-              onClick: () =>
-                act('config-clear', async () => {
-                  await call('config', { action: 'set', patch: { ai: { clearApiKey: true } } })
-                  state.settings = null
-                  setNotice('ok', '已清除 API Key')
-                }),
-            },
-            '清除 Key',
+            'div',
+            { className: 'wl-toolbar' },
+            h(
+              'button',
+              {
+                className: 'wl-btn danger',
+                disabled: state.busy === 'config-clear',
+                onClick: () =>
+                  act('config-clear', async () => {
+                    await call('config', { action: 'set', patch: { ai: { clearApiKey: true } } })
+                    state.settings = null
+                    setNotice('ok', '已清除 API Key')
+                  }),
+              },
+              '清除 Key',
+            ),
           )
         : null,
     ),
 
-    h(
-      'div',
-      { className: 'wl-section' },
-      h('div', { className: 'wl-section-title' }, '备份'),
+    settingsSection(
+      'backup',
+      '备份与恢复',
+      `${state.backups.length} 份备份`,
       h(
         'div',
         { className: 'wl-toolbar' },
@@ -1274,10 +1338,10 @@ function settingsTab() {
         : h('div', { className: 'wl-empty' }, '还没有备份。'),
     ),
 
-    h(
-      'div',
-      { className: 'wl-section' },
-      h('div', { className: 'wl-section-title' }, '从旧 WorkLog 导入'),
+    settingsSection(
+      'import',
+      '从旧 WorkLog 导入',
+      '迁移旧 data\\archive',
       h('div', { className: 'wl-hint' }, '填旧 WorkLog 安装目录（例如 E:\\WorkLog），复制其 data\\archive 到当前数据目录。'),
       h(
         'div',

@@ -52,7 +52,7 @@ zcode plugins install zcode-worklog@zcode-worklog
 | 待办 | 添加、完成、重开、删除、清空已完成；支持 `!高`、`@2026-10-30` 快捷语法 |
 | 汇报 | 日报、周报、月报、季报、绩效素材、项目档案；可选 AI 润色；查看已生成报告 |
 | 会话 | 按日期扫描本机 AI 工具会话，查看来源/标题/轮数/项目/会话源；只读，不写归档 |
-| 设置 | 数据目录、Git 扫描根、文档目录、额外 AI 会话目录、Git 作者、自动归档时间、AI 接口、备份/恢复、从旧 WorkLog 导入 |
+| 设置 | 分块折叠：数据与扫描、AI 润色、备份与恢复、从旧 WorkLog 导入；顶部常驻保存栏 |
 
 面板通过插件自己的 MCP 工具 `worklog_api`（仅面板可见）读写同一份本地数据。面板脚本与样式由插件服务端内联进 `ui://zcode-worklog/panel.html`，不依赖外部程序；如果面板一直停在加载态，先关闭面板重开，仍不行就更新插件并重启 ZCode（`zcode plugins update zcode-worklog@zcode-worklog`）。
 

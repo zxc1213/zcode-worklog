@@ -52,7 +52,7 @@ Six tabs:
 | Todos | Add, complete, reopen, delete, clear completed; `!high` / `@2026-10-30` shortcuts |
 | Reports | Daily, weekly, monthly, quarterly, performance material, project dossier; optional AI polish; view generated reports |
 | Sessions | Scan local AI tool sessions by date; view source/title/turns/project and session sources; read-only, never writes the archive |
-| Settings | Data directory, Git/document roots, extra AI session roots, Git author, auto-archive time, AI endpoint, backup/restore, import from old WorkLog |
+| Settings | Collapsible blocks: data & scanning, AI polish, backup/restore, import from old WorkLog; sticky save bar on top |
 
 The panel talks to this plugin's own MCP server through the panel-only `worklog_api` tool. The plugin inlines the panel script and stylesheet into `ui://zcode-worklog/panel.html`, so the host loads no external program or subresources. If the panel stays on the loading screen, close and reopen it; if that fails, update the plugin and restart ZCode (`zcode plugins update zcode-worklog@zcode-worklog`).
 

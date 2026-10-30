@@ -221,9 +221,21 @@ assert.ok(text().includes('调整 zcode worklog 会话扫描'), 'sessions scan r
 assert.ok(text().includes('1 场'), 'sessions totals card rendered')
 console.log('sessions OK')
 
+const clickFold = async (label) => {
+  const head = [...doc.querySelectorAll('.wl-fold-head')].find((item) => item.textContent.includes(label))
+  assert.ok(head, `fold ${label} exists`)
+  head.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await wait(200)
+}
+
 await clickTab('设置')
-assert.ok(text().includes('扫描根目录'), 'settings tab renders')
+assert.ok(text().includes('保存设置'), 'settings save bar renders')
+assert.ok(text().includes('数据与扫描'), 'settings tab is split into folds')
+assert.ok(text().includes('备份与恢复'), 'settings tab shows backup fold')
 await wait(250)
+await clickFold('数据与扫描')
+assert.ok(text().includes('扫描根目录'), 'data fold expands')
+await clickFold('AI 润色')
 assert.ok(text().includes('扫描本机 AI 工具'), 'settings tab offers AI reuse')
 assert.ok(text().includes('Demo Provider'), 'settings tab lists detected AI configs')
 assert.ok(text().includes('Anthropic 兼容'), 'settings tab shows the API format')
