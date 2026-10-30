@@ -34472,7 +34472,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 var PLUGIN_NAME = "zcode-worklog";
-var PLUGIN_VERSION = "0.2.3";
+var PLUGIN_VERSION = "0.2.4";
 function pluginHome() {
   const explicit = String(process.env.WORKLOG_HOME || "").trim();
   if (explicit) return resolve(explicit);
@@ -36286,6 +36286,37 @@ function aiEndpoint(baseUrl, apiFormat = "openai") {
   if (!base) return "";
   return apiFormat === "anthropic" ? `${base}/v1/messages` : `${base}/chat/completions`;
 }
+async function listAiModels({ baseUrl, apiFormat = "openai", apiKey = "", timeoutMs = 15e3 } = {}) {
+  const base = String(baseUrl || "").trim().replace(/\/+$/, "");
+  if (!base) throw new Error("\u9700\u8981\u5148\u586B\u5199 Base URL");
+  const format = apiFormat === "anthropic" ? "anthropic" : "openai";
+  const url2 = format === "anthropic" ? `${base}/v1/models` : `${base}/models`;
+  const headers = { accept: "application/json" };
+  const key = String(apiKey || "").trim();
+  if (key) {
+    if (format === "anthropic") {
+      headers["anthropic-version"] = "2023-06-01";
+      headers["x-api-key"] = key;
+      if (!/api\.anthropic\.com/i.test(base)) headers.authorization = `Bearer ${key}`;
+    } else {
+      headers.authorization = `Bearer ${key}`;
+    }
+  }
+  const response = await fetch(url2, { headers, signal: AbortSignal.timeout(timeoutMs) });
+  const text = await response.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = {};
+  }
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${data?.error?.message || data?.message || text.slice(0, 200)}`);
+  }
+  const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data?.models) ? data.models : [];
+  const models = rows.map((row) => typeof row === "string" ? row : row?.id || row?.name || "").map((id) => String(id || "").trim()).filter(Boolean);
+  return [...new Set(models)].sort((a, b) => a.localeCompare(b));
+}
 function aiHeaders(config2, baseUrl) {
   const apiKey = String(config2.ai.apiKey || "").trim();
   const format = config2.ai.apiFormat === "anthropic" ? "anthropic" : "openai";
@@ -36456,6 +36487,7 @@ function maskKey(value) {
 }
 function makeCandidate(input2) {
   const apiKey = String(input2.apiKey || "").trim();
+  const models = [...new Set((Array.isArray(input2.models) ? input2.models : [input2.model]).map((model) => String(model || "").trim()).filter(Boolean))];
   return {
     id: String(input2.id),
     source: String(input2.source || "local"),
@@ -36466,6 +36498,7 @@ function makeCandidate(input2) {
     apiFormat: input2.apiFormat === "anthropic" ? "anthropic" : "openai",
     note: String(input2.note || ""),
     rank: Number(input2.rank || 0),
+    models,
     apiKey
   };
 }
@@ -36521,9 +36554,12 @@ function zcodeCandidates(home) {
     if (!baseUrl) continue;
     const apiFormat = provider.kind === "anthropic" ? "anthropic" : provider.kind === "openai" ? "openai" : "";
     if (!apiFormat) continue;
-    const models = provider.models && typeof provider.models === "object" ? provider.models : {};
-    const modelKey = Object.keys(models)[0] || "";
-    const model = String(models[modelKey]?.name || modelKey || "").trim();
+    const modelsMap = provider.models && typeof provider.models === "object" ? provider.models : {};
+    const modelKey = Object.keys(modelsMap)[0] || "";
+    const model = String(modelsMap[modelKey]?.name || modelKey || "").trim();
+    const modelNames = Object.entries(modelsMap).map(
+      ([id, entry]) => String(entry?.name || id || "").trim()
+    );
     const chosen = isSelected(key);
     const rawKey = String(options.apiKey || "").trim();
     const encrypted = rawKey.startsWith("enc:v1:");
@@ -36542,6 +36578,7 @@ function zcodeCandidates(home) {
         baseUrl,
         model,
         apiFormat,
+        models: modelNames,
         apiKey: encrypted ? "" : rawKey,
         note: notes.join("\uFF1B"),
         rank: chosen && usableKey ? 0 : provider.enabled === false ? 2 : usableKey ? 1 : 3
@@ -36714,6 +36751,7 @@ function dshCandidates(home, env) {
         baseUrl,
         model,
         apiFormat,
+        models: modelIds,
         apiKey: usable ? rawKey : "",
         note: notes.join("\uFF1B"),
         rank: defaultProvider === id && usable ? 1 : usable ? 4 : 6
@@ -37013,6 +37051,32 @@ async function aiAction(args = {}) {
   const action = args.action || "detect";
   if (action === "detect") {
     return { candidates: detectAiCandidates().map(publicCandidate) };
+  }
+  if (action === "models") {
+    const saved = loadConfig();
+    const baseUrl = String(args.baseUrl || saved.ai.baseUrl || "").trim().replace(/\/+$/, "");
+    if (!baseUrl) throw new Error("\u9700\u8981\u5148\u586B\u5199 Base URL");
+    const apiFormat = args.apiFormat === "anthropic" ? "anthropic" : args.apiFormat === "openai" ? "openai" : saved.ai.apiFormat;
+    const sameBase = saved.ai.baseUrl.replace(/\/+$/, "") === baseUrl;
+    const apiKey = String(args.apiKey || (sameBase ? saved.ai.apiKey : "") || "").trim();
+    let apiError = null;
+    try {
+      const models = await listAiModels({ baseUrl, apiFormat, apiKey });
+      if (models.length) return { models, source: "api" };
+    } catch (error62) {
+      apiError = error62;
+    }
+    const local = detectAiCandidates().find(
+      (candidate) => candidate.baseUrl.replace(/\/+$/, "") === baseUrl && candidate.models?.length
+    );
+    if (local) {
+      return {
+        models: local.models,
+        source: "local",
+        warning: apiError ? String(apiError.message || apiError) : "\u63A5\u53E3\u8FD4\u56DE\u4E86\u7A7A\u6A21\u578B\u5217\u8868"
+      };
+    }
+    throw apiError || new Error("\u63A5\u53E3\u6CA1\u6709\u8FD4\u56DE\u6A21\u578B\u5217\u8868\uFF0C\u672C\u673A\u914D\u7F6E\u91CC\u4E5F\u6CA1\u6709\u5DF2\u77E5\u6A21\u578B");
   }
   if (action === "apply") {
     const candidate = findAiCandidate(args.id);

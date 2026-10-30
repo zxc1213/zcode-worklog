@@ -35,7 +35,7 @@ import {
   searchDays,
   updateTodo,
 } from '../lib/store.mjs'
-import { askArchive, generateReport, summarizeAiUsage } from '../lib/report.mjs'
+import { askArchive, generateReport, listAiModels, summarizeAiUsage } from '../lib/report.mjs'
 import { detectAiCandidates, findAiCandidate, publicCandidate } from '../lib/ai-detect.mjs'
 import { listSessionSources, parseSessionLines, scanSessions } from '../lib/sessions.mjs'
 
@@ -187,6 +187,35 @@ export async function aiAction(args = {}) {
   const action = args.action || 'detect'
   if (action === 'detect') {
     return { candidates: detectAiCandidates().map(publicCandidate) }
+  }
+  if (action === 'models') {
+    const saved = loadConfig()
+    const baseUrl = String(args.baseUrl || saved.ai.baseUrl || '').trim().replace(/\/+$/, '')
+    if (!baseUrl) throw new Error('需要先填写 Base URL')
+    const apiFormat =
+      args.apiFormat === 'anthropic' ? 'anthropic' : args.apiFormat === 'openai' ? 'openai' : saved.ai.apiFormat
+    const sameBase = saved.ai.baseUrl.replace(/\/+$/, '') === baseUrl
+    const apiKey = String(args.apiKey || (sameBase ? saved.ai.apiKey : '') || '').trim()
+    let apiError = null
+    try {
+      const models = await listAiModels({ baseUrl, apiFormat, apiKey })
+      if (models.length) return { models, source: 'api' }
+    } catch (error) {
+      apiError = error
+    }
+    // Many gateways do not implement /models (or return an empty list); fall
+    // back to models already known from the locally detected provider config.
+    const local = detectAiCandidates().find(
+      (candidate) => candidate.baseUrl.replace(/\/+$/, '') === baseUrl && candidate.models?.length,
+    )
+    if (local) {
+      return {
+        models: local.models,
+        source: 'local',
+        warning: apiError ? String(apiError.message || apiError) : '接口返回了空模型列表',
+      }
+    }
+    throw apiError || new Error('接口没有返回模型列表，本机配置里也没有已知模型')
   }
   if (action === 'apply') {
     const candidate = findAiCandidate(args.id)

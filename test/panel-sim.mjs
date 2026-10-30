@@ -40,7 +40,7 @@ const config = {
   autoArchive: false,
   skipWeekends: true,
   taskTime: '18:30',
-  ai: { baseUrl: '', model: '', hasApiKey: false },
+  ai: { baseUrl: 'https://example.test/api/anthropic', model: 'GLM-5.2', apiFormat: 'anthropic', hasApiKey: true },
 }
 
 const bootstrap = {
@@ -115,11 +115,17 @@ function respond(window, message) {
             hasKey: true,
             keyHint: 'sk-d…7890',
             note: 'ZCode 当前选择的供应商',
+            models: ['GLM-5.2', 'GLM-5-Turbo'],
           },
         ],
       }
+    else if (op === 'ai' && args.action === 'models')
+      structured = { models: ['GLM-5.2', 'GLM-5-Turbo', 'GLM-5.3'], source: 'api' }
     else if (op === 'ai' && args.action === 'apply')
-      structured = { applied: { name: 'Demo Provider' }, config: bootstrap.config }
+      structured = {
+        applied: { name: 'Demo Provider', models: ['GLM-5.2', 'GLM-5-Turbo'] },
+        config: bootstrap.config,
+      }
     else if (op === 'sessions' && args.action === 'sources')
       structured = {
         sources: [
@@ -236,9 +242,21 @@ await wait(250)
 await clickFold('数据与扫描')
 assert.ok(text().includes('扫描根目录'), 'data fold expands')
 await clickFold('AI 润色')
-assert.ok(text().includes('扫描本机 AI 工具'), 'settings tab offers AI reuse')
-assert.ok(text().includes('Demo Provider'), 'settings tab lists detected AI configs')
-assert.ok(text().includes('Anthropic 兼容'), 'settings tab shows the API format')
+await wait(300)
+const pick = doc.querySelector('#wl-ai-pick')
+assert.ok(pick, 'AI candidate dropdown renders')
+assert.ok(pick.textContent.includes('Demo Provider'), 'dropdown lists the candidate')
+assert.ok(pick.textContent.includes('2 模型'), 'dropdown shows the model count')
+const modelInput = [...doc.querySelectorAll('input')].find((el) => el.getAttribute('list') === 'wl-ai-models')
+assert.ok(modelInput, 'model input has a datalist')
+const loadBtn = [...doc.querySelectorAll('button')].find((el) => el.textContent === '加载模型')
+assert.ok(loadBtn, 'load models button renders')
+loadBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+await wait(400)
+const datalist = doc.querySelector('#wl-ai-models')
+assert.ok(datalist, 'model datalist renders')
+assert.equal(datalist.querySelectorAll('option').length, 3, 'models loaded into the datalist')
+assert.ok(text().includes('已加载 3 个模型'), 'model count hint renders')
 console.log('settings OK')
 
 const ops = messages

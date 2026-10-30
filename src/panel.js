@@ -87,6 +87,10 @@ const state = {
   sessions: { date: today(), result: null, sources: null },
   aiCandidates: null,
   aiBusy: false,
+  aiPick: '',
+  aiModels: [],
+  aiModelsBusy: false,
+  aiModelsNote: '',
   settingsOpen: { data: false, ai: false, backup: false, import: false },
 }
 
@@ -877,6 +881,7 @@ async function detectAi() {
   try {
     const data = await call('ai', { action: 'detect' })
     state.aiCandidates = Array.isArray(data?.candidates) ? data.candidates : []
+    state.aiPick = ''
     if (!state.aiCandidates.length) setNotice('info', '没有发现可复用的本机 AI 配置，可在下方手动填写。')
   } catch (error) {
     state.aiCandidates = []
@@ -887,51 +892,101 @@ async function detectAi() {
   }
 }
 
-function aiCandidateItem(candidate) {
+async function loadAiModels() {
+  if (state.aiModelsBusy) return
+  const draft = state.settings || draftFromConfig(state.config)
+  if (!draft.aiBaseUrl) {
+    state.aiModelsNote = '请先填写 Base URL'
+    render()
+    return
+  }
+  state.aiModelsBusy = true
+  state.aiModelsNote = ''
+  render()
+  try {
+    const data = await call('ai', {
+      action: 'models',
+      baseUrl: draft.aiBaseUrl,
+      apiFormat: draft.aiFormat,
+      apiKey: draft.aiKey || undefined,
+    })
+    state.aiModels = Array.isArray(data?.models) ? data.models : []
+    let note = state.aiModels.length ? `已加载 ${state.aiModels.length} 个模型，可下拉选择或直接填写` : '接口没有返回模型列表'
+    if (data?.source === 'local') {
+      note += `；接口不支持 /models，已用本机配置里的模型${data.warning ? `（${String(data.warning).slice(0, 120)}）` : ''}`
+    }
+    state.aiModelsNote = note
+  } catch (error) {
+    state.aiModelsNote = `加载失败：${String(error?.message || error).slice(0, 160)}`
+  } finally {
+    state.aiModelsBusy = false
+    render()
+  }
+}
+
+function aiCandidateRow(candidates) {
+  const current = candidates.find((candidate) => candidate.id === state.aiPick) || candidates[0]
   return h(
     'div',
-    { className: 'wl-item', key: candidate.id },
+    null,
     h(
       'div',
-      { className: 'grow' },
-      h('div', { className: 'wl-item-title' }, candidate.name || candidate.id),
+      { className: 'wl-date-row' },
       h(
-        'div',
-        { className: 'wl-item-meta' },
-        h('span', null, candidate.sourceLabel),
-        candidate.model ? h('span', null, candidate.model) : h('span', null, '未识别到模型'),
-        h('span', null, candidate.hasKey ? `Key ${candidate.keyHint}` : '无 Key'),
-        h('span', null, candidate.apiFormat === 'anthropic' ? 'Anthropic 兼容' : 'OpenAI 兼容'),
-      ),
-      h('div', { className: 'wl-hint wl-mono' }, candidate.baseUrl),
-      candidate.note ? h('div', { className: 'wl-hint' }, candidate.note) : null,
-    ),
-    h(
-      'button',
-      {
-        className: 'wl-btn primary tiny',
-        disabled: state.busy === 'ai-apply',
-        onClick: () =>
-          act(
-            'ai-apply',
-            async () => {
-              const result = await call('ai', { action: 'apply', id: candidate.id })
-              const base = state.settings || draftFromConfig(result.config)
-              state.config = result.config
-              state.settings = {
-                ...base,
-                aiBaseUrl: result.config.ai.baseUrl,
-                aiModel: result.config.ai.model,
-                aiFormat: result.config.ai.apiFormat,
-                aiKey: '',
-              }
-              setNotice('ok', `已复用 ${result.applied?.name || candidate.name} 的 AI 配置`)
-            },
-            { refresh: false },
+        'select',
+        {
+          className: 'wl-select',
+          id: 'wl-ai-pick',
+          onChange: (event) => {
+            state.aiPick = event.target.value
+            render()
+          },
+        },
+        candidates.map((candidate, index) =>
+          h(
+            'option',
+            { value: candidate.id, selected: candidate.id === current.id },
+            `${candidate.sourceLabel} · ${candidate.name}（${candidate.models.length || 0} 模型${candidate.hasKey ? '' : '，无 Key'}）`,
           ),
-      },
-      '使用',
+        ),
+      ),
+      h(
+        'button',
+        {
+          className: 'wl-btn primary',
+          disabled: state.busy === 'ai-apply',
+          onClick: () =>
+            act(
+              'ai-apply',
+              async () => {
+                const result = await call('ai', { action: 'apply', id: current.id })
+                const base = state.settings || draftFromConfig(result.config)
+                state.config = result.config
+                state.settings = {
+                  ...base,
+                  aiBaseUrl: result.config.ai.baseUrl,
+                  aiModel: result.config.ai.model,
+                  aiFormat: result.config.ai.apiFormat,
+                  aiKey: '',
+                }
+                state.aiPick = current.id
+                state.aiModels = Array.isArray(result.applied?.models) ? result.applied.models : []
+                state.aiModelsNote = state.aiModels.length ? `已载入 ${state.aiModels.length} 个模型` : ''
+                setNotice('ok', `已复用 ${result.applied?.name || current.name} 的 AI 配置`)
+              },
+              { refresh: false },
+            ),
+        },
+        state.busy === 'ai-apply' ? '应用中…' : '使用',
+      ),
     ),
+    current
+      ? h(
+          'div',
+          { className: 'wl-hint' },
+          `${current.baseUrl}${current.note ? ` · ${current.note}` : ''}`,
+        )
+      : null,
   )
 }
 
@@ -1219,7 +1274,7 @@ function settingsTab() {
       state.aiCandidates === null
         ? null
         : state.aiCandidates.length
-          ? h('div', { className: 'wl-list' }, state.aiCandidates.map(aiCandidateItem))
+          ? aiCandidateRow(state.aiCandidates)
           : h('div', { className: 'wl-empty' }, '没有发现可复用的本机 AI 配置。'),
       h('div', { className: 'wl-label' }, '接口格式'),
       h(
@@ -1236,7 +1291,31 @@ function settingsTab() {
         onInput: set('aiBaseUrl'),
       }),
       h('div', { className: 'wl-label' }, '模型'),
-      h('input', { className: 'wl-input', value: draft.aiModel, placeholder: 'gpt-4o-mini', onInput: set('aiModel') }),
+      h(
+        'div',
+        { className: 'wl-date-row' },
+        h('input', {
+          className: 'wl-input',
+          value: draft.aiModel,
+          placeholder: 'gpt-4o-mini',
+          list: 'wl-ai-models',
+          onInput: set('aiModel'),
+        }),
+        h(
+          'button',
+          {
+            className: 'wl-btn',
+            disabled: state.aiModelsBusy,
+            onClick: loadAiModels,
+          },
+          state.aiModelsBusy ? '加载中…' : '加载模型',
+        ),
+      ),
+      h('datalist', { id: 'wl-ai-models' }, state.aiModels.map((model) => h('option', { value: model }))),
+      state.aiModels.length
+        ? h('div', { className: 'wl-hint' }, `已加载 ${state.aiModels.length} 个模型，可下拉选择或直接填写`)
+        : null,
+      state.aiModelsNote ? h('div', { className: 'wl-hint' }, state.aiModelsNote) : null,
       h('div', { className: 'wl-label' }, 'API Key'),
       h('input', {
         className: 'wl-input',

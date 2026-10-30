@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { createServer } from 'node:http'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -341,6 +342,7 @@ describe('ai detection', () => {
     assert.equal(zai.model, 'glm-5.3')
     assert.equal(zai.baseUrl, 'https://profile.example/api/coding/paas/v4')
     assert.equal(zai.apiKey, 'sk-zai-1234567890')
+    assert.deepEqual(zai.models, ['glm-5.3'])
     assert.match(zai.note, /默认/)
     const headroom = list.find((item) => item.id === 'dsh:headroom')
     assert.equal(headroom.apiFormat, 'anthropic')
@@ -385,25 +387,66 @@ describe('ai detection', () => {
         '    - id: agent-default-model',
         '      config:',
         '        provider: p1',
-        '    - id: llm-pi-ai',
-        '      config:',
-        '        providers:',
-        '          p1:',
-        '            api: openai-completions',
-        '            models:',
-        '              - id: m1',
-        '                name: M1',
-        '              - id: m2',
+        '    - insert:',
+        '        - id: llm-pi-ai',
+        '          config:',
+        '            providers:',
+        '              p1:',
+        '                api: openai-completions',
+        '                models:',
+        '                  - id: m1',
+        '                    name: M1',
+        '                  - id: m2',
       ].join('\n'),
     )
     assert.ok(Array.isArray(parsed))
     const entries = parsed[0].insert
     assert.equal(entries[0].config.provider, 'p1')
-    assert.equal(entries[1].config.providers.p1.api, 'openai-completions')
+    const llm = entries[1].insert[0]
+    assert.equal(llm.config.providers.p1.api, 'openai-completions')
     assert.deepEqual(
-      entries[1].config.providers.p1.models.map((model) => model.id),
+      llm.config.providers.p1.models.map((model) => model.id),
       ['m1', 'm2'],
     )
+    assert.ok(llm.config.providers.p1.models.every((model) => typeof model === 'object'))
+  })
+
+  it('lists models from openai and anthropic compatible endpoints', async () => {
+    const { listAiModels } = await import('../lib/report.mjs')
+    const seen = []
+    const server = createServer((req, res) => {
+      seen.push({ url: req.url, auth: req.headers.authorization || '' })
+      if (req.url === '/v1/models') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ data: [{ id: 'm2' }, { id: 'm1' }, { id: 'm1' }] }))
+      } else if (req.url === '/anthropic/v1/models') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ data: [{ id: 'a1' }] }))
+      } else {
+        res.writeHead(404, { 'content-type': 'application/json' })
+        res.end('{}')
+      }
+    })
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = server.address().port
+    try {
+      assert.deepEqual(
+        await listAiModels({ baseUrl: `http://127.0.0.1:${port}/v1`, apiFormat: 'openai', apiKey: 'k1' }),
+        ['m1', 'm2'],
+      )
+      assert.deepEqual(
+        await listAiModels({ baseUrl: `http://127.0.0.1:${port}/anthropic`, apiFormat: 'anthropic', apiKey: 'k2' }),
+        ['a1'],
+      )
+      assert.equal(seen[0].auth, 'Bearer k1')
+      assert.ok(seen[1].auth, 'anthropic request carries auth')
+      await assert.rejects(
+        () => listAiModels({ baseUrl: `http://127.0.0.1:${port}/missing`, apiFormat: 'openai' }),
+        /HTTP 404/,
+      )
+    } finally {
+      await new Promise((resolve) => server.close(resolve))
+    }
   })
 })
 

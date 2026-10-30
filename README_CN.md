@@ -71,6 +71,8 @@ zcode plugins install zcode-worklog@zcode-worklog
 
 接口格式支持 **OpenAI 兼容**（`/chat/completions`）和 **Anthropic 兼容**（`/v1/messages`），ZCode 目前常用的 BigModel / Z.ai Coding Plan 属于后者。手动填写也照常可用。
 
+0.2.4 起：本机配置以下拉框展示（标注可用模型数，不再平铺）；填好 Base URL / Key 后点「加载模型」会请求 `/models`（Anthropic 兼容为 `/v1/models`），模型框变成可下拉选择、也可手动填写；接口不提供模型列表时自动回退到本机配置里已知的模型。
+
 ## 数据目录
 
 ```text

@@ -71,6 +71,8 @@ The panel talks to this plugin's own MCP server through the panel-only `worklog_
 
 Both **OpenAI-compatible** (`/chat/completions`) and **Anthropic-compatible** (`/v1/messages`) endpoints are supported; the BigModel / Z.ai coding plans commonly used with ZCode use the latter. Manual entry still works as before.
 
+Since 0.2.4: local configs render as one dropdown (with the model count instead of a long list). After filling Base URL / key, **Load models** queries `/models` (`/v1/models` for Anthropic-compatible endpoints) and the model field becomes a dropdown you can also type into; endpoints without a model list fall back to models known from local configs.
+
 ## Data layout
 
 ```text
