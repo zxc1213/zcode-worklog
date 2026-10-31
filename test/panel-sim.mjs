@@ -69,7 +69,7 @@ const bootstrap = {
 
 const messages = []
 const virtualConsole = new VirtualConsole()
-virtualConsole.on('jsdomError', (error) => console.error('[jsdomError]', error.message))
+virtualConsole.on('jsdomError', (error) => console.error('[jsdomError]', error.message + ' \n ' + (error.detail?.stack || error.stack || '(no stack)')))
 
 function reply(window, id, result, extra = {}) {
   const payload = { jsonrpc: '2.0', id, result: { ...result, ...extra } }

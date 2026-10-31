@@ -2767,7 +2767,6 @@ function scheduleTab() {
       })
   }
   const data = state.calData
-  const today = data?.today || today()
   return h(
     'div',
     null,
