@@ -49,7 +49,7 @@ Six tabs:
 |---|---|
 | Overview | Today's archive state, log/todo/project/backup/AI-session counts, today's AI sessions, recent runs, one-click archive |
 | Logs | Read/edit/save a day's Markdown, search the archive, re-archive, generate a daily report |
-| Todos | Add, inline edit, complete, reopen, delete, clear completed; subtask checklist and tags managed in the edit form; smart order (overdue > priority > due date), pri/tag filters, stats bar; `!high` / `#tag` / `@2026-10-30` shortcuts |
+| Todos | Add, inline edit, complete, reopen, delete, clear completed; subtask checklist and tags managed in the edit form; smart order (overdue > priority > due date), pri/tag filters, stats bar; AI smart-fill / batch parse / daily top-3 suggestion (needs AI config); `!high` / `#tag` / `@2026-10-30` / `repeat=daily` shortcuts |
 | Reports | Daily, weekly, monthly, quarterly, performance material, project dossier; optional AI polish; view generated reports |
 | Sessions | Scan local AI tool sessions by date; view source/title/turns/project and session sources; read-only, never writes the archive |
 | Settings | Collapsible blocks: data & scanning, AI polish, backup/restore, import from old WorkLog; sticky save bar on top |
@@ -147,7 +147,7 @@ The command palette usually shows `/zcode-worklog:status`; on clients that use a
 /zcode-worklog:status
 /zcode-worklog:today [YYYY-MM-DD]
 /zcode-worklog:search <keyword>
-/zcode-worklog:todo list | add <title> [!high] [@YYYY-MM-DD] | edit <id> | done <id> | reopen <id> | del <id> | clear | stats | carry
+/zcode-worklog:todo list | add <title> [!high] [#tag] [@YYYY-MM-DD] | edit <id> | done <id> | reopen <id> | del <id> | clear | stats | carry | parse <text> | plan
 /zcode-worklog:archive run | backfill <dates...> | status
 /zcode-worklog:sessions [YYYY-MM-DD] | sources | refresh [YYYY-MM-DD]
 /zcode-worklog:report daily|weekly|month|quarter|perf|project [args]

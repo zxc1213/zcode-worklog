@@ -76,6 +76,9 @@ const state = {
   todoFilter: { pri: '', tag: '' },
   editingTodo: null,
   editingDraft: null,
+  todoSuggest: null,
+  todoBatch: { open: false, drafts: null, checked: [] },
+  aiDraft: null,
   reports: [],
   backups: [],
   config: null,
@@ -666,6 +669,259 @@ function filterChip(value, current, onPick, label) {
   )
 }
 
+function aiReady() {
+  return Boolean(state.config?.ai?.baseUrl && state.config?.ai?.model)
+}
+
+function composeDraftInput(draft) {
+  const parts = [draft.title]
+  if ((draft.tags || []).length) parts.push(draft.tags.map((tag) => '#' + tag).join(' '))
+  if (draft.repeat) parts.push('repeat=' + draft.repeat)
+  return parts.filter(Boolean).join(' ')
+}
+
+async function aiFillForm() {
+  const titleInput = document.getElementById('wl-todo-title')
+  const raw = String(titleInput?.value || '').trim()
+  if (!raw) {
+    setNotice('err', '先在输入框里写一句话待办，再点 AI 填单')
+    render()
+    return
+  }
+  await act('todo-parse', async () => {
+    const result = await call('todos', { action: 'parse', text: raw, mode: 'one' })
+    const draft = result?.drafts?.[0]
+    if (!draft) throw new Error('AI 没有解析出待办')
+    state.aiDraft = draft
+    state.todoBatch = { open: false, drafts: null, checked: [] }
+    setNotice('ok', 'AI 已填单（' + draft.title + '），确认后点「添加」')
+  })
+}
+
+async function runBatchParse() {
+  const textarea = document.getElementById('wl-todo-batch-text')
+  const text = String(textarea?.value || '').trim()
+  if (!text) {
+    setNotice('err', '先粘贴要解析的文字')
+    render()
+    return
+  }
+  await act('todo-parse', async () => {
+    const result = await call('todos', { action: 'parse', text, mode: 'batch' })
+    state.todoBatch.drafts = result.drafts || []
+    state.todoBatch.checked = []
+    setNotice('ok', '解析出 ' + state.todoBatch.drafts.length + ' 条待办草稿')
+  })
+}
+
+async function addBatchDrafts() {
+  const batch = state.todoBatch
+  const selected = (batch.drafts || [])
+    .map((draft, index) => (batch.checked[index] !== false ? draft : null))
+    .filter(Boolean)
+  if (!selected.length) {
+    setNotice('err', '没有勾选任何草稿')
+    render()
+    return
+  }
+  await act('todo-batch-add', async () => {
+    let added = 0
+    for (const draft of selected) {
+      await call('todos', {
+        action: 'add',
+        title: draft.title,
+        pri: draft.pri,
+        due: draft.due,
+        repeat: draft.repeat,
+        tags: draft.tags,
+      })
+      added += 1
+    }
+    state.todoBatch = { open: false, drafts: null, checked: [] }
+    setNotice('ok', '已添加 ' + added + ' 条待办')
+  })
+}
+
+function todoBatchBlock() {
+  const batch = state.todoBatch
+  const drafts = batch.drafts || []
+  const selectedCount = drafts.filter((draft, index) => batch.checked[index] !== false).length
+  return h(
+    'div',
+    { className: 'wl-section', style: { marginTop: '8px' } },
+    h(
+      'div',
+      { className: 'wl-row' },
+      h(
+        'button',
+        {
+          className: 'wl-btn tiny',
+          onClick: () => {
+            batch.open = !batch.open
+            render()
+          },
+        },
+        batch.open ? '收起批量解析' : 'AI 批量解析',
+      ),
+      batch.open && !drafts.length
+        ? h('span', { className: 'wl-hint' }, '粘贴会议记录/便签，拆成多条待办，勾选后入库')
+        : null,
+    ),
+    batch.open
+      ? [
+          h('textarea', {
+            className: 'wl-input',
+            id: 'wl-todo-batch-text',
+            rows: 3,
+            placeholder: '粘贴一段文字，例如会议结论：张三周五前出报告 !高；我每周一整理周报',
+          }),
+          h(
+            'div',
+            { className: 'wl-row', style: { marginTop: '4px' } },
+            h(
+              'button',
+              { className: 'wl-btn', disabled: state.busy === 'todo-parse', onClick: runBatchParse },
+              '解析',
+            ),
+            drafts.length
+              ? h('span', { className: 'wl-hint' }, '解析出 ' + drafts.length + ' 条，勾选后添加')
+              : null,
+          ),
+          drafts.length
+            ? h(
+                'div',
+                { className: 'wl-list', style: { marginTop: '4px' } },
+                drafts.map((draft, index) =>
+                  h(
+                    'div',
+                    { className: 'wl-item', key: 'bd' + index },
+                    h('input', {
+                      className: 'wl-check',
+                      type: 'checkbox',
+                      checked: batch.checked[index] !== false,
+                      onChange: () => {
+                        batch.checked[index] = batch.checked[index] === false
+                        render()
+                      },
+                    }),
+                    h(
+                      'div',
+                      { className: 'grow' },
+                      h('div', { className: 'wl-item-title' }, draft.title),
+                      h(
+                        'div',
+                        { className: 'wl-item-meta' },
+                        priorityTag(draft.pri),
+                        draft.due ? h('span', null, '到期 ' + draft.due) : null,
+                        draft.repeat ? h('span', null, repeatLabel(draft.repeat)) : null,
+                        (draft.tags || []).map((tag) => h('span', { className: 'wl-tag' }, '#' + tag)),
+                      ),
+                    ),
+                  ),
+                ),
+              )
+            : null,
+          drafts.length && selectedCount
+            ? h(
+                'div',
+                { className: 'wl-row', style: { marginTop: '4px' } },
+                h(
+                  'button',
+                  {
+                    className: 'wl-btn primary',
+                    disabled: state.busy === 'todo-batch-add',
+                    onClick: addBatchDrafts,
+                  },
+                  '添加选中的 ' + selectedCount + ' 条',
+                ),
+              )
+            : null,
+        ]
+      : null,
+  )
+}
+
+async function refreshSuggest() {
+  await act('todo-suggest', async () => {
+    const result = await call('todos', { action: 'suggest' })
+    state.todoSuggest = result
+    if (!result?.picks?.length) setNotice('ok', result?.note || 'AI 没有给出建议')
+  })
+}
+
+function suggestCard() {
+  const picks = state.todoSuggest?.picks || []
+  return h(
+    'div',
+    { className: 'wl-card wide' },
+    picks.length
+      ? [
+          h(
+            'div',
+            { className: 'wl-row' },
+            h('div', { className: 'wl-section-title', style: { flex: '1' } }, '今日 3 件要事'),
+            h(
+              'button',
+              {
+                className: 'wl-btn tiny',
+                disabled: state.busy === 'todo-suggest',
+                onClick: refreshSuggest,
+              },
+              '换一批',
+            ),
+            h(
+              'button',
+              {
+                className: 'wl-btn tiny',
+                onClick: () => {
+                  state.todoSuggest = null
+                  render()
+                },
+              },
+              '收起',
+            ),
+          ),
+          h(
+            'div',
+            { className: 'wl-list', style: { marginTop: '4px' } },
+            picks.map((pick) =>
+              h(
+                'div',
+                { className: 'wl-item', key: pick.id },
+                h(
+                  'div',
+                  { className: 'grow' },
+                  h('div', { className: 'wl-item-title' }, '⭐ ' + pick.title),
+                  h(
+                    'div',
+                    { className: 'wl-item-meta' },
+                    priorityTag(pick.pri),
+                    pick.due ? h('span', null, '到期 ' + pick.due) : null,
+                    pick.carries ? h('span', { className: 'wl-carry' }, '顺延 ' + pick.carries) : null,
+                    h('span', null, pick.reason),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ]
+      : h(
+          'div',
+          { className: 'wl-row' },
+          h('div', { className: 'grow wl-hint' }, '让 AI 从进行中的待办里挑今天的 3 件要事。'),
+          h(
+            'button',
+            {
+              className: 'wl-btn',
+              disabled: state.busy === 'todo-suggest',
+              onClick: refreshSuggest,
+            },
+            '生成建议',
+          ),
+        ),
+  )
+}
+
 function todosTab() {
   const todayText = today()
   const stats = state.status?.todos?.stats || null
@@ -683,6 +939,7 @@ function todosTab() {
     'div',
     null,
     noticeNode(),
+    aiReady() ? suggestCard() : null,
     h(
       'div',
       { className: 'wl-card wide' },
@@ -692,7 +949,8 @@ function todosTab() {
         h('input', {
           className: 'wl-input',
           id: 'wl-todo-title',
-          placeholder: '新待办，支持 !高 / @2026-10-31',
+          value: state.aiDraft ? composeDraftInput(state.aiDraft) : '',
+          placeholder: '新待办，支持 !高 #标签 @2026-10-31 repeat=daily',
           onKeydown: (event) => {
             if (event.key === 'Enter') addTodoFromForm()
           },
@@ -706,19 +964,43 @@ function todosTab() {
           },
           '添加',
         ),
+        h(
+          'select',
+          {
+            className: 'wl-select',
+            id: 'wl-todo-pri',
+            style: { width: '86px' },
+          },
+          h('option', { value: '', selected: !state.aiDraft?.pri }, '优先级'),
+          h('option', { value: '高', selected: state.aiDraft?.pri === '高' }, '高'),
+          h('option', { value: '中', selected: state.aiDraft?.pri === '中' }, '中'),
+          h('option', { value: '低', selected: state.aiDraft?.pri === '低' }, '低'),
+        ),
+        h('input', {
+          className: 'wl-input',
+          id: 'wl-todo-due',
+          type: 'date',
+          value: state.aiDraft?.due || '',
+          style: { width: '136px' },
+        }),
+        aiReady()
+          ? h(
+              'button',
+              {
+                className: 'wl-btn',
+                disabled: state.busy === 'todo-parse',
+                onClick: aiFillForm,
+              },
+              'AI 填单',
+            )
+          : null,
       ),
       h(
         'div',
         { className: 'wl-row', style: { marginTop: '6px' } },
-        h(
-          'select',
-          { className: 'wl-select', id: 'wl-todo-pri', style: { width: '86px' } },
-          h('option', { value: '' }, '优先级'),
-          h('option', { value: '高' }, '高'),
-          h('option', { value: '中' }, '中'),
-          h('option', { value: '低' }, '低'),
-        ),
-        h('input', { className: 'wl-input', id: 'wl-todo-due', type: 'date', style: { width: '136px' } }),
+        state.aiDraft
+          ? h('span', { className: 'wl-hint' }, 'AI 填单草稿，确认无误后点「添加」，或直接修改')
+          : h('span', { className: 'wl-hint' }, '优先级/到期日可选，行内支持 !高 #标签 @日期 repeat=语法'),
         h(
           'button',
           {
@@ -745,6 +1027,7 @@ function todosTab() {
         filterChip(item, state.todoFilter.tag, (value) => (state.todoFilter.tag = value), `#${item}`),
       ),
     ),
+    aiReady() ? todoBatchBlock() : null,
     h(
       'div',
       { className: 'wl-hint', style: { marginTop: '4px' } },
@@ -1117,6 +1400,7 @@ function addTodoFromForm() {
   const repeat = repeatMatch ? repeatMatch[1] : ''
   act('todo-add', async () => {
     await call('todos', { action: 'add', title, pri, due, repeat, tags })
+    state.aiDraft = null
     if (titleInput) titleInput.value = ''
     setNotice('ok', `已添加：${title}`)
   })

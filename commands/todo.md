@@ -14,6 +14,8 @@ description: 管理待办：列表、添加、编辑、完成、重开、删除�
 - `del <id>` → `{ action: "delete", id }`；
 - `clear` → `{ action: "clear_done" }`；
 - `stats` → `{ action: "stats" }`，报告进行中 / 逾期 / 今日完成 / 本周完成；
-- `carry` → `{ action: "carry_over" }`，把逾期未完成项的到期日改到今天（同一天幂等，归档今天时自动执行）。
+- `carry` → `{ action: "carry_over" }`，把逾期未完成项的到期日改到今天（同一天幂等，归档今天时自动执行）；
+- `parse <文本>` → `{ action: "parse", text, mode: "batch" }`，把自然语言解析成待办草稿（需 AI 配置）。把返回的 drafts 逐条列出（标题/优先级/到期/重复/标签）请用户确认，确认后逐条 `{ action: "add", ...draft }` 入库；
+- `plan` → `{ action: "suggest" }`，AI 从进行中待办里选「今日 3 件要事」并附一句理由（需 AI 配置）。
 
 id 是 `worklog_todos` 返回的完整 UUID；如果用户只给了标题，先 list 找到唯一匹配再操作，匹配不唯一就请用户确认。操作完成后用中文确认结果。

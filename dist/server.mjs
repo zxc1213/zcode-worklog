@@ -34472,7 +34472,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 var PLUGIN_NAME = "zcode-worklog";
-var PLUGIN_VERSION = "0.3.1";
+var PLUGIN_VERSION = "0.3.2";
 function pluginHome() {
   const explicit = String(process.env.WORKLOG_HOME || "").trim();
   if (explicit) return resolve(explicit);
@@ -35626,6 +35626,14 @@ function nextRepeatDue(rule, fromDate = /* @__PURE__ */ new Date()) {
   }
   return "";
 }
+function cleanTodoDraft(input2 = {}) {
+  const title = String(input2.title || "").trim();
+  if (!title) throw new Error("\u8349\u7A3F\u6807\u9898\u4E0D\u80FD\u4E3A\u7A7A");
+  const due = /^\d{4}-\d{2}-\d{2}$/.test(String(input2.due || "")) ? String(input2.due).slice(0, 10) : "";
+  const repeat = /^(?:daily|weekly:[0-6]|monthly:(?:[1-9]|[12]\d|3[01]))$/.test(String(input2.repeat || "")) ? String(input2.repeat) : "";
+  const pri = PRI_VALUES.includes(input2.pri) ? input2.pri : "";
+  return { title, due, repeat, pri, tags: cleanTags(input2.tags) };
+}
 async function deleteTodo(config2, id) {
   const todos = await loadTodos(config2);
   const next = todos.filter((todo) => todo.id !== id);
@@ -36592,7 +36600,7 @@ function aiResult(config2, data) {
   if (!content) throw new Error("AI \u63A5\u53E3\u6CA1\u6709\u8FD4\u56DE choices[0].message.content");
   return { text: String(content).trim(), usage: data.usage || null };
 }
-async function aiComplete(config2, system, user) {
+async function aiComplete(config2, system, user, { kind = "report" } = {}) {
   if (!config2.ai.baseUrl || !config2.ai.model) {
     throw new Error("\u8FD8\u6CA1\u6709\u914D\u7F6E AI \u63A5\u53E3\uFF08baseUrl/model\uFF09");
   }
@@ -36616,7 +36624,7 @@ async function aiComplete(config2, system, user) {
   const result = aiResult(config2, data);
   if (result.usage) {
     await recordAiUsage(config2, {
-      kind: "report",
+      kind,
       model: data.model || config2.ai.model,
       in: result.usage.prompt_tokens || 0,
       out: result.usage.completion_tokens || 0,
@@ -37224,6 +37232,81 @@ async function archiveAction(config2, args = {}) {
   }
   throw new Error(`\u672A\u77E5 action: ${action}`);
 }
+function extractJson(text) {
+  const raw = String(text || "").trim();
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const candidate = fenced ? fenced[1] : raw;
+  const start = candidate.indexOf("{");
+  const end = candidate.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("AI \u6CA1\u6709\u8FD4\u56DE JSON");
+  return JSON.parse(candidate.slice(start, end + 1));
+}
+function weekdayName(dateString) {
+  const [year, month, day] = String(dateString).split("-").map(Number);
+  const name = ["\u65E5", "\u4E00", "\u4E8C", "\u4E09", "\u56DB", "\u4E94", "\u516D"][new Date(year, month - 1, day).getDay()];
+  return "\u661F\u671F" + name;
+}
+async function parseTodoDrafts(config2, args = {}) {
+  if (!config2.ai.baseUrl || !config2.ai.model) throw new Error("\u8FD8\u6CA1\u6709\u914D\u7F6E AI \u63A5\u53E3\uFF08baseUrl/model\uFF09");
+  const text = String(args.text || "").trim();
+  if (!text) throw new Error("\u9700\u8981\u89E3\u6790\u7684\u6587\u672C\u4E0D\u80FD\u4E3A\u7A7A");
+  const batch = args.mode === "batch";
+  const today = localDate();
+  const system = [
+    "\u4F60\u662F\u5F85\u529E\u89E3\u6790\u52A9\u624B\u3002\u628A\u7528\u6237\u6587\u672C\u89E3\u6790\u6210\u5F85\u529E JSON\uFF0C\u53EA\u8F93\u51FA JSON\uFF0C\u4E0D\u8981\u8F93\u51FA\u5176\u4ED6\u6587\u5B57\u3002",
+    '\u683C\u5F0F\uFF1A{"todos":[{"title":"\u4E00\u53E5\u8BDD\u6807\u9898","pri":"\u9AD8|\u4E2D|\u4F4E\u6216\u7A7A","due":"YYYY-MM-DD\u6216\u7A7A","repeat":"daily|weekly:0-6|monthly:1-28\u6216\u7A7A","tags":["\u6807\u7B7E"]}]}',
+    "\u4ECA\u5929\u662F " + today + "\uFF08" + weekdayName(today) + "\uFF09\u3002\u65F6\u95F4\u89C4\u5219\uFF1A\u5468\u4E94\u2192\u6700\u8FD1\u7684\u5468\u4E94\u3001\u4E0B\u5468\u4E00\u2192\u4E0B\u5468\u3001\u6708\u5E95\u2192\u672C\u6708\u6700\u540E\u4E00\u5929\u3001N\u5929\u540E\u2192\u4ECA\u5929+N\uFF1B\u6CA1\u6709\u65F6\u95F4\u4FE1\u606F due \u7559\u7A7A\u3002",
+    "\u6BCF\u5929/\u6BCF\u65E5\u2192daily\uFF1B\u6BCF\u5468X\u2192weekly:X\uFF080=\u5468\u65E5\uFF09\uFF1B\u6BCF\u6708X\u53F7\u2192monthly:X\uFF081-28\uFF09\u3002",
+    "\u7D27\u6025/\u5C3D\u5FEB/\u9A6C\u4E0A\u2192\u9AD8\uFF1B\u4E0D\u6025/\u6709\u7A7A\u65F6\u2192\u4F4E\uFF1B#\u8BCD \u63D0\u53D6\u4E3A tags\uFF08\u53BB\u6389#\u53F7\uFF09\u3002",
+    "title \u4E0D\u8981\u5305\u542B\u65E5\u671F\u3001\u4F18\u5148\u7EA7\u3001#\u6807\u7B7E\u8BB0\u53F7\u3002",
+    batch ? "\u628A\u6587\u672C\u62C6\u6210\u591A\u6761\u76F8\u4E92\u72EC\u7ACB\u7684\u5F85\u529E\u3002" : "\u53EA\u89E3\u6790\u51FA 1 \u6761\u5F85\u529E\u3002",
+    "\u53EA\u4F9D\u636E\u6587\u672C\u5185\u5BB9\uFF0C\u4E0D\u8981\u7F16\u9020\u3002"
+  ].join("\n");
+  const result = await aiComplete(config2, system, text, { kind: "todo" });
+  const data = extractJson(result.text);
+  const list = Array.isArray(data.todos) ? data.todos : [];
+  const drafts = [];
+  for (const item of list.slice(0, batch ? 10 : 1)) {
+    try {
+      drafts.push(cleanTodoDraft(item));
+    } catch {
+    }
+  }
+  if (!drafts.length) throw new Error("AI \u6CA1\u6709\u89E3\u6790\u51FA\u6709\u6548\u5F85\u529E\uFF0C\u8BF7\u6362\u4E2A\u8BF4\u6CD5\u6216\u624B\u52A8\u6DFB\u52A0");
+  return { drafts, mode: batch ? "batch" : "one" };
+}
+async function suggestTopTodos(config2) {
+  if (!config2.ai.baseUrl || !config2.ai.model) throw new Error("\u8FD8\u6CA1\u6709\u914D\u7F6E AI \u63A5\u53E3\uFF08baseUrl/model\uFF09");
+  const today = localDate();
+  const open2 = sortTodos(
+    (await loadTodos(config2)).filter((todo) => todo.status !== "done"),
+    today
+  ).slice(0, 30);
+  if (!open2.length) return { picks: [], note: "\u6CA1\u6709\u8FDB\u884C\u4E2D\u7684\u5F85\u529E" };
+  const lines = open2.map(
+    (todo, index) => index + 1 + ". " + todo.title + " | \u4F18\u5148\u7EA7:" + (todo.pri || "\u65E0") + " | \u5230\u671F:" + (todo.due || "\u65E0") + " | \u5DF2\u987A\u5EF6:" + (todo.carries || 0) + "\u6B21 | \u6807\u7B7E:" + ((todo.tags || []).join(",") || "\u65E0") + " | id:" + todo.id
+  );
+  const system = [
+    '\u4F60\u662F\u6BCF\u65E5\u8BA1\u5212\u52A9\u624B\u3002\u4ECE\u5F85\u529E\u5217\u8868\u4E2D\u9009\u51FA\u4ECA\u5929\u6700\u503C\u5F97\u505A\u7684 3 \u4EF6\u8981\u4E8B\uFF0C\u53EA\u8F93\u51FA JSON\uFF1A{"picks":[{"id":"\u5F85\u529Eid","reason":"\u4E00\u53E5\u8BDD\u7406\u7531"}]}\u3002',
+    "\u9009\u62E9\u89C4\u5219\uFF1A\u903E\u671F\u4E14\u987A\u5EF6\u6B21\u6570\u591A\u7684\u4F18\u5148\uFF0C\u5176\u6B21\u9AD8\u4F18\u5148\u7EA7\uFF0C\u518D\u6B21\u5230\u671F\u65E5\u4E34\u8FD1\uFF1B\u7406\u7531\u8981\u5177\u4F53\u5230\u5F85\u529E\u5185\u5BB9\u3002",
+    "\u53EA\u8F93\u51FA JSON\uFF0C\u4E0D\u8981\u8F93\u51FA\u5176\u4ED6\u6587\u5B57\u3002"
+  ].join("\n");
+  const result = await aiComplete(config2, system, lines.join("\n"), { kind: "todo" });
+  const data = extractJson(result.text);
+  const picks = (Array.isArray(data.picks) ? data.picks : []).map((pick2) => {
+    const todo = open2.find((item) => item.id === pick2?.id);
+    if (!todo) return null;
+    return {
+      id: todo.id,
+      title: todo.title,
+      pri: todo.pri,
+      due: todo.due,
+      carries: todo.carries || 0,
+      reason: String(pick2.reason || "").slice(0, 80)
+    };
+  }).filter(Boolean).slice(0, 3);
+  return { picks };
+}
 async function todoAction(config2, args = {}) {
   const action = args.action || "list";
   if (action === "list") {
@@ -37258,6 +37341,8 @@ async function todoAction(config2, args = {}) {
   if (action === "clear_done") return clearDoneTodos(config2);
   if (action === "carry_over") return carryOverTodos(config2, { date: args.date || localDate() });
   if (action === "stats") return getTodoStats(config2);
+  if (action === "parse") return parseTodoDrafts(config2, args);
+  if (action === "suggest") return suggestTopTodos(config2);
   throw new Error(`\u672A\u77E5 action: ${action}`);
 }
 async function reportAction(config2, args = {}) {
@@ -37492,7 +37577,7 @@ tool(
   "worklog_todos",
   {
     title: "\u7BA1\u7406\u5F85\u529E",
-    description: "\u7BA1\u7406\u672C\u5730\u5F85\u529E\uFF1Alist/add/update/complete/reopen/delete/clear_done/carry_over/stats\u3002list \u9ED8\u8BA4\u667A\u80FD\u6392\u5E8F\uFF08\u903E\u671F > \u9AD8/\u4E2D/\u4F4E > \u5230\u671F\u65E5\uFF09\uFF0C\u652F\u6301 status/pri/tag/q \u8FC7\u6EE4\uFF1Badd \u4E0E update \u652F\u6301 pri\uFF08\u9AD8/\u4E2D/\u4F4E\uFF09\u3001due\uFF08YYYY-MM-DD\uFF09\u3001md\u3001repeat\uFF08daily / weekly:0-6 / monthly:1-28\uFF09\u3001tags\uFF08\u5B57\u7B26\u4E32\u6570\u7EC4\uFF0C\u53EF\u53BB # \u524D\u7F00\uFF09\u3001subtasks\uFF08{title, done} \u5217\u8868\uFF09\uFF1Bcarry_over \u628A\u903E\u671F\u672A\u5B8C\u6210\u9879\u7684 due \u6539\u4E3A\u4ECA\u5929\uFF08\u540C\u65E5\u5E42\u7B49\uFF0C\u5F52\u6863\u4ECA\u5929\u65F6\u81EA\u52A8\u6267\u884C\uFF09\u3002",
+    description: "\u7BA1\u7406\u672C\u5730\u5F85\u529E\uFF1Alist/add/update/complete/reopen/delete/clear_done/carry_over/stats/parse/suggest\u3002list \u9ED8\u8BA4\u667A\u80FD\u6392\u5E8F\uFF08\u903E\u671F > \u9AD8/\u4E2D/\u4F4E > \u5230\u671F\u65E5\uFF09\uFF0C\u652F\u6301 status/pri/tag/q \u8FC7\u6EE4\uFF1Badd \u4E0E update \u652F\u6301 pri\uFF08\u9AD8/\u4E2D/\u4F4E\uFF09\u3001due\uFF08YYYY-MM-DD\uFF09\u3001md\u3001repeat\uFF08daily / weekly:0-6 / monthly:1-28\uFF09\u3001tags\uFF08\u5B57\u7B26\u4E32\u6570\u7EC4\uFF0C\u53EF\u53BB # \u524D\u7F00\uFF09\u3001subtasks\uFF08{title, done} \u5217\u8868\uFF09\uFF1Bcarry_over \u628A\u903E\u671F\u672A\u5B8C\u6210\u9879\u7684 due \u6539\u4E3A\u4ECA\u5929\uFF08\u540C\u65E5\u5E42\u7B49\uFF0C\u5F52\u6863\u4ECA\u5929\u65F6\u81EA\u52A8\u6267\u884C\uFF09\uFF1Bparse \u628A\u81EA\u7136\u8BED\u8A00\u89E3\u6790\u6210\u5F85\u529E\u8349\u7A3F\uFF08\u4E0D\u76F4\u63A5\u5165\u5E93\uFF0C\u9700\u786E\u8BA4\u540E\u518D add\uFF09\uFF1Bsuggest \u4ECE\u8FDB\u884C\u4E2D\u5F85\u529E\u91CC\u9009\u4ECA\u5929 3 \u4EF6\u8981\u4E8B\u3002parse/suggest \u9700\u8981 AI \u914D\u7F6E\u3002",
     inputSchema: external_exports.object({
       action: external_exports.enum([
         "list",
@@ -37503,7 +37588,9 @@ tool(
         "delete",
         "clear_done",
         "carry_over",
-        "stats"
+        "stats",
+        "parse",
+        "suggest"
       ]),
       id: external_exports.string().optional(),
       title: external_exports.string().optional(),
@@ -37513,6 +37600,8 @@ tool(
       repeat: external_exports.string().optional(),
       tags: external_exports.array(external_exports.string()).optional(),
       subtasks: external_exports.array(external_exports.object({ id: external_exports.string().optional(), title: external_exports.string(), done: external_exports.boolean().optional() })).optional(),
+      text: external_exports.string().optional(),
+      mode: external_exports.enum(["one", "batch"]).optional(),
       status: external_exports.enum(["open", "done"]).optional(),
       tag: external_exports.string().optional(),
       q: external_exports.string().optional(),

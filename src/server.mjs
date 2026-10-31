@@ -118,7 +118,7 @@ tool(
   {
     title: '管理待办',
     description:
-      '管理本地待办：list/add/update/complete/reopen/delete/clear_done/carry_over/stats。list 默认智能排序（逾期 > 高/中/低 > 到期日），支持 status/pri/tag/q 过滤；add 与 update 支持 pri（高/中/低）、due（YYYY-MM-DD）、md、repeat（daily / weekly:0-6 / monthly:1-28）、tags（字符串数组，可去 # 前缀）、subtasks（{title, done} 列表）；carry_over 把逾期未完成项的 due 改为今天（同日幂等，归档今天时自动执行）。',
+      '管理本地待办：list/add/update/complete/reopen/delete/clear_done/carry_over/stats/parse/suggest。list 默认智能排序（逾期 > 高/中/低 > 到期日），支持 status/pri/tag/q 过滤；add 与 update 支持 pri（高/中/低）、due（YYYY-MM-DD）、md、repeat（daily / weekly:0-6 / monthly:1-28）、tags（字符串数组，可去 # 前缀）、subtasks（{title, done} 列表）；carry_over 把逾期未完成项的 due 改为今天（同日幂等，归档今天时自动执行）；parse 把自然语言解析成待办草稿（不直接入库，需确认后再 add）；suggest 从进行中待办里选今天 3 件要事。parse/suggest 需要 AI 配置。',
     inputSchema: z.object({
       action: z.enum([
         'list',
@@ -130,6 +130,8 @@ tool(
         'clear_done',
         'carry_over',
         'stats',
+        'parse',
+        'suggest',
       ]),
       id: z.string().optional(),
       title: z.string().optional(),
@@ -141,6 +143,8 @@ tool(
       subtasks: z
         .array(z.object({ id: z.string().optional(), title: z.string(), done: z.boolean().optional() }))
         .optional(),
+      text: z.string().optional(),
+      mode: z.enum(['one', 'batch']).optional(),
       status: z.enum(['open', 'done']).optional(),
       tag: z.string().optional(),
       q: z.string().optional(),

@@ -17,6 +17,7 @@ import { archiveDay, archiveDays } from '../lib/archive.mjs'
 import {
   addTodo,
   carryOverTodos,
+  cleanTodoDraft,
   clearDoneTodos,
   createBackup,
   deleteBackup,
@@ -36,10 +37,11 @@ import {
   restoreBackup,
   saveDay,
   searchDays,
+  sortTodos,
   todoStats,
   updateTodo,
 } from '../lib/store.mjs'
-import { askArchive, generateReport, listAiModels, summarizeAiUsage } from '../lib/report.mjs'
+import { askArchive, aiComplete, generateReport, listAiModels, summarizeAiUsage } from '../lib/report.mjs'
 import { detectAiCandidates, findAiCandidate, publicCandidate } from '../lib/ai-detect.mjs'
 import { listSessionSources, parseSessionLines, scanSessions } from '../lib/sessions.mjs'
 
@@ -142,6 +144,109 @@ export async function archiveAction(config, args = {}) {
   throw new Error(`未知 action: ${action}`)
 }
 
+/** Pull the first JSON object out of a model reply (tolerates code fences). */
+function extractJson(text) {
+  const raw = String(text || '').trim()
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/)
+  const candidate = fenced ? fenced[1] : raw
+  const start = candidate.indexOf('{')
+  const end = candidate.lastIndexOf('}')
+  if (start < 0 || end <= start) throw new Error('AI 没有返回 JSON')
+  return JSON.parse(candidate.slice(start, end + 1))
+}
+
+function weekdayName(dateString) {
+  const [year, month, day] = String(dateString).split('-').map(Number)
+  const name = ['日', '一', '二', '三', '四', '五', '六'][new Date(year, month - 1, day).getDay()]
+  return '星期' + name
+}
+
+/**
+ * AI 待办解析：把自然语言解析成待办草稿（不直接入库，返回给面板/命令确认）。
+ */
+export async function parseTodoDrafts(config, args = {}) {
+  if (!config.ai.baseUrl || !config.ai.model) throw new Error('还没有配置 AI 接口（baseUrl/model）')
+  const text = String(args.text || '').trim()
+  if (!text) throw new Error('需要解析的文本不能为空')
+  const batch = args.mode === 'batch'
+  const today = localDate()
+  const system = [
+    '你是待办解析助手。把用户文本解析成待办 JSON，只输出 JSON，不要输出其他文字。',
+    '格式：{"todos":[{"title":"一句话标题","pri":"高|中|低或空","due":"YYYY-MM-DD或空","repeat":"daily|weekly:0-6|monthly:1-28或空","tags":["标签"]}]}',
+    '今天是 ' + today + '（' + weekdayName(today) + '）。时间规则：周五→最近的周五、下周一→下周、月底→本月最后一天、N天后→今天+N；没有时间信息 due 留空。',
+    '每天/每日→daily；每周X→weekly:X（0=周日）；每月X号→monthly:X（1-28）。',
+    '紧急/尽快/马上→高；不急/有空时→低；#词 提取为 tags（去掉#号）。',
+    'title 不要包含日期、优先级、#标签记号。',
+    batch ? '把文本拆成多条相互独立的待办。' : '只解析出 1 条待办。',
+    '只依据文本内容，不要编造。',
+  ].join('\n')
+  const result = await aiComplete(config, system, text, { kind: 'todo' })
+  const data = extractJson(result.text)
+  const list = Array.isArray(data.todos) ? data.todos : []
+  const drafts = []
+  for (const item of list.slice(0, batch ? 10 : 1)) {
+    try {
+      drafts.push(cleanTodoDraft(item))
+    } catch {
+      /* skip malformed draft entries */
+    }
+  }
+  if (!drafts.length) throw new Error('AI 没有解析出有效待办，请换个说法或手动添加')
+  return { drafts, mode: batch ? 'batch' : 'one' }
+}
+
+/**
+ * AI 每日建议：从进行中的待办里挑今天最值得做的 3 件要事（带一句话理由）。
+ */
+export async function suggestTopTodos(config) {
+  if (!config.ai.baseUrl || !config.ai.model) throw new Error('还没有配置 AI 接口（baseUrl/model）')
+  const today = localDate()
+  const open = sortTodos(
+    (await loadTodos(config)).filter((todo) => todo.status !== 'done'),
+    today,
+  ).slice(0, 30)
+  if (!open.length) return { picks: [], note: '没有进行中的待办' }
+  const lines = open.map(
+    (todo, index) =>
+      (index + 1) +
+      '. ' +
+      todo.title +
+      ' | 优先级:' +
+      (todo.pri || '无') +
+      ' | 到期:' +
+      (todo.due || '无') +
+      ' | 已顺延:' +
+      (todo.carries || 0) +
+      '次 | 标签:' +
+      ((todo.tags || []).join(',') || '无') +
+      ' | id:' +
+      todo.id,
+  )
+  const system = [
+    '你是每日计划助手。从待办列表中选出今天最值得做的 3 件要事，只输出 JSON：{"picks":[{"id":"待办id","reason":"一句话理由"}]}。',
+    '选择规则：逾期且顺延次数多的优先，其次高优先级，再次到期日临近；理由要具体到待办内容。',
+    '只输出 JSON，不要输出其他文字。',
+  ].join('\n')
+  const result = await aiComplete(config, system, lines.join('\n'), { kind: 'todo' })
+  const data = extractJson(result.text)
+  const picks = (Array.isArray(data.picks) ? data.picks : [])
+    .map((pick) => {
+      const todo = open.find((item) => item.id === pick?.id)
+      if (!todo) return null
+      return {
+        id: todo.id,
+        title: todo.title,
+        pri: todo.pri,
+        due: todo.due,
+        carries: todo.carries || 0,
+        reason: String(pick.reason || '').slice(0, 80),
+      }
+    })
+    .filter(Boolean)
+    .slice(0, 3)
+  return { picks }
+}
+
 export async function todoAction(config, args = {}) {
   const action = args.action || 'list'
   if (action === 'list') {
@@ -176,6 +281,8 @@ export async function todoAction(config, args = {}) {
   if (action === 'clear_done') return clearDoneTodos(config)
   if (action === 'carry_over') return carryOverTodos(config, { date: args.date || localDate() })
   if (action === 'stats') return getTodoStats(config)
+  if (action === 'parse') return parseTodoDrafts(config, args)
+  if (action === 'suggest') return suggestTopTodos(config)
   throw new Error(`未知 action: ${action}`)
 }
 

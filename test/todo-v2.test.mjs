@@ -3,6 +3,7 @@
  * stats, update/carry_over/stats actions, archive integration, report section.
  */
 import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -255,5 +256,63 @@ describe('todos v2 m2', () => {
     const byTag = await api.todoAction(config, { action: 'list', tag: '周报' })
     assert.ok(byTag.some((todo) => todo.title === '带标签任务'))
     assert.ok(byTag.every((todo) => todo.tags.includes('周报')))
+  })
+})
+
+describe('todos v2 ai actions', () => {
+  it('parse/suggest work against a mock AI endpoint and record usage kind todo', async () => {
+    const server = createServer((req, res) => {
+      let body = ''
+      req.on('data', (chunk) => {
+        body += chunk
+      })
+      req.on('end', () => {
+        const payload = JSON.parse(body)
+        const isParse = String(payload.messages?.[0]?.content || payload.system || '').includes('待办解析助手')
+        const content = isParse
+          ? '{"todos":[{"title":"发周报","pri":"高","due":"2026-11-06","repeat":"","tags":["周报"]},{"title":"  ","pri":"高"}]}'
+          : '{"picks":[{"id":"pick-me","reason":"逾期且顺延多次"},{"id":"missing","reason":"应被过滤"}]}'
+        res.setHeader('content-type', 'application/json')
+        res.end(
+          JSON.stringify({
+            choices: [{ message: { content } }],
+            usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+          }),
+        )
+      })
+    })
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = server.address().port
+    const { saveConfig } = await import('../lib/config.mjs')
+    saveConfig({ ai: { baseUrl: 'http://127.0.0.1:' + port + '/v1', model: 'mock', apiFormat: 'openai' } })
+    try {
+      const fresh = loadConfig()
+      const parsed = await api.todoAction(fresh, { action: 'parse', text: '周五前发周报', mode: 'batch' })
+      assert.equal(parsed.drafts.length, 1, 'empty-title draft is dropped')
+      assert.equal(parsed.drafts[0].title, '发周报')
+      assert.equal(parsed.drafts[0].due, '2026-11-06')
+      assert.deepEqual(parsed.drafts[0].tags, ['周报'])
+
+      await store.saveTodos(config, [
+        { id: 'pick-me', title: '老拖延', pri: '高', due: '2026-10-30', extra: { carries: 3 } },
+      ])
+      const suggestion = await api.todoAction(fresh, { action: 'suggest' })
+      assert.equal(suggestion.picks.length, 1, 'picks are filtered to open todos')
+      assert.equal(suggestion.picks[0].id, 'pick-me')
+      assert.equal(suggestion.picks[0].reason, '逾期且顺延多次')
+
+      const state = await store.loadState(config)
+      assert.equal(state.aiUsage[0].kind, 'todo')
+    } finally {
+      server.close()
+      saveConfig({ ai: { baseUrl: '', model: '', clearApiKey: true } })
+    }
+  })
+
+  it('parse fails fast without AI config', async () => {
+    await assert.rejects(
+      () => api.todoAction(loadConfig(), { action: 'parse', text: 'x' }),
+      /还没有配置 AI/,
+    )
   })
 })
