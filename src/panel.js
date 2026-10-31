@@ -84,6 +84,8 @@ const state = {
   calMonth: '',
   calData: null,
   calSelected: '',
+  calMode: 'month',
+  calAnchor: '',
   calDay: null,
   calDayLoading: false,
   wizardTypes: null,
@@ -2592,16 +2594,43 @@ function calCell(day, today) {
   )
 }
 
+function weekDatesOf(anchor) {
+  const base = new Date(anchor)
+  const lead = (base.getDay() + 6) % 7
+  const monday = new Date(base)
+  monday.setDate(monday.getDate() - lead)
+  const list = []
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday)
+    d.setDate(d.getDate() + i)
+    const pad = (n) => String(n).padStart(2, '0')
+    list.push(d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()))
+  }
+  return list
+}
+
 function calGrid() {
   const data = state.calData
   if (!data) return h('div', { className: 'wl-hint' }, '加载中…')
   const days = data.days || {}
-  const first = data.month + '-01'
-  const lead = (new Date(first).getDay() + 6) % 7
-  const cells = []
-  for (let i = 0; i < lead; i++) cells.push(h('span', { className: 'wl-cal-cell empty' }, ''))
   const now = data.today
-  for (const date of Object.keys(days)) cells.push(calCell(days[date], now))
+  let cells = []
+  if (state.calMode === 'week') {
+    const anchor = state.calAnchor || now
+    const week = weekDatesOf(anchor)
+    const missing = week.some((date) => !days[date])
+    if (missing) {
+      // cross-month week: pull the neighbouring month, then re-render
+      loadCalMonth(week[3].slice(0, 7))
+      return h('div', { className: 'wl-hint' }, '加载中…')
+    }
+    cells = week.map((date) => calCell(days[date], now))
+  } else {
+    const first = data.month + '-01'
+    const lead = (new Date(first).getDay() + 6) % 7
+    for (let i = 0; i < lead; i++) cells.push(h('span', { className: 'wl-cal-cell empty' }, ''))
+    for (const date of Object.keys(days)) cells.push(calCell(days[date], now))
+  }
   return h(
     'div',
     { className: 'wl-cal-grid' },
@@ -2782,19 +2811,53 @@ function scheduleTab() {
           {
             className: 'wl-btn tiny',
             disabled: state.calDataLoading,
-            onClick: () => loadCalMonth(calKey(String(Number(state.calMonth.slice(0, 4))) - 1 + state.calMonth.slice(4))),
+            onClick: () => {
+              if (state.calMode === 'week') {
+                const d = new Date(state.calAnchor || data?.today || today())
+                d.setDate(d.getDate() - 7)
+                const pad = (n) => String(n).padStart(2, '0')
+                state.calAnchor = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+                if (state.calAnchor.slice(0, 7) !== state.calMonth) loadCalMonth(state.calAnchor.slice(0, 7))
+                else render()
+              } else loadCalMonth(calKey(String(Number(state.calMonth.slice(0, 4))) - 1 + state.calMonth.slice(4)))
+            },
           },
           '◀',
         ),
-        h('div', { className: 'wl-section-title' }, state.calMonth),
+        h('div', { className: 'wl-section-title' }, state.calMode === 'week' ? (state.calAnchor || data?.today || today()).slice(5) + ' 起的一周' : state.calMonth),
+        h(
+          'button',
+          {
+            className: 'wl-btn tiny' + (state.calMode === 'week' ? '' : ' primary'),
+            onClick: () => { state.calMode = 'month'; state.calAnchor = ''; render() },
+          },
+          '月',
+        ),
+        h(
+          'button',
+          {
+            className: 'wl-btn tiny' + (state.calMode === 'week' ? ' primary' : ''),
+            onClick: () => { state.calMode = 'week'; if (!state.calAnchor) state.calAnchor = data?.today || today(); render() },
+          },
+          '周',
+        ),
         h(
           'button',
           {
             className: 'wl-btn tiny',
             disabled: state.calDataLoading,
             onClick: () => {
-              const y = Number(state.calMonth.slice(0, 4))
-              loadCalMonth(calKey(y + 1 + state.calMonth.slice(4)))
+              if (state.calMode === 'week') {
+                const d = new Date(state.calAnchor || data?.today || today())
+                d.setDate(d.getDate() + 7)
+                const pad = (n) => String(n).padStart(2, '0')
+                state.calAnchor = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+                if (state.calAnchor.slice(0, 7) !== state.calMonth) loadCalMonth(state.calAnchor.slice(0, 7))
+                else render()
+              } else {
+                const y = Number(state.calMonth.slice(0, 4))
+                loadCalMonth(calKey(y + 1 + state.calMonth.slice(4)))
+              }
             },
           },
           '▶',

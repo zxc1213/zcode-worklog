@@ -316,7 +316,7 @@ var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.16.0";
+    PLUGIN_VERSION = "0.16.1";
   }
 });
 
