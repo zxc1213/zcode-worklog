@@ -44,8 +44,14 @@ import {
 import { askArchive, aiComplete, generateReport, listAiModels, summarizeAiUsage } from '../lib/report.mjs'
 import { detectAiCandidates, findAiCandidate, publicCandidate } from '../lib/ai-detect.mjs'
 import { listSessionSources, parseSessionLines, scanSessions } from '../lib/sessions.mjs'
+import { getHistory, getTasks, runDueTasks, updateTask } from '../lib/scheduler.mjs'
+import { scanWatchDirs } from '../lib/watch.mjs'
+import { probeAiTool, WIZARD_TYPES } from '../lib/wizard.mjs'
 
 export async function statusPayload(config = loadConfig()) {
+  // Panel open is one of the two scheduler trigger points (the other is the
+  // SessionStart hook); disabled tasks make this a cheap no-op.
+  await runDueTasks(config, { budgetMs: 3000 })
   const [days, todos, state, backups, projects] = await Promise.all([
     listDays(config),
     loadTodos(config),
@@ -245,6 +251,36 @@ export async function suggestTopTodos(config) {
     .filter(Boolean)
     .slice(0, 3)
   return { picks }
+}
+
+export async function collectAction(config, args = {}) {
+  const action = args.action || 'diagnostics'
+  if (action === 'diagnostics') {
+    const [tasks, history, sources] = await Promise.all([
+      getTasks(config),
+      getHistory(config),
+      listSessionSources(config),
+    ])
+    const dirs = Array.isArray(config.watchDirs) ? config.watchDirs : []
+    return { tasks, history, sources, watchDirs: dirs }
+  }
+  if (action === 'scan_watch') return scanWatchDirs(config)
+  if (action === 'scan_sessions') {
+    const result = await scanSessions(config, localDate(), { force: true })
+    return { sessions: result?.sessions?.length || 0, errors: result?.errors || [] }
+  }
+  if (action === 'run') {
+    return runDueTasks(config, { force: true, id: args.id || '' })
+  }
+  if (action === 'set') return updateTask(config, args)
+  throw new Error(`未知 action: ${action}`)
+}
+
+export async function wizardAction(args = {}) {
+  const action = args.action || 'types'
+  if (action === 'types') return { types: WIZARD_TYPES }
+  if (action === 'probe') return probeAiTool(args)
+  throw new Error(`未知 action: ${action}`)
 }
 
 export async function todoAction(config, args = {}) {
@@ -451,6 +487,10 @@ export async function dispatch(op, args = {}) {
       return configAction(args)
     case 'ai':
       return aiAction(args)
+    case 'collect':
+      return collectAction(config, args)
+    case 'wizard':
+      return wizardAction(args)
     case 'days':
       return listDays(config)
     case 'reports':

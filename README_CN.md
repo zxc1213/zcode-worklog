@@ -139,7 +139,7 @@ zcode plugins install zcode-worklog@zcode-worklog
 
 ## Agent 工具
 
-`worklog_status`、`worklog_day`、`worklog_search`、`worklog_todos`、`worklog_archive`、`worklog_sessions`、`worklog_report`、`worklog_ask`、`worklog_projects`、`worklog_usage`、`worklog_backup`、`worklog_config`、`worklog_open`。
+`worklog_status`、`worklog_day`、`worklog_search`、`worklog_todos`、`worklog_archive`、`worklog_sessions`、`worklog_report`、`worklog_ask`、`worklog_projects`、`worklog_usage`、`worklog_backup`、`worklog_config`、`worklog_open`、`worklog_collect`（采集调度与诊断）、`worklog_wizard`（AI 工具配置向导）。
 
 工具名在会话里通常带 `mcp__plugin_zcode-worklog_worklog__` 前缀。
 
@@ -165,7 +165,7 @@ zcode plugins install zcode-worklog@zcode-worklog
 
 `SessionStart` 钩子会在会话开始时：
 
-- 注入一行状态（今天是否归档、待办数量与逾期数、最近归档日期）；
+- 注入一行状态（今天是否归档、待办数量与逾期数、最近归档日期）；会话启动时补偿执行到期的定时采集任务（AI 会话扫描、监控目录指纹）；
 - 如果 `autoArchive` 已开启且到点，顺带执行当天的自动归档（最多一次）。
 
 钩子失败不会阻塞会话，错误只写到 stderr。
@@ -177,7 +177,7 @@ zcode plugins install zcode-worklog@zcode-worklog
 ## 与旧版 / dsh-worklog 的区别
 
 - 独立维护，不依赖 WorkLog 的 Python 后端、Claude CLI、8377 端口。
-- 已实现：Git/文档归档、日志编辑/搜索、待办、确定性汇报、可选 AI 润色/问答、AI 会话汇总、备份、旧归档导入、自动归档、侧边面板。
+- 已实现：Git/文档归档、日志编辑/搜索、待办（子任务/标签/AI 助手）、确定性汇报、可选 AI 润色/问答、AI 会话汇总、备份、旧归档导入、自动归档、侧边面板、采集调度器（补偿式定时）、AI 工具配置向导、监控目录指纹扫描（本地/网盘/git）。
 - 尚未实现：Cursor/Trae/Windsurf 的 VS Code 数据库会话扫描、Word/Excel 导出、绩效模板 Excel 还原、飞书工时、业务流程图。后续可以按需从 dsh-worklog 继续移植。
 
 ## 开发

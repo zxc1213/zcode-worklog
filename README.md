@@ -135,7 +135,7 @@ Day-file format:
 
 ## Agent tools
 
-`worklog_status`, `worklog_day`, `worklog_search`, `worklog_todos`, `worklog_archive`, `worklog_sessions`, `worklog_report`, `worklog_ask`, `worklog_projects`, `worklog_usage`, `worklog_backup`, `worklog_config`, `worklog_open`.
+`worklog_status`, `worklog_day`, `worklog_search`, `worklog_todos`, `worklog_archive`, `worklog_sessions`, `worklog_report`, `worklog_ask`, `worklog_projects`, `worklog_usage`, `worklog_backup`, `worklog_config`, `worklog_open`, `worklog_collect` (collection scheduler & diagnostics), `worklog_wizard` (AI tool config wizard).
 
 Session tool names are usually prefixed with `mcp__plugin_zcode-worklog_worklog__`.
 
@@ -167,7 +167,7 @@ Use the panel's **Settings → Import from old WorkLog** with the old install di
 
 ## Scope
 
-Implemented: Git/document archiving, log editing/search, todos, deterministic reports, optional AI polish/Q&A, AI session digest, backups, old archive import, auto-archive, side panel.
+Implemented: Git/document archiving, log editing/search, todos (subtasks/tags/AI assistant), deterministic reports, optional AI polish/Q&A, AI session digest, backups, old archive import, auto-archive, side panel, compensating collection scheduler, AI tool config wizard, watched-dir fingerprint scanning (local/cloud/git).
 
 Not implemented: Cursor/Trae/Windsurf VS Code database session scanning, Word/Excel export, performance template restoration, Feishu timesheets, business flow diagrams.
 

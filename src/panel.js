@@ -79,6 +79,11 @@ const state = {
   todoSuggest: null,
   todoBatch: { open: false, drafts: null, checked: [] },
   aiDraft: null,
+  schedData: null,
+  schedLoading: false,
+  wizardTypes: null,
+  wizardDraft: { type: 'claude', location: '' },
+  wizardProbe: null,
   reports: [],
   backups: [],
   config: null,
@@ -97,7 +102,7 @@ const state = {
   aiModels: [],
   aiModelsBusy: false,
   aiModelsNote: '',
-  settingsOpen: { data: false, ai: false, backup: false, import: false },
+  settingsOpen: { data: false, ai: false, backup: false, import: false, sched: false, wizard: false },
 }
 
 function h(tag, props = {}, ...children) {
@@ -165,6 +170,7 @@ function draftFromConfig(config) {
     scanRoots: (c.scanRoots || []).join('\n'),
     docRoots: (c.docRoots || []).join('\n'),
     sessionRoots: (c.sessionRoots || []).join('\n'),
+    watchDirsText: (c.watchDirs || []).map(function (item) { return typeof item === 'string' ? item : item.path + (item.kind && item.kind !== 'local' ? '|'+item.kind : '') }).join('\n'),
     gitAuthor: c.gitAuthor || '',
     git: c.sources?.git !== false,
     docs: c.sources?.docs !== false,
@@ -1827,6 +1833,7 @@ async function saveSettings() {
       scanRoots: splitLines(draft.scanRoots),
       docRoots: splitLines(draft.docRoots),
       sessionRoots: splitLines(draft.sessionRoots),
+      watchDirs: splitLines(draft.watchDirsText).map(function (line) { const seg = line.split('|'); const path = (seg[0] || '').trim(); const kind = ['local','cloud','git'].indexOf((seg[1] || '').trim()) >= 0 ? seg[1].trim() : 'local'; return { path: path, kind: kind } }).filter(function (item) { return item.path }),
       gitAuthor: draft.gitAuthor,
       sources: { git: draft.git, docs: draft.docs, sessions: draft.sessions },
       autoArchive: draft.autoArchive,
@@ -2147,6 +2154,335 @@ function settingsTab() {
         ),
       ),
     ),
+    schedSection(),
+    wizardSection(),
+  )
+}
+
+async function loadSched() {
+  if (state.schedData) return
+  state.schedLoading = true
+  render()
+  try {
+    state.schedData = await call('collect', { action: 'diagnostics' })
+  } catch (error) {
+    setNotice('err', '采集诊断与调度加载失败：' + String(error?.message || error))
+  } finally {
+    state.schedLoading = false
+  }
+}
+
+function refreshSched(next) {
+  return act('sched', async () => {
+    await next()
+    state.schedData = await call('collect', { action: 'diagnostics' })
+  })
+}
+
+function taskRow(task) {
+  return h(
+    'div',
+    { style: { marginTop: '6px' }, key: task.id },
+    h(
+      'div',
+      { className: 'wl-row' },
+      h('input', {
+        className: 'wl-check',
+        type: 'checkbox',
+        checked: Boolean(task.enabled),
+        onChange: () => refreshSched(() => call('collect', { action: 'set', id: task.id, enabled: !task.enabled })),
+      }),
+      h(
+        'div',
+        { className: 'grow' },
+        h('div', { className: 'wl-item-title' }, task.title),
+        h('div', { className: 'wl-item-meta' }, task.description),
+        h(
+          'div',
+          { className: 'wl-item-meta' },
+          '间隔 ' + (Number(task.everyHours) || 0) + ' 小时',
+          task.dailyAt ? ' · 每天 ' + task.dailyAt + ' 后' : '',
+          task.lastRunAt ? ' · 上次 ' + String(task.lastRunAt).slice(5, 16).replace('T', ' ') : ' · 未运行',
+          task.lastStatus === 'ok' ? ' · ✅' : task.lastStatus === 'error' ? ' · ❌ ' + (task.lastError || '') : '',
+        ),
+      ),
+      h('input', {
+        className: 'wl-input',
+        type: 'number',
+        min: 0,
+        step: 1,
+        value: task.everyHours,
+        style: { width: '58px' },
+        title: '间隔小时数，0=不按间隔',
+        onChange: (event) =>
+          refreshSched(() =>
+            call('collect', { action: 'set', id: task.id, everyHours: Number(event.target.value) || 0 }),
+          ),
+      }),
+      h('input', {
+        className: 'wl-input',
+        type: 'time',
+        value: task.dailyAt || '',
+        style: { width: '96px' },
+        title: '每天固定时间（可选）',
+        onChange: (event) => refreshSched(() => call('collect', { action: 'set', id: task.id, dailyAt: event.target.value })),
+      }),
+      h(
+        'button',
+        {
+          className: 'wl-btn tiny',
+          disabled: state.busy === 'sched',
+          onClick: () => refreshSched(() => call('collect', { action: 'run', id: task.id })),
+        },
+        '立即运行',
+      ),
+    ),
+  )
+}
+
+function schedSection() {
+  const open = Boolean(state.settingsOpen.sched)
+  if (open) loadSched().then(render)
+  const data = state.schedData
+  const tasks = data?.tasks || []
+  const sources = data?.sources || []
+  const history = data?.history || []
+  return h(
+    'div',
+    { className: `wl-fold${open ? ' open' : ''}` },
+    h(
+      'button',
+      {
+        className: 'wl-fold-head',
+        type: 'button',
+        onClick: () => {
+          state.settingsOpen.sched = !open
+          render()
+        },
+      },
+      h('span', { className: 'wl-fold-caret' }, open ? '▾' : '▸'),
+      h('span', { className: 'wl-fold-title' }, '采集调度与诊断'),
+      h('span', { className: 'wl-hint' }, '定时采集 / 来源健康 / 监控目录'),
+    ),
+    open
+      ? h(
+          'div',
+          { className: 'wl-fold-body' },
+          state.schedLoading && !data
+            ? h('div', { className: 'wl-hint' }, '加载中…')
+            : [
+                h(
+                  'div',
+                  { className: 'wl-row' },
+                  h(
+                    'button',
+                    {
+                      className: 'wl-btn',
+                      disabled: state.busy === 'sched',
+                      onClick: () => refreshSched(() => call('collect', { action: 'run' })),
+                    },
+                    '运行所有到期任务',
+                  ),
+                  h(
+                    'button',
+                    {
+                      className: 'wl-btn',
+                      disabled: state.busy === 'sched',
+                      onClick: () => refreshSched(() => call('collect', { action: 'scan_sessions' })),
+                    },
+                    '立即扫描会话',
+                  ),
+                  h(
+                    'button',
+                    {
+                      className: 'wl-btn',
+                      disabled: state.busy === 'sched',
+                      onClick: () => refreshSched(() => call('collect', { action: 'scan_watch' })),
+                    },
+                    '立即扫描目录',
+                  ),
+                ),
+                h('div', { className: 'wl-section-title', style: { marginTop: '8px' } }, '调度任务'),
+                tasks.length ? tasks.map(taskRow) : h('div', { className: 'wl-hint' }, '无任务'),
+                h('div', { className: 'wl-section-title', style: { marginTop: '8px' } }, '会话来源'),
+                sources.map((source) =>
+                  h(
+                    'div',
+                    { className: 'wl-row', key: source.id + source.path },
+                    h('span', { className: 'wl-tag' }, source.label),
+                    h('span', { className: 'grow wl-hint', style: { wordBreak: 'break-all' } }, source.path),
+                    h('span', { className: source.exists ? 'wl-hint' : 'wl-carry' }, source.exists ? '✓' : '✗'),
+                  ),
+                ),
+                h('div', { className: 'wl-section-title', style: { marginTop: '8px' } }, '监控目录'),
+                (data?.watchDirs || []).length
+                  ? data.watchDirs.map((dir) =>
+                      h(
+                        'div',
+                        { className: 'wl-row', key: dir.path },
+                        h('span', { className: 'wl-tag' }, dir.kind),
+                        h('span', { className: 'grow wl-hint', style: { wordBreak: 'break-all' } }, dir.path),
+                      ),
+                    )
+                  : h(
+                      'div',
+                      { className: 'wl-hint' },
+                      '在「数据与扫描」里加监控目录：每行一条，格式 路径 或 路径|cloud 或 路径|git',
+                    ),
+                history.length
+                  ? [
+                      h('div', { className: 'wl-section-title', style: { marginTop: '8px' } }, '最近调度历史'),
+                      history.slice(0, 8).map((item) =>
+                        h(
+                          'div',
+                          { className: 'wl-row', key: item.at },
+                          h('span', { className: 'wl-hint' }, String(item.at).slice(5, 16).replace('T', ' ')),
+                          h('span', { className: 'grow wl-hint' }, item.title || item.id),
+                          h(
+                            'span',
+                            { className: item.status === 'ok' ? 'wl-hint' : 'wl-carry' },
+                            item.status +
+                              (item.sessions !== undefined ? ' ' + item.sessions + ' 场' : '') +
+                              (item.changed !== undefined ? ' 变化 ' + item.changed : ''),
+                          ),
+                        ),
+                      ),
+                    ]
+                  : null,
+              ],
+        )
+      : null,
+  )
+}
+
+function wizardSection() {
+  const open = Boolean(state.settingsOpen.wizard)
+  const draft = state.wizardDraft
+  const probe = state.wizardProbe
+  if (open && !state.wizardTypes && !state.wizardTypesLoading) {
+    state.wizardTypesLoading = true
+    call('wizard', { action: 'types' })
+      .then((result) => {
+        state.wizardTypes = result?.types || []
+      })
+      .catch(() => {
+        state.wizardTypes = []
+      })
+      .finally(() => {
+        state.wizardTypesLoading = false
+        render()
+      })
+  }
+  return h(
+    'div',
+    { className: `wl-fold${open ? ' open' : ''}` },
+    h(
+      'button',
+      {
+        className: 'wl-fold-head',
+        type: 'button',
+        onClick: () => {
+          state.settingsOpen.wizard = !open
+          render()
+        },
+      },
+      h('span', { className: 'wl-fold-caret' }, open ? '▾' : '▸'),
+      'AI 工具配置向导',
+      h('span', { className: 'wl-hint' }, '按位置探测并一键应用'),
+    ),
+    open
+      ? h(
+          'div',
+          { className: 'wl-fold-body' },
+          h(
+            'div',
+            { className: 'wl-row', style: { marginTop: '6px' } },
+            h(
+              'select',
+              {
+                className: 'wl-select',
+                style: { width: '150px' },
+                value: draft.type,
+                onChange: (event) => {
+                  draft.type = event.target.value
+                  state.wizardProbe = null
+                  render()
+                },
+              },
+              (state.wizardTypes || []).length
+                ? state.wizardTypes.map((item) =>
+                    h('option', { value: item.type, selected: draft.type === item.type }, item.title),
+                  )
+                : h('option', { value: draft.type }, draft.type),
+            ),
+            h('input', {
+              className: 'wl-input',
+              placeholder: '位置（可选，默认扫标准路径）',
+              value: draft.location,
+              onInput: (event) => {
+                draft.location = event.target.value
+              },
+            }),
+            h(
+              'button',
+              {
+                className: 'wl-btn',
+                disabled: state.busy === 'wizard',
+                onClick: () =>
+                  act('wizard', async () => {
+                    state.wizardProbe = await call('wizard', { action: 'probe', type: draft.type, location: draft.location })
+                    if (!state.wizardProbe.ok) setNotice('err', state.wizardProbe.error || '探测失败')
+                  }),
+              },
+              '探测',
+            ),
+          ),
+          probe && probe.ok && probe.type === 'custom'
+            ? h(
+                'div',
+                { className: 'wl-hint', style: { marginTop: '6px' } },
+                '文件数 ' + probe.custom.fileCount + '。' + (probe.custom.note || ''),
+              )
+            : null,
+          probe && probe.ok && probe.type !== 'custom'
+            ? (probe.candidates || []).map((candidate) =>
+                h(
+                  'div',
+                  { className: 'wl-item', key: candidate.id, style: { marginTop: '6px' } },
+                  h(
+                    'div',
+                    { className: 'grow' },
+                    h('div', { className: 'wl-item-title' }, candidate.name || candidate.id),
+                    h(
+                      'div',
+                      { className: 'wl-item-meta' },
+                      candidate.baseUrl,
+                      ' · 模型 ' + (candidate.modelsCount || 0) + ' 个',
+                      candidate.model ? ' · 当前 ' + candidate.model : '',
+                      ' · Key ' + (candidate.hasKey ? '已配置 ' + (candidate.keyHint || '') : '未配置'),
+                    ),
+                    candidate.note ? h('div', { className: 'wl-item-meta' }, candidate.note) : null,
+                  ),
+                  h(
+                    'button',
+                    {
+                      className: 'wl-btn primary tiny',
+                      disabled: state.busy === 'wizard-apply',
+                      onClick: () =>
+                        act('wizard-apply', async () => {
+                          await call('ai', { action: 'apply', id: candidate.id })
+                          setNotice('ok', '已应用：' + (candidate.name || candidate.id))
+                        }),
+                    },
+                    '应用',
+                  ),
+                ),
+              )
+            : null,
+          probe && probe.ok && probe.hint ? h('div', { className: 'wl-hint', style: { marginTop: '4px' } }, probe.hint) : null,
+          probe && !probe.ok ? h('div', { className: 'wl-carry', style: { marginTop: '6px' } }, probe.error || '探测失败') : null,
+        )
+      : null,
   )
 }
 

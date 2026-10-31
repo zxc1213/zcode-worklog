@@ -16,7 +16,9 @@ import { composePanelHtml } from '../lib/panel.mjs'
 import {
   archiveAction,
   backupAction,
+  collectAction,
   configAction,
+  wizardAction,
   dayAction,
   dispatch,
   maybeAutoArchive,
@@ -257,6 +259,38 @@ tool(
 )
 
 tool(
+  'worklog_collect',
+  {
+    title: '采集与调度',
+    description:
+      'WorkLog 采集与调度：action=diagnostics 查看采集来源健康/调度任务/监控目录；action=run {id?} 立即执行调度任务（collect-sessions 扫描 AI 会话、collect-watch 扫描监控目录）；action=set {id, enabled, everyHours?, dailyAt?} 修改任务开关与间隔；action=scan_watch/scan_sessions 单独触发对应扫描。开始排查采集问题时先调 diagnostics。',
+    inputSchema: z.object({
+      action: z.enum(['diagnostics', 'run', 'set', 'scan_watch', 'scan_sessions']).optional(),
+      id: z.string().optional(),
+      enabled: z.boolean().optional(),
+      everyHours: z.number().optional(),
+      dailyAt: z.string().optional(),
+    }),
+  },
+  (args) => collectAction(loadConfig(), args),
+)
+
+tool(
+  'worklog_wizard',
+  {
+    title: 'AI 工具配置向导',
+    description:
+      'WorkLog AI 工具配置向导：action=types 列出可引导配置的工具类型（claude/codex/dsh/zcode/gemini/custom）；action=probe {type, location?} 按位置探测该工具的本机配置详情（模型列表数、接口地址、Key 是否配置及掩码），不返回 Key 明文；探测结果确认后用 worklog_config 或 worklog_ai（action=apply, id=候选id）应用。',
+    inputSchema: z.object({
+      action: z.enum(['types', 'probe']).optional(),
+      type: z.string().optional(),
+      location: z.string().optional(),
+    }),
+  },
+  (args) => wizardAction(args),
+)
+
+tool(
   'worklog_config',
   {
     title: 'WorkLog 配置',
@@ -306,6 +340,8 @@ server.registerTool(
         'backup',
         'config',
         'ai',
+        'collect',
+        'wizard',
       ]),
       args: z.record(z.string(), z.unknown()).optional(),
     }),

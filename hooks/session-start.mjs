@@ -7,6 +7,7 @@
  */
 import { archiveDir, loadConfig, localDate, pluginHome } from '../lib/config.mjs'
 import { listDays, loadState, loadTodos, sortTodos } from '../lib/store.mjs'
+import { runDueTasks } from '../lib/scheduler.mjs'
 import { maybeAutoArchive } from '../src/api.mjs'
 
 const dataDirArg = process.argv[2]
@@ -56,6 +57,25 @@ try {
     autoNote = `（自动归档失败：${String(error?.message || error)}）`
   }
 
+  // Second half of the compensating scheduler: the hook is the reliable
+  // trigger point. Disabled tasks make this a cheap no-op; a single failing
+  // task is reported in the status line, never fatal.
+  let schedNote = ''
+  try {
+    const scheduled = await runDueTasks(config, { budgetMs: 5000 })
+    const okRan = scheduled.ran.filter((item) => item.status === 'ok')
+    const errRan = scheduled.ran.filter((item) => item.status === 'error')
+    if (okRan.length) {
+      const detail = okRan
+        .map((item) => (item.sessions !== undefined ? `${item.title} ${item.sessions} 场` : item.title))
+        .join('、')
+      schedNote = `（定时采集：${detail}）`
+    }
+    if (errRan.length) schedNote += `（定时任务失败 ${errRan.length} 项）`
+  } catch (hookError) {
+    schedNote = `（定时任务异常：${String(hookError?.message || hookError)}）`
+  }
+
   const today = localDate()
   const [days, todos, state] = await Promise.all([
     listDays(config),
@@ -86,6 +106,7 @@ try {
   }
   if (state.lastAutoDate) parts.push(`上次自动归档 ${state.lastAutoDate}`)
   if (autoNote) parts.push(autoNote)
+  if (schedNote) parts.push(schedNote)
 
   const hint = archivedToday
     ? '需要补充日志、生成汇报或管理待办时，调用 worklog_* 工具或打开 WorkLog 面板。'
