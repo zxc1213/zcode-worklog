@@ -6,7 +6,7 @@
  * Usage: node session-start.mjs [pluginDataDir]
  */
 import { archiveDir, loadConfig, localDate, pluginHome } from '../lib/config.mjs'
-import { listDays, loadState, loadTodos } from '../lib/store.mjs'
+import { listDays, loadState, loadTodos, sortTodos } from '../lib/store.mjs'
 import { maybeAutoArchive } from '../src/api.mjs'
 
 const dataDirArg = process.argv[2]
@@ -72,10 +72,17 @@ try {
   ]
   if (!archivedToday && last) parts.push(`最近归档 ${last.date}`)
   if (last === undefined && !archivedToday) parts.push('还没有任何归档')
-  parts.push(`待办 ${open.length} 条进行中${overdue.length ? `（${overdue.length} 条逾期）` : ''}`)
+  parts.push(`待办 ${open.length} 条进行中${overdue.length ? `（${overdue.length} 条逾期，归档后自动顺延到今天）` : ''}`)
   if (open.length) {
-    const preview = open.slice(0, 3).map((todo) => todo.title).join('；')
-    parts.push(`例如：${preview}`)
+    // Smart order (overdue first) — same rule as the panel and worklog_todos list.
+    const preview = sortTodos(open, today)
+      .slice(0, 3)
+      .map((todo) => {
+        const carry = todo.carries >= 2 ? `（已顺延 ${todo.carries} 次）` : ''
+        return todo.title + carry
+      })
+      .join('；')
+    parts.push(`优先处理：${preview}`)
   }
   if (state.lastAutoDate) parts.push(`上次自动归档 ${state.lastAutoDate}`)
   if (autoNote) parts.push(autoNote)

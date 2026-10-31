@@ -34472,7 +34472,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 var PLUGIN_NAME = "zcode-worklog";
-var PLUGIN_VERSION = "0.2.6";
+var PLUGIN_VERSION = "0.3.0";
 function pluginHome() {
   const explicit = String(process.env.WORKLOG_HOME || "").trim();
   if (explicit) return resolve(explicit);
@@ -34739,9 +34739,9 @@ ${escapeScript(js)}
 
 // lib/archive.mjs
 import { execFile } from "node:child_process";
-import { existsSync as existsSync3 } from "node:fs";
-import { mkdir as mkdir2, readdir as readdir2, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
-import { basename, dirname as dirname2, extname, join as join3, relative, resolve as resolve2 } from "node:path";
+import { existsSync as existsSync4 } from "node:fs";
+import { mkdir as mkdir3, readdir as readdir3, stat as stat3, writeFile as writeFile3 } from "node:fs/promises";
+import { basename as basename2, dirname as dirname3, extname, join as join4, relative as relative2, resolve as resolve2 } from "node:path";
 import { promisify } from "node:util";
 
 // lib/sessions.mjs
@@ -35407,249 +35407,57 @@ function sessionMarkdownSection(result) {
   return lines;
 }
 
-// lib/archive.mjs
-var execFileAsync = promisify(execFile);
-var SKIP_DIRS = /* @__PURE__ */ new Set([
-  ".git",
-  "node_modules",
-  "dist",
-  "build",
-  "out",
-  "target",
-  "coverage",
-  ".next",
-  ".nuxt",
-  ".cache",
-  ".turbo",
-  "venv",
-  ".venv",
-  "__pycache__",
-  "AppData",
-  "Library",
-  "System32",
-  "WinSxS"
-]);
-var DOC_EXTS = /* @__PURE__ */ new Set([
-  ".md",
-  ".markdown",
-  ".txt",
-  ".doc",
-  ".docx",
-  ".xls",
-  ".xlsx",
-  ".ppt",
-  ".pptx",
-  ".pdf"
-]);
-function isSkippedDir(name) {
-  return SKIP_DIRS.has(name) || name.startsWith(".") && name !== ".";
-}
-async function walk(root, maxDepth, visitDir, visitFile) {
-  const base = resolve2(root);
-  if (!existsSync3(base)) return;
-  const queue = [{ dir: base, depth: 0 }];
-  let seen = 0;
-  while (queue.length) {
-    const { dir, depth } = queue.shift();
-    let entries;
-    try {
-      entries = await readdir2(dir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    await visitDir?.(dir, depth);
-    for (const entry of entries) {
-      const full = join3(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (depth < maxDepth && !isSkippedDir(entry.name)) queue.push({ dir: full, depth: depth + 1 });
-      } else if (entry.isFile()) {
-        seen += 1;
-        if (seen > 5e4) return;
-        await visitFile?.(full, entry);
-      }
-    }
-  }
-}
-async function git(repo, args, timeout = 2e4) {
-  const { stdout } = await execFileAsync("git", ["-C", repo, ...args], {
-    timeout,
-    windowsHide: true,
-    maxBuffer: 16 * 1024 * 1024
-  });
-  return String(stdout || "");
-}
-async function findGitRepos(roots = []) {
-  const repos = [];
-  for (const root of roots) {
-    await walk(root, 3, async (dir) => {
-      if (existsSync3(join3(dir, ".git"))) repos.push(dir);
-    });
-  }
-  return [...new Set(repos)];
-}
-async function scanGit(roots, dateString, author = "") {
-  const repos = await findGitRepos(roots);
-  const out = [];
-  const errors = [];
-  for (const repo of repos) {
-    try {
-      const currentAuthor = author || (await git(repo, ["config", "user.name"])).trim();
-      const args = [
-        "log",
-        `--since=${dateString} 00:00:00`,
-        `--until=${dateString} 23:59:59`,
-        "--all",
-        "--pretty=format:%h%x09%an%x09%s"
-      ];
-      if (currentAuthor) args.push(`--author=${currentAuthor}`);
-      const text = await git(repo, args);
-      const commits = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
-        const [hash2, commitAuthor, ...subject] = line.split("	");
-        return { hash: hash2, author: commitAuthor || "", subject: subject.join("	") };
-      });
-      if (commits.length) {
-        out.push({
-          name: basename(repo),
-          path: repo,
-          author: currentAuthor,
-          commits
-        });
-      }
-    } catch (error62) {
-      errors.push({ repo, error: String(error62?.message || error62) });
-    }
-  }
-  return { repos: out, errors };
-}
-async function scanDocs(roots, dateString) {
-  const files = [];
-  const errors = [];
-  for (const root of roots) {
-    try {
-      await walk(root, 6, null, async (full) => {
-        if (!DOC_EXTS.has(extname(full).toLowerCase())) return;
-        try {
-          const info = await stat2(full);
-          if (localDate(info.mtime) !== dateString) return;
-          files.push({
-            path: full,
-            relative: relative(root, full),
-            size: info.size,
-            mtime: info.mtime.toISOString(),
-            time: localTime(info.mtime)
-          });
-        } catch {
-        }
-      });
-    } catch (error62) {
-      errors.push({ root, error: String(error62?.message || error62) });
-    }
-  }
-  return { files, errors };
-}
-function sizeText(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-function buildDayMarkdown(dateString, gitResult, docResult, note = "", sessionResult = null) {
-  const repos = gitResult.repos || [];
-  const docs = docResult.files || [];
-  const sessions = sessionResult?.sessions || [];
-  const turns = sessionResult?.totals?.turns || 0;
-  const commitCount = repos.reduce((sum, repo) => sum + repo.commits.length, 0);
-  const lines = [
-    `# ${dateString} \u5DE5\u4F5C\u65E5\u5FD7`,
-    "",
-    `> \u81EA\u52A8\u5F52\u6863 \xB7 ${localTime()}`,
-    "",
-    "## \u4ECA\u65E5\u6982\u89C8",
-    "",
-    `- Git \u63D0\u4EA4\uFF1A${commitCount} \u4E2A\uFF0C\u6D89\u53CA ${repos.length} \u4E2A\u9879\u76EE`,
-    `- \u6587\u6863\u53D8\u66F4\uFF1A${docs.length} \u4E2A`,
-    ...sessionResult ? [`- AI \u4F1A\u8BDD\uFF1A${sessions.length} \u573A\uFF0C${turns} \u8F6E`] : [],
-    ""
-  ];
-  if (repos.length) {
-    lines.push("## \u9879\u76EE\u8FDB\u5C55", "");
-    for (const repo of repos) {
-      lines.push(`### ${repo.name}`, "");
-      for (const commit of repo.commits) {
-        lines.push(`- \`${commit.hash}\` ${commit.subject}${commit.author ? `\uFF08${commit.author}\uFF09` : ""}`);
-      }
-      lines.push("");
-    }
-  } else {
-    lines.push("## \u9879\u76EE\u8FDB\u5C55", "", "\u4ECA\u5929\u6CA1\u6709\u626B\u63CF\u5230 Git \u63D0\u4EA4\u3002", "");
-  }
-  if (docs.length) {
-    lines.push("## \u6587\u6863\u53D8\u66F4", "");
-    for (const doc of docs) {
-      lines.push(`- \`${doc.relative || basename(doc.path)}\` \xB7 ${doc.time} \xB7 ${sizeText(doc.size)}`);
-    }
-    lines.push("");
-  } else {
-    lines.push("## \u6587\u6863\u53D8\u66F4", "", "\u4ECA\u5929\u6CA1\u6709\u626B\u63CF\u5230\u6587\u6863\u53D8\u66F4\u3002", "");
-  }
-  if (sessionResult) lines.push(...sessionMarkdownSection(sessionResult));
-  lines.push("## \u5907\u6CE8", "", note.trim() || "\uFF08\u53EF\u5728\u6B64\u8865\u5145\u4ECA\u5929\u7684\u5DE5\u4F5C\u8BF4\u660E\uFF09", "");
-  return lines.join("\n");
-}
-async function archiveDay(config2, dateString, { force = false, note = "" } = {}) {
-  const target = dayFile(config2, dateString);
-  if (!force && existsSync3(target)) {
-    return { date: dateString, path: target, created: false, existing: true };
-  }
-  const [gitResult, docResult, sessionResult] = await Promise.all([
-    config2.sources?.git === false ? Promise.resolve({ repos: [], errors: [] }) : scanGit(scanRootsOf(config2), dateString, config2.gitAuthor || ""),
-    config2.sources?.docs === false ? Promise.resolve({ files: [], errors: [] }) : scanDocs(docRootsOf(config2), dateString),
-    config2.sources?.sessions === false ? Promise.resolve(null) : scanSessions(config2, dateString).catch((error62) => ({
-      sessions: [],
-      totals: { sessions: 0, turns: 0 },
-      errors: [{ source: "sessions", error: String(error62?.message || error62) }]
-    }))
-  ]);
-  const text = buildDayMarkdown(dateString, gitResult, docResult, note, sessionResult);
-  await mkdir2(dirname2(target), { recursive: true });
-  await writeFile2(target, text, "utf8");
-  return {
-    date: dateString,
-    path: target,
-    created: true,
-    existing: false,
-    text,
-    commitCount: gitResult.repos.reduce((sum, repo) => sum + repo.commits.length, 0),
-    repoCount: gitResult.repos.length,
-    docCount: docResult.files.length,
-    sessionCount: sessionResult?.sessions?.length || 0,
-    turnCount: sessionResult?.totals?.turns || 0,
-    repos: gitResult.repos.map((repo) => ({
-      name: repo.name,
-      path: repo.path,
-      commits: repo.commits.length
-    })),
-    errors: [...gitResult.errors, ...docResult.errors, ...sessionResult?.errors || []]
-  };
-}
-async function archiveDays(config2, dates, options = {}) {
-  const results = [];
-  for (const dateString of dates) {
-    try {
-      results.push(await archiveDay(config2, dateString, options));
-    } catch (error62) {
-      results.push({ date: dateString, error: String(error62?.message || error62) });
-    }
-  }
-  return results;
-}
-
 // lib/store.mjs
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync4 } from "node:fs";
-import { cp, mkdir as mkdir3, readdir as readdir3, readFile as readFile2, stat as stat3, unlink, writeFile as writeFile3 } from "node:fs/promises";
-import { basename as basename2, dirname as dirname3, join as join4, relative as relative2 } from "node:path";
+import { existsSync as existsSync3 } from "node:fs";
+import { cp, mkdir as mkdir2, readdir as readdir2, readFile as readFile2, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
+import { basename, dirname as dirname2, join as join3, relative } from "node:path";
 var MAX_SEARCH_HITS = 50;
 var MAX_SNIPPET = 180;
+var PRI_VALUES = ["\u9AD8", "\u4E2D", "\u4F4E"];
+var PRI_RANK = { \u9AD8: 0, \u4E2D: 1, \u4F4E: 2 };
+var MAX_TAGS = 8;
+var MAX_SUBTASKS = 20;
+function cleanTags(input2) {
+  const list = Array.isArray(input2) ? input2 : String(input2 || "").split(/[,，#\s]+/);
+  const out = [];
+  for (const raw of list) {
+    const tag = String(raw || "").trim().replace(/^#/, "");
+    if (tag && !out.includes(tag)) out.push(tag);
+    if (out.length >= MAX_TAGS) break;
+  }
+  return out;
+}
+function cleanSubtasks(input2) {
+  if (!Array.isArray(input2)) return [];
+  const out = [];
+  for (const item of input2) {
+    const title = String(typeof item === "string" ? item : item?.title || "").trim();
+    if (!title) continue;
+    out.push({
+      id: typeof item === "object" && item && String(item.id || "") ? String(item.id) : randomUUID(),
+      title,
+      done: typeof item === "object" && item ? Boolean(item.done) : false
+    });
+    if (out.length >= MAX_SUBTASKS) break;
+  }
+  return out;
+}
+function normalizeTodo(todo) {
+  if (!todo || typeof todo !== "object" || !todo.id || !todo.title) return null;
+  return {
+    ...todo,
+    md: String(todo.md || ""),
+    status: todo.status === "done" ? "done" : "open",
+    pri: PRI_VALUES.includes(todo.pri) ? todo.pri : "",
+    due: String(todo.due || "").slice(0, 10),
+    repeat: String(todo.repeat || ""),
+    tags: cleanTags(todo.tags),
+    subtasks: cleanSubtasks(todo.subtasks),
+    carries: Number.isInteger(todo.carries) && todo.carries > 0 ? todo.carries : 0,
+    lastCarry: String(todo.lastCarry || "").slice(0, 10)
+  };
+}
 async function readJson2(file2, fallback) {
   try {
     return JSON.parse(await readFile2(file2, "utf8"));
@@ -35658,16 +35466,63 @@ async function readJson2(file2, fallback) {
   }
 }
 async function writeJson(file2, value) {
-  await mkdir3(dirname3(file2), { recursive: true });
-  await writeFile3(file2, JSON.stringify(value, null, 2) + "\n", "utf8");
+  await mkdir2(dirname2(file2), { recursive: true });
+  await writeFile2(file2, JSON.stringify(value, null, 2) + "\n", "utf8");
 }
 async function loadTodos(config2) {
   const todos = await readJson2(todosFile(config2), []);
-  return Array.isArray(todos) ? todos : [];
+  if (!Array.isArray(todos)) return [];
+  return todos.map(normalizeTodo).filter(Boolean);
 }
 async function saveTodos(config2, todos) {
   await writeJson(todosFile(config2), todos);
   return todos;
+}
+function compareTodos(a, b, today) {
+  const aDone = a.status === "done";
+  const bDone = b.status === "done";
+  if (aDone !== bDone) return aDone ? 1 : -1;
+  if (aDone) return String(b.done_at || "").localeCompare(String(a.done_at || ""));
+  const aOver = a.due && a.due < today ? 1 : 0;
+  const bOver = b.due && b.due < today ? 1 : 0;
+  if (aOver !== bOver) return bOver - aOver;
+  const aRank = aOver ? -1 : PRI_RANK[a.pri] ?? 3;
+  const bRank = bOver ? -1 : PRI_RANK[b.pri] ?? 3;
+  if (aRank !== bRank) return aRank - bRank;
+  if (a.due !== b.due) {
+    if (!a.due) return 1;
+    if (!b.due) return -1;
+    return a.due.localeCompare(b.due);
+  }
+  return String(b.created || "").localeCompare(String(a.created || ""));
+}
+function sortTodos(todos, today = localDate()) {
+  return [...todos].sort((a, b) => compareTodos(a, b, today));
+}
+function queryTodos(todos, query = {}, today = localDate()) {
+  const { status, pri, tag, q, sort = "smart" } = query;
+  let list = todos;
+  if (status === "open" || status === "done") list = list.filter((todo) => todo.status === status);
+  if (PRI_VALUES.includes(pri)) list = list.filter((todo) => todo.pri === pri);
+  if (tag) list = list.filter((todo) => todo.tags.includes(String(tag)));
+  const needle = String(q || "").trim().toLowerCase();
+  if (needle) {
+    list = list.filter(
+      (todo) => todo.title.toLowerCase().includes(needle) || String(todo.md || "").toLowerCase().includes(needle) || todo.tags.some((item) => item.toLowerCase().includes(needle))
+    );
+  }
+  if (sort === "due") {
+    return [...list].sort((a, b) => {
+      if (a.due === b.due) return String(a.created || "").localeCompare(String(b.created || ""));
+      if (!a.due) return 1;
+      if (!b.due) return -1;
+      return a.due.localeCompare(b.due);
+    });
+  }
+  if (sort === "created") {
+    return [...list].sort((a, b) => String(b.created || "").localeCompare(String(a.created || "")));
+  }
+  return sortTodos(list, today);
 }
 async function addTodo(config2, input2 = {}) {
   const title = String(input2.title || "").trim();
@@ -35678,9 +35533,13 @@ async function addTodo(config2, input2 = {}) {
     title,
     md: String(input2.md || input2.detail || ""),
     status: input2.status === "done" ? "done" : "open",
-    pri: ["\u9AD8", "\u4E2D", "\u4F4E"].includes(input2.pri || input2.priority) ? input2.pri || input2.priority : "",
+    pri: PRI_VALUES.includes(input2.pri || input2.priority) ? input2.pri || input2.priority : "",
     due: String(input2.due || "").slice(0, 10),
     repeat: String(input2.repeat || ""),
+    tags: cleanTags(input2.tags),
+    subtasks: cleanSubtasks(input2.subtasks),
+    carries: 0,
+    lastCarry: "",
     created: now,
     updated: now,
     done_at: input2.status === "done" ? now : ""
@@ -35703,8 +35562,13 @@ async function updateTodo(config2, patch = {}) {
     id,
     title: String(patch.title ?? current.title).trim() || current.title,
     md: String(patch.md ?? current.md ?? ""),
-    pri: ["\u9AD8", "\u4E2D", "\u4F4E"].includes(patch.pri ?? patch.priority ?? current.pri) ? patch.pri ?? patch.priority ?? current.pri : current.pri,
+    pri: PRI_VALUES.includes(patch.pri ?? patch.priority ?? current.pri) ? patch.pri ?? patch.priority ?? current.pri : current.pri,
     due: String(patch.due ?? current.due ?? "").slice(0, 10),
+    repeat: String(patch.repeat ?? current.repeat ?? ""),
+    tags: patch.tags === void 0 ? current.tags : cleanTags(patch.tags),
+    subtasks: patch.subtasks === void 0 ? current.subtasks : cleanSubtasks(patch.subtasks),
+    carries: Number.isInteger(patch.carries) && patch.carries >= 0 ? patch.carries : current.carries || 0,
+    lastCarry: String(patch.lastCarry ?? current.lastCarry ?? "").slice(0, 10),
     updated: (/* @__PURE__ */ new Date()).toISOString()
   };
   if (patch.status === "done" && current.status !== "done") next.done_at = (/* @__PURE__ */ new Date()).toISOString();
@@ -35726,6 +35590,10 @@ async function spawnRepeatedTodo(config2, todo, todos) {
     id: randomUUID(),
     status: "open",
     done_at: "",
+    tags: [...todo.tags || []],
+    subtasks: (todo.subtasks || []).map((sub) => ({ ...sub, done: false })),
+    carries: 0,
+    lastCarry: "",
     created: (/* @__PURE__ */ new Date()).toISOString(),
     updated: (/* @__PURE__ */ new Date()).toISOString(),
     due
@@ -35772,6 +35640,47 @@ async function clearDoneTodos(config2) {
   await saveTodos(config2, next);
   return { ok: true, removed };
 }
+async function carryOverTodos(config2, { date: date5 = localDate() } = {}) {
+  const day = String(date5 || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error(`\u975E\u6CD5\u65E5\u671F\uFF1A${date5}`);
+  const todos = await loadTodos(config2);
+  const carried = [];
+  let skipped = 0;
+  for (const todo of todos) {
+    if (todo.status !== "open" || !todo.due || todo.due >= day) continue;
+    if (todo.lastCarry === day) {
+      skipped += 1;
+      continue;
+    }
+    todo.due = day;
+    todo.carries = (todo.carries || 0) + 1;
+    todo.lastCarry = day;
+    todo.updated = (/* @__PURE__ */ new Date()).toISOString();
+    carried.push({ id: todo.id, title: todo.title, pri: todo.pri, due: todo.due, carries: todo.carries });
+  }
+  if (carried.length) await saveTodos(config2, todos);
+  return { carried, skipped, date: day };
+}
+function todoStats(todos, today = localDate()) {
+  const list = Array.isArray(todos) ? todos : [];
+  const open2 = list.filter((todo) => todo.status !== "done");
+  const done = list.filter((todo) => todo.status === "done");
+  const dayOf = (todo) => String(todo.done_at || "").slice(0, 10);
+  const byPri = { \u9AD8: 0, \u4E2D: 0, \u4F4E: 0, \u65E0: 0 };
+  for (const todo of open2) byPri[PRI_RANK[todo.pri] === void 0 ? "\u65E0" : todo.pri] += 1;
+  return {
+    open: open2.length,
+    overdue: open2.filter((todo) => todo.due && todo.due < today).length,
+    dueToday: open2.filter((todo) => todo.due === today).length,
+    doneToday: done.filter((todo) => dayOf(todo) === today).length,
+    doneWeek: done.filter((todo) => dayOf(todo) && dayOf(todo) >= mondayOf(today)).length,
+    total: list.length,
+    byPri
+  };
+}
+async function getTodoStats(config2) {
+  return todoStats(await loadTodos(config2));
+}
 async function loadState(config2) {
   return readJson2(stateFile(config2), {
     lastArchive: "",
@@ -35806,12 +35715,12 @@ async function recordAiUsage(config2, usage) {
 async function walkFiles(dir, visitor) {
   let entries;
   try {
-    entries = await readdir3(dir, { withFileTypes: true });
+    entries = await readdir2(dir, { withFileTypes: true });
   } catch {
     return;
   }
   for (const entry of entries) {
-    const full = join4(dir, entry.name);
+    const full = join3(dir, entry.name);
     if (entry.isDirectory()) {
       if (entry.name === "reports" || entry.name === "backups") continue;
       await walkFiles(full, visitor);
@@ -35821,17 +35730,17 @@ async function walkFiles(dir, visitor) {
   }
 }
 async function listDays(config2) {
-  const root = join4(config2.dataDir, "archive");
+  const root = join3(config2.dataDir, "archive");
   const days = [];
   await walkFiles(root, async (full) => {
-    const name = basename2(full);
+    const name = basename(full);
     if (!/^\d{4}-\d{2}-\d{2}\.md$/.test(name)) return;
     try {
-      const info = await stat3(full);
+      const info = await stat2(full);
       days.push({
         date: name.slice(0, 10),
         path: full,
-        relative: relative2(root, full),
+        relative: relative(root, full),
         size: info.size,
         mtime: info.mtime.toISOString()
       });
@@ -35843,7 +35752,7 @@ async function listDays(config2) {
 }
 async function getDay(config2, dateString) {
   const target = dayFile(config2, dateString);
-  if (existsSync4(target)) {
+  if (existsSync3(target)) {
     return { date: dateString, exists: true, text: await readFile2(target, "utf8"), path: target };
   }
   const days = await listDays(config2);
@@ -35855,8 +35764,8 @@ async function getDay(config2, dateString) {
 }
 async function saveDay(config2, dateString, text) {
   const target = dayFile(config2, dateString);
-  await mkdir3(dirname3(target), { recursive: true });
-  await writeFile3(target, String(text ?? ""), "utf8");
+  await mkdir2(dirname2(target), { recursive: true });
+  await writeFile2(target, String(text ?? ""), "utf8");
   return getDay(config2, dateString);
 }
 async function searchDays(config2, query) {
@@ -35929,32 +35838,32 @@ async function listReports(config2) {
   const reports = [];
   let entries = [];
   try {
-    entries = await readdir3(dir, { withFileTypes: true });
+    entries = await readdir2(dir, { withFileTypes: true });
   } catch {
     return reports;
   }
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-    const full = join4(dir, entry.name);
-    const info = await stat3(full);
+    const full = join3(dir, entry.name);
+    const info = await stat2(full);
     reports.push({ name: entry.name, size: info.size, mtime: info.mtime.toISOString() });
   }
   reports.sort((a, b) => b.mtime.localeCompare(a.mtime));
   return reports;
 }
 async function readReport(config2, name) {
-  const safe = basename2(String(name || ""));
+  const safe = basename(String(name || ""));
   if (!safe.endsWith(".md")) throw new Error("\u62A5\u544A\u6587\u4EF6\u540D\u4E0D\u5408\u6CD5");
-  const full = join4(reportsDir(config2), safe);
-  if (!existsSync4(full)) throw new Error(`\u62A5\u544A\u4E0D\u5B58\u5728\uFF1A${safe}`);
+  const full = join3(reportsDir(config2), safe);
+  if (!existsSync3(full)) throw new Error(`\u62A5\u544A\u4E0D\u5B58\u5728\uFF1A${safe}`);
   return { name: safe, text: await readFile2(full, "utf8") };
 }
 async function writeReport(config2, name, text) {
-  const safe = basename2(String(name || ""));
+  const safe = basename(String(name || ""));
   if (!safe.endsWith(".md")) throw new Error("\u62A5\u544A\u6587\u4EF6\u540D\u4E0D\u5408\u6CD5");
-  const full = join4(reportsDir(config2), safe);
-  await mkdir3(dirname3(full), { recursive: true });
-  await writeFile3(full, String(text ?? ""), "utf8");
+  const full = join3(reportsDir(config2), safe);
+  await mkdir2(dirname2(full), { recursive: true });
+  await writeFile2(full, String(text ?? ""), "utf8");
   return { name: safe, path: full };
 }
 async function createBackup(config2) {
@@ -35986,33 +35895,33 @@ async function createBackup(config2) {
     reports
   };
   const name = `zcode-worklog-backup-${(/* @__PURE__ */ new Date()).toISOString().replace(/[-:]/g, "").replace(/\..+$/, "")}.json`;
-  const file2 = join4(backupsDir(config2), name);
-  await mkdir3(dirname3(file2), { recursive: true });
-  await writeFile3(file2, JSON.stringify(payload, null, 2), "utf8");
-  return { file: file2, name, days: archive.length, reports: reports.length, size: (await stat3(file2)).size };
+  const file2 = join3(backupsDir(config2), name);
+  await mkdir2(dirname2(file2), { recursive: true });
+  await writeFile2(file2, JSON.stringify(payload, null, 2), "utf8");
+  return { file: file2, name, days: archive.length, reports: reports.length, size: (await stat2(file2)).size };
 }
 async function listBackups(config2) {
   const dir = backupsDir(config2);
   const out = [];
   let entries = [];
   try {
-    entries = await readdir3(dir, { withFileTypes: true });
+    entries = await readdir2(dir, { withFileTypes: true });
   } catch {
     return out;
   }
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-    const full = join4(dir, entry.name);
-    const info = await stat3(full);
+    const full = join3(dir, entry.name);
+    const info = await stat2(full);
     out.push({ name: entry.name, size: info.size, mtime: info.mtime.toISOString() });
   }
   out.sort((a, b) => b.mtime.localeCompare(a.mtime));
   return out;
 }
 async function restoreBackup(config2, name) {
-  const safe = basename2(String(name || ""));
-  const file2 = join4(backupsDir(config2), safe);
-  if (!existsSync4(file2)) throw new Error(`\u5907\u4EFD\u4E0D\u5B58\u5728\uFF1A${safe}`);
+  const safe = basename(String(name || ""));
+  const file2 = join3(backupsDir(config2), safe);
+  if (!existsSync3(file2)) throw new Error(`\u5907\u4EFD\u4E0D\u5B58\u5728\uFF1A${safe}`);
   const payload = JSON.parse(await readFile2(file2, "utf8"));
   if (!Array.isArray(payload.archive)) throw new Error("\u5907\u4EFD\u683C\u5F0F\u4E0D\u6B63\u786E");
   let restored = 0;
@@ -36031,23 +35940,302 @@ async function restoreBackup(config2, name) {
 }
 async function importWorkLog(config2, sourceDir) {
   const candidates = [
-    join4(sourceDir, "data", "archive"),
-    join4(sourceDir, "archive")
+    join3(sourceDir, "data", "archive"),
+    join3(sourceDir, "archive")
   ];
-  const source = candidates.find((candidate) => existsSync4(candidate));
+  const source = candidates.find((candidate) => existsSync3(candidate));
   if (!source) throw new Error("\u6CA1\u6709\u627E\u5230 data\\archive \u6216 archive \u76EE\u5F55");
-  const target = join4(config2.dataDir, "archive");
-  await mkdir3(target, { recursive: true });
+  const target = join3(config2.dataDir, "archive");
+  await mkdir2(target, { recursive: true });
   await cp(source, target, { recursive: true, force: false, errorOnExist: false });
   const days = await listDays(config2);
   return { ok: true, source, importedDays: days.length };
 }
 async function deleteBackup(config2, name) {
-  const safe = basename2(String(name || ""));
-  const file2 = join4(backupsDir(config2), safe);
-  if (!existsSync4(file2)) throw new Error(`\u5907\u4EFD\u4E0D\u5B58\u5728\uFF1A${safe}`);
+  const safe = basename(String(name || ""));
+  const file2 = join3(backupsDir(config2), safe);
+  if (!existsSync3(file2)) throw new Error(`\u5907\u4EFD\u4E0D\u5B58\u5728\uFF1A${safe}`);
   await unlink(file2);
   return { ok: true, name: safe };
+}
+
+// lib/archive.mjs
+var execFileAsync = promisify(execFile);
+var SKIP_DIRS = /* @__PURE__ */ new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  "build",
+  "out",
+  "target",
+  "coverage",
+  ".next",
+  ".nuxt",
+  ".cache",
+  ".turbo",
+  "venv",
+  ".venv",
+  "__pycache__",
+  "AppData",
+  "Library",
+  "System32",
+  "WinSxS"
+]);
+var DOC_EXTS = /* @__PURE__ */ new Set([
+  ".md",
+  ".markdown",
+  ".txt",
+  ".doc",
+  ".docx",
+  ".xls",
+  ".xlsx",
+  ".ppt",
+  ".pptx",
+  ".pdf"
+]);
+function isSkippedDir(name) {
+  return SKIP_DIRS.has(name) || name.startsWith(".") && name !== ".";
+}
+async function walk(root, maxDepth, visitDir, visitFile) {
+  const base = resolve2(root);
+  if (!existsSync4(base)) return;
+  const queue = [{ dir: base, depth: 0 }];
+  let seen = 0;
+  while (queue.length) {
+    const { dir, depth } = queue.shift();
+    let entries;
+    try {
+      entries = await readdir3(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    await visitDir?.(dir, depth);
+    for (const entry of entries) {
+      const full = join4(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (depth < maxDepth && !isSkippedDir(entry.name)) queue.push({ dir: full, depth: depth + 1 });
+      } else if (entry.isFile()) {
+        seen += 1;
+        if (seen > 5e4) return;
+        await visitFile?.(full, entry);
+      }
+    }
+  }
+}
+async function git(repo, args, timeout = 2e4) {
+  const { stdout } = await execFileAsync("git", ["-C", repo, ...args], {
+    timeout,
+    windowsHide: true,
+    maxBuffer: 16 * 1024 * 1024
+  });
+  return String(stdout || "");
+}
+async function findGitRepos(roots = []) {
+  const repos = [];
+  for (const root of roots) {
+    await walk(root, 3, async (dir) => {
+      if (existsSync4(join4(dir, ".git"))) repos.push(dir);
+    });
+  }
+  return [...new Set(repos)];
+}
+async function scanGit(roots, dateString, author = "") {
+  const repos = await findGitRepos(roots);
+  const out = [];
+  const errors = [];
+  for (const repo of repos) {
+    try {
+      const currentAuthor = author || (await git(repo, ["config", "user.name"])).trim();
+      const args = [
+        "log",
+        `--since=${dateString} 00:00:00`,
+        `--until=${dateString} 23:59:59`,
+        "--all",
+        "--pretty=format:%h%x09%an%x09%s"
+      ];
+      if (currentAuthor) args.push(`--author=${currentAuthor}`);
+      const text = await git(repo, args);
+      const commits = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+        const [hash2, commitAuthor, ...subject] = line.split("	");
+        return { hash: hash2, author: commitAuthor || "", subject: subject.join("	") };
+      });
+      if (commits.length) {
+        out.push({
+          name: basename2(repo),
+          path: repo,
+          author: currentAuthor,
+          commits
+        });
+      }
+    } catch (error62) {
+      errors.push({ repo, error: String(error62?.message || error62) });
+    }
+  }
+  return { repos: out, errors };
+}
+async function scanDocs(roots, dateString) {
+  const files = [];
+  const errors = [];
+  for (const root of roots) {
+    try {
+      await walk(root, 6, null, async (full) => {
+        if (!DOC_EXTS.has(extname(full).toLowerCase())) return;
+        try {
+          const info = await stat3(full);
+          if (localDate(info.mtime) !== dateString) return;
+          files.push({
+            path: full,
+            relative: relative2(root, full),
+            size: info.size,
+            mtime: info.mtime.toISOString(),
+            time: localTime(info.mtime)
+          });
+        } catch {
+        }
+      });
+    } catch (error62) {
+      errors.push({ root, error: String(error62?.message || error62) });
+    }
+  }
+  return { files, errors };
+}
+function sizeText(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+var TODO_LIST_CAP = 6;
+function todoLine(todo) {
+  const pri = todo.pri ? `[${todo.pri}] ` : "";
+  const times = todo.carries >= 2 ? `\uFF08\u7B2C ${todo.carries} \u6B21\uFF09` : "";
+  return `${pri}${todo.title}${times}`;
+}
+async function todoDaySection(config2, dateString, carried = null) {
+  const todos = await loadTodos(config2);
+  const isToday = dateString === localDate();
+  const doneOf = todos.filter(
+    (todo) => todo.status === "done" && String(todo.done_at || "").slice(0, 10) === dateString
+  );
+  const addedOf = todos.filter((todo) => String(todo.created || "").slice(0, 10) === dateString);
+  const open2 = todos.filter((todo) => todo.status !== "done");
+  const overdue = open2.filter((todo) => todo.due && todo.due < localDate());
+  const label = isToday ? "\u4ECA\u65E5" : "\u5F53\u65E5";
+  const parts = [`${label}\u5B8C\u6210 ${doneOf.length} \u6761`, `\u65B0\u589E ${addedOf.length} \u6761`];
+  if (carried) parts.push(`\u987A\u5EF6 ${carried.carried.length} \u6761`);
+  else if (overdue.length) parts.push(`\u5F53\u524D\u903E\u671F ${overdue.length} \u6761`);
+  const lines = [`- ${parts.join(" \xB7 ")}`];
+  if (doneOf.length) {
+    const names = doneOf.slice(0, TODO_LIST_CAP).map((todo) => todo.title);
+    if (doneOf.length > TODO_LIST_CAP) names.push(`\u7B49 ${doneOf.length} \u6761`);
+    lines.push(`- ${label}\u5B8C\u6210\uFF1A${names.join("\u3001")}`);
+  }
+  if (carried?.carried?.length) {
+    const names = carried.carried.slice(0, TODO_LIST_CAP).map((todo) => todoLine(todo));
+    if (carried.carried.length > TODO_LIST_CAP) names.push(`\u7B49 ${carried.carried.length} \u6761`);
+    lines.push(`- \u987A\u5EF6\uFF1A${names.join("\u3001")}`);
+  }
+  const dues = open2.map((todo) => todo.due).filter(Boolean);
+  if (open2.length) {
+    lines.push(
+      `- \u5F53\u524D\u672A\u5B8C\u6210\u5171 ${open2.length} \u6761${dues.length ? `\uFF0C\u6700\u8FD1\u5230\u671F ${dues.sort()[0]}` : ""}`
+    );
+  }
+  return lines;
+}
+function buildDayMarkdown(dateString, gitResult, docResult, note = "", sessionResult = null, todoSection = []) {
+  const repos = gitResult.repos || [];
+  const docs = docResult.files || [];
+  const sessions = sessionResult?.sessions || [];
+  const turns = sessionResult?.totals?.turns || 0;
+  const commitCount = repos.reduce((sum, repo) => sum + repo.commits.length, 0);
+  const lines = [
+    `# ${dateString} \u5DE5\u4F5C\u65E5\u5FD7`,
+    "",
+    `> \u81EA\u52A8\u5F52\u6863 \xB7 ${localTime()}`,
+    "",
+    "## \u4ECA\u65E5\u6982\u89C8",
+    "",
+    `- Git \u63D0\u4EA4\uFF1A${commitCount} \u4E2A\uFF0C\u6D89\u53CA ${repos.length} \u4E2A\u9879\u76EE`,
+    `- \u6587\u6863\u53D8\u66F4\uFF1A${docs.length} \u4E2A`,
+    ...sessionResult ? [`- AI \u4F1A\u8BDD\uFF1A${sessions.length} \u573A\uFF0C${turns} \u8F6E`] : [],
+    ""
+  ];
+  if (repos.length) {
+    lines.push("## \u9879\u76EE\u8FDB\u5C55", "");
+    for (const repo of repos) {
+      lines.push(`### ${repo.name}`, "");
+      for (const commit of repo.commits) {
+        lines.push(`- \`${commit.hash}\` ${commit.subject}${commit.author ? `\uFF08${commit.author}\uFF09` : ""}`);
+      }
+      lines.push("");
+    }
+  } else {
+    lines.push("## \u9879\u76EE\u8FDB\u5C55", "", "\u4ECA\u5929\u6CA1\u6709\u626B\u63CF\u5230 Git \u63D0\u4EA4\u3002", "");
+  }
+  if (docs.length) {
+    lines.push("## \u6587\u6863\u53D8\u66F4", "");
+    for (const doc of docs) {
+      lines.push(`- \`${doc.relative || basename2(doc.path)}\` \xB7 ${doc.time} \xB7 ${sizeText(doc.size)}`);
+    }
+    lines.push("");
+  } else {
+    lines.push("## \u6587\u6863\u53D8\u66F4", "", "\u4ECA\u5929\u6CA1\u6709\u626B\u63CF\u5230\u6587\u6863\u53D8\u66F4\u3002", "");
+  }
+  if (sessionResult) lines.push(...sessionMarkdownSection(sessionResult));
+  if (todoSection?.length) lines.push("## \u5F85\u529E", "", ...todoSection, "");
+  lines.push("## \u5907\u6CE8", "", note.trim() || "\uFF08\u53EF\u5728\u6B64\u8865\u5145\u4ECA\u5929\u7684\u5DE5\u4F5C\u8BF4\u660E\uFF09", "");
+  return lines.join("\n");
+}
+async function archiveDay(config2, dateString, { force = false, note = "" } = {}) {
+  const target = dayFile(config2, dateString);
+  if (!force && existsSync4(target)) {
+    return { date: dateString, path: target, created: false, existing: true };
+  }
+  const isToday = dateString === localDate();
+  const carryResult = isToday ? await carryOverTodos(config2, { date: dateString }) : null;
+  const [gitResult, docResult, sessionResult] = await Promise.all([
+    config2.sources?.git === false ? Promise.resolve({ repos: [], errors: [] }) : scanGit(scanRootsOf(config2), dateString, config2.gitAuthor || ""),
+    config2.sources?.docs === false ? Promise.resolve({ files: [], errors: [] }) : scanDocs(docRootsOf(config2), dateString),
+    config2.sources?.sessions === false ? Promise.resolve(null) : scanSessions(config2, dateString).catch((error62) => ({
+      sessions: [],
+      totals: { sessions: 0, turns: 0 },
+      errors: [{ source: "sessions", error: String(error62?.message || error62) }]
+    }))
+  ]);
+  const todoSection = await todoDaySection(config2, dateString, carryResult);
+  const text = buildDayMarkdown(dateString, gitResult, docResult, note, sessionResult, todoSection);
+  await mkdir3(dirname3(target), { recursive: true });
+  await writeFile3(target, text, "utf8");
+  return {
+    date: dateString,
+    path: target,
+    created: true,
+    existing: false,
+    text,
+    commitCount: gitResult.repos.reduce((sum, repo) => sum + repo.commits.length, 0),
+    repoCount: gitResult.repos.length,
+    docCount: docResult.files.length,
+    sessionCount: sessionResult?.sessions?.length || 0,
+    turnCount: sessionResult?.totals?.turns || 0,
+    carriedCount: carryResult?.carried?.length || 0,
+    repos: gitResult.repos.map((repo) => ({
+      name: repo.name,
+      path: repo.path,
+      commits: repo.commits.length
+    })),
+    errors: [...gitResult.errors, ...docResult.errors, ...sessionResult?.errors || []]
+  };
+}
+async function archiveDays(config2, dates, options = {}) {
+  const results = [];
+  for (const dateString of dates) {
+    try {
+      results.push(await archiveDay(config2, dateString, options));
+    } catch (error62) {
+      results.push({ date: dateString, error: String(error62?.message || error62) });
+    }
+  }
+  return results;
 }
 
 // lib/report.mjs
@@ -36181,6 +36369,35 @@ async function ensureDay(config2, dateString) {
   if (!archived.created) return getDay(config2, dateString);
   return getDay(config2, dateString);
 }
+async function todoReportSection(config2, dates) {
+  const todos = await loadTodos(config2);
+  const start = dates[0];
+  const end = dates[dates.length - 1];
+  const dayOf = (value) => String(value || "").slice(0, 10);
+  const doneInRange = todos.filter((todo) => {
+    const day = dayOf(todo.done_at);
+    return todo.status === "done" && day && day >= start && day <= end;
+  });
+  const onTime = doneInRange.filter((todo) => !todo.due || dayOf(todo.done_at) <= todo.due);
+  const open2 = todos.filter((todo) => todo.status !== "done");
+  const overdue = open2.filter((todo) => todo.due && todo.due < localDate());
+  const worst = open2.reduce(
+    (top, todo) => (todo.carries || 0) >= (top?.carries || 0) && todo.carries > 0 ? todo : top,
+    null
+  );
+  if (!doneInRange.length && !open2.length) return ["## \u5F85\u529E\u6982\u51B5", "", "- \u672C\u671F\u5F85\u529E\u7EDF\u8BA1\uFF1A\u65E0\u8BB0\u5F55", ""];
+  const lines = ["## \u5F85\u529E\u6982\u51B5", ""];
+  if (doneInRange.length) {
+    const rate = Math.round(onTime.length / doneInRange.length * 100);
+    lines.push(`- \u5468\u671F\u5185\u5B8C\u6210 ${doneInRange.length} \u6761\uFF0C\u6309\u65F6\u5B8C\u6210\u7387 ${rate}%`);
+  } else {
+    lines.push("- \u5468\u671F\u5185\u6CA1\u6709\u5DF2\u5B8C\u6210\u7684\u5F85\u529E");
+  }
+  lines.push(`- \u5F53\u524D\u903E\u671F ${overdue.length} \u6761`);
+  if (worst) lines.push(`- \u987A\u5EF6\u6700\u591A\uFF1A${worst.title}\uFF08\u987A\u5EF6 ${worst.carries} \u6B21\uFF0C\u4ECD\u672A\u5B8C\u6210\uFF09`);
+  lines.push("");
+  return lines;
+}
 async function generateReport(config2, options = {}) {
   const kind = String(options.kind || "daily");
   let key = localDate();
@@ -36277,6 +36494,8 @@ ${String(error62?.message || error62)}
 `;
     }
   }
+  finalText = `${finalText.replace(/\n*$/, "\n")}
+${(await todoReportSection(config2, dates)).join("\n")}`;
   const name = reportName(kind, key);
   const path = await writeReport(config2, name, finalText);
   return { kind, key, name, path: path.path, text: finalText, days: days.length, ai };
@@ -36947,6 +37166,7 @@ async function statusPayload(config2 = loadConfig()) {
       count: todos.length,
       open: todos.filter((todo) => todo.status !== "done").length,
       overdue: todos.filter((todo) => todo.status !== "done" && todo.due && todo.due < today).length,
+      stats: todoStats(todos, today),
       recent: todos.filter((todo) => todo.status !== "done").sort((a, b) => String(a.due || "9999").localeCompare(String(b.due || "9999"))).slice(0, 12)
     },
     backups: {
@@ -36978,7 +37198,7 @@ async function archiveAction(config2, args = {}) {
       date: dateString,
       mode: args.mode === "auto" ? "auto" : "manual",
       status: result.created ? "ok" : "skip",
-      note: result.created ? `${result.commitCount} \u63D0\u4EA4 / ${result.docCount} \u6587\u6863 / ${result.sessionCount || 0} \u4F1A\u8BDD` : "\u5F53\u5929\u5DF2\u6709\u5F52\u6863",
+      note: result.created ? `${result.commitCount} \u63D0\u4EA4 / ${result.docCount} \u6587\u6863 / ${result.sessionCount || 0} \u4F1A\u8BDD${result.carriedCount ? ` / \u987A\u5EF6 ${result.carriedCount} \u5F85\u529E` : ""}` : "\u5F53\u5929\u5DF2\u6709\u5F52\u6863",
       commitCount: result.commitCount || 0,
       docCount: result.docCount || 0,
       sessionCount: result.sessionCount || 0,
@@ -37006,8 +37226,23 @@ async function archiveAction(config2, args = {}) {
 }
 async function todoAction(config2, args = {}) {
   const action = args.action || "list";
-  if (action === "list") return loadTodos(config2);
+  if (action === "list") {
+    const todos = await loadTodos(config2);
+    return queryTodos(todos, { status: args.status, pri: args.pri, tag: args.tag, q: args.q, sort: args.sort });
+  }
   if (action === "add") return addTodo(config2, args);
+  if (action === "update") {
+    return updateTodo(config2, {
+      id: args.id,
+      title: args.title,
+      md: args.md ?? args.detail,
+      pri: args.pri,
+      due: args.due,
+      repeat: args.repeat,
+      tags: args.tags,
+      subtasks: args.subtasks
+    });
+  }
   if (action === "complete" || action === "reopen") {
     return updateTodo(config2, {
       id: args.id,
@@ -37021,6 +37256,8 @@ async function todoAction(config2, args = {}) {
   }
   if (action === "delete") return deleteTodo(config2, args.id);
   if (action === "clear_done") return clearDoneTodos(config2);
+  if (action === "carry_over") return carryOverTodos(config2, { date: args.date || localDate() });
+  if (action === "stats") return getTodoStats(config2);
   throw new Error(`\u672A\u77E5 action: ${action}`);
 }
 async function reportAction(config2, args = {}) {
@@ -37123,7 +37360,7 @@ async function maybeAutoArchive(config2 = loadConfig()) {
     date: today,
     mode: "auto",
     status: result.created ? "ok" : "skip",
-    note: result.created ? `\u81EA\u52A8\u5F52\u6863\uFF1A${result.commitCount} \u63D0\u4EA4 / ${result.docCount} \u6587\u6863 / ${result.sessionCount || 0} \u4F1A\u8BDD` : "\u5F53\u5929\u5DF2\u6709\u5F52\u6863",
+    note: result.created ? `\u81EA\u52A8\u5F52\u6863\uFF1A${result.commitCount} \u63D0\u4EA4 / ${result.docCount} \u6587\u6863 / ${result.sessionCount || 0} \u4F1A\u8BDD${result.carriedCount ? ` / \u987A\u5EF6 ${result.carriedCount} \u5F85\u529E` : ""}` : "\u5F53\u5929\u5DF2\u6709\u5F52\u6863",
     commitCount: result.commitCount || 0,
     docCount: result.docCount || 0
   });
@@ -37255,15 +37492,30 @@ tool(
   "worklog_todos",
   {
     title: "\u7BA1\u7406\u5F85\u529E",
-    description: "\u7BA1\u7406\u672C\u5730\u5F85\u529E\uFF1Alist/add/complete/reopen/delete/clear_done\u3002add \u652F\u6301 pri\uFF08\u9AD8/\u4E2D/\u4F4E\uFF09\u3001due\uFF08YYYY-MM-DD\uFF09\u3001md\u3001repeat\uFF08daily / weekly:0-6 / monthly:1-31\uFF09\u3002",
+    description: "\u7BA1\u7406\u672C\u5730\u5F85\u529E\uFF1Alist/add/update/complete/reopen/delete/clear_done/carry_over/stats\u3002list \u9ED8\u8BA4\u667A\u80FD\u6392\u5E8F\uFF08\u903E\u671F > \u9AD8/\u4E2D/\u4F4E > \u5230\u671F\u65E5\uFF09\uFF0C\u652F\u6301 status/pri/tag/q \u8FC7\u6EE4\uFF1Badd \u4E0E update \u652F\u6301 pri\uFF08\u9AD8/\u4E2D/\u4F4E\uFF09\u3001due\uFF08YYYY-MM-DD\uFF09\u3001md\u3001repeat\uFF08daily / weekly:0-6 / monthly:1-31\uFF09\uFF1Bcarry_over \u628A\u903E\u671F\u672A\u5B8C\u6210\u9879\u7684 due \u6539\u4E3A\u4ECA\u5929\uFF08\u540C\u65E5\u5E42\u7B49\uFF0C\u5F52\u6863\u4ECA\u5929\u65F6\u81EA\u52A8\u6267\u884C\uFF09\u3002",
     inputSchema: external_exports.object({
-      action: external_exports.enum(["list", "add", "complete", "reopen", "delete", "clear_done"]),
+      action: external_exports.enum([
+        "list",
+        "add",
+        "update",
+        "complete",
+        "reopen",
+        "delete",
+        "clear_done",
+        "carry_over",
+        "stats"
+      ]),
       id: external_exports.string().optional(),
       title: external_exports.string().optional(),
       pri: external_exports.enum(["\u9AD8", "\u4E2D", "\u4F4E"]).optional(),
       due: external_exports.string().optional(),
       md: external_exports.string().optional(),
-      repeat: external_exports.string().optional()
+      repeat: external_exports.string().optional(),
+      status: external_exports.enum(["open", "done"]).optional(),
+      tag: external_exports.string().optional(),
+      q: external_exports.string().optional(),
+      sort: external_exports.enum(["smart", "due", "created"]).optional(),
+      date: external_exports.string().optional()
     })
   },
   (args) => todoAction(loadConfig(), args)

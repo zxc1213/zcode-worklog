@@ -420,6 +420,35 @@ body {
   border-color: var(--wl-ok-soft);
 }
 
+.wl-chip {
+  appearance: none;
+  border: 1px solid var(--wl-border);
+  background: transparent;
+  color: var(--wl-muted);
+  font: inherit;
+  font-size: 10.5px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  line-height: 1.7;
+}
+
+.wl-chip.on {
+  background: var(--wl-accent-soft);
+  color: var(--wl-accent-text);
+  border-color: var(--wl-accent);
+}
+
+.wl-carry {
+  color: var(--wl-warn);
+  font-weight: 600;
+}
+
+.wl-carry.hot {
+  color: var(--wl-danger);
+  font-weight: 700;
+}
+
 .wl-pre {
   white-space: pre-wrap;
   word-break: break-word;

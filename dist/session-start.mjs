@@ -173,8 +173,53 @@ function dayFile(config, dateString) {
 }
 
 // lib/store.mjs
+import { randomUUID } from "node:crypto";
 import { cp, mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join as join2, relative } from "node:path";
+var PRI_VALUES = ["\u9AD8", "\u4E2D", "\u4F4E"];
+var PRI_RANK = { \u9AD8: 0, \u4E2D: 1, \u4F4E: 2 };
+var MAX_TAGS = 8;
+var MAX_SUBTASKS = 20;
+function cleanTags(input) {
+  const list = Array.isArray(input) ? input : String(input || "").split(/[,，#\s]+/);
+  const out = [];
+  for (const raw of list) {
+    const tag = String(raw || "").trim().replace(/^#/, "");
+    if (tag && !out.includes(tag)) out.push(tag);
+    if (out.length >= MAX_TAGS) break;
+  }
+  return out;
+}
+function cleanSubtasks(input) {
+  if (!Array.isArray(input)) return [];
+  const out = [];
+  for (const item of input) {
+    const title = String(typeof item === "string" ? item : item?.title || "").trim();
+    if (!title) continue;
+    out.push({
+      id: typeof item === "object" && item && String(item.id || "") ? String(item.id) : randomUUID(),
+      title,
+      done: typeof item === "object" && item ? Boolean(item.done) : false
+    });
+    if (out.length >= MAX_SUBTASKS) break;
+  }
+  return out;
+}
+function normalizeTodo(todo) {
+  if (!todo || typeof todo !== "object" || !todo.id || !todo.title) return null;
+  return {
+    ...todo,
+    md: String(todo.md || ""),
+    status: todo.status === "done" ? "done" : "open",
+    pri: PRI_VALUES.includes(todo.pri) ? todo.pri : "",
+    due: String(todo.due || "").slice(0, 10),
+    repeat: String(todo.repeat || ""),
+    tags: cleanTags(todo.tags),
+    subtasks: cleanSubtasks(todo.subtasks),
+    carries: Number.isInteger(todo.carries) && todo.carries > 0 ? todo.carries : 0,
+    lastCarry: String(todo.lastCarry || "").slice(0, 10)
+  };
+}
 async function readJson(file, fallback) {
   try {
     return JSON.parse(await readFile(file, "utf8"));
@@ -188,7 +233,54 @@ async function writeJson(file, value) {
 }
 async function loadTodos(config) {
   const todos = await readJson(todosFile(config), []);
-  return Array.isArray(todos) ? todos : [];
+  if (!Array.isArray(todos)) return [];
+  return todos.map(normalizeTodo).filter(Boolean);
+}
+async function saveTodos(config, todos) {
+  await writeJson(todosFile(config), todos);
+  return todos;
+}
+function compareTodos(a, b, today) {
+  const aDone = a.status === "done";
+  const bDone = b.status === "done";
+  if (aDone !== bDone) return aDone ? 1 : -1;
+  if (aDone) return String(b.done_at || "").localeCompare(String(a.done_at || ""));
+  const aOver = a.due && a.due < today ? 1 : 0;
+  const bOver = b.due && b.due < today ? 1 : 0;
+  if (aOver !== bOver) return bOver - aOver;
+  const aRank = aOver ? -1 : PRI_RANK[a.pri] ?? 3;
+  const bRank = bOver ? -1 : PRI_RANK[b.pri] ?? 3;
+  if (aRank !== bRank) return aRank - bRank;
+  if (a.due !== b.due) {
+    if (!a.due) return 1;
+    if (!b.due) return -1;
+    return a.due.localeCompare(b.due);
+  }
+  return String(b.created || "").localeCompare(String(a.created || ""));
+}
+function sortTodos(todos, today = localDate()) {
+  return [...todos].sort((a, b) => compareTodos(a, b, today));
+}
+async function carryOverTodos(config, { date = localDate() } = {}) {
+  const day = String(date || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error(`\u975E\u6CD5\u65E5\u671F\uFF1A${date}`);
+  const todos = await loadTodos(config);
+  const carried = [];
+  let skipped = 0;
+  for (const todo of todos) {
+    if (todo.status !== "open" || !todo.due || todo.due >= day) continue;
+    if (todo.lastCarry === day) {
+      skipped += 1;
+      continue;
+    }
+    todo.due = day;
+    todo.carries = (todo.carries || 0) + 1;
+    todo.lastCarry = day;
+    todo.updated = (/* @__PURE__ */ new Date()).toISOString();
+    carried.push({ id: todo.id, title: todo.title, pri: todo.pri, due: todo.due, carries: todo.carries });
+  }
+  if (carried.length) await saveTodos(config, todos);
+  return { carried, skipped, date: day };
 }
 async function loadState(config) {
   return readJson(stateFile(config), {
@@ -1030,7 +1122,45 @@ function sizeText(bytes) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
-function buildDayMarkdown(dateString, gitResult, docResult, note = "", sessionResult = null) {
+var TODO_LIST_CAP = 6;
+function todoLine(todo) {
+  const pri = todo.pri ? `[${todo.pri}] ` : "";
+  const times = todo.carries >= 2 ? `\uFF08\u7B2C ${todo.carries} \u6B21\uFF09` : "";
+  return `${pri}${todo.title}${times}`;
+}
+async function todoDaySection(config, dateString, carried = null) {
+  const todos = await loadTodos(config);
+  const isToday = dateString === localDate();
+  const doneOf = todos.filter(
+    (todo) => todo.status === "done" && String(todo.done_at || "").slice(0, 10) === dateString
+  );
+  const addedOf = todos.filter((todo) => String(todo.created || "").slice(0, 10) === dateString);
+  const open = todos.filter((todo) => todo.status !== "done");
+  const overdue = open.filter((todo) => todo.due && todo.due < localDate());
+  const label = isToday ? "\u4ECA\u65E5" : "\u5F53\u65E5";
+  const parts = [`${label}\u5B8C\u6210 ${doneOf.length} \u6761`, `\u65B0\u589E ${addedOf.length} \u6761`];
+  if (carried) parts.push(`\u987A\u5EF6 ${carried.carried.length} \u6761`);
+  else if (overdue.length) parts.push(`\u5F53\u524D\u903E\u671F ${overdue.length} \u6761`);
+  const lines = [`- ${parts.join(" \xB7 ")}`];
+  if (doneOf.length) {
+    const names = doneOf.slice(0, TODO_LIST_CAP).map((todo) => todo.title);
+    if (doneOf.length > TODO_LIST_CAP) names.push(`\u7B49 ${doneOf.length} \u6761`);
+    lines.push(`- ${label}\u5B8C\u6210\uFF1A${names.join("\u3001")}`);
+  }
+  if (carried?.carried?.length) {
+    const names = carried.carried.slice(0, TODO_LIST_CAP).map((todo) => todoLine(todo));
+    if (carried.carried.length > TODO_LIST_CAP) names.push(`\u7B49 ${carried.carried.length} \u6761`);
+    lines.push(`- \u987A\u5EF6\uFF1A${names.join("\u3001")}`);
+  }
+  const dues = open.map((todo) => todo.due).filter(Boolean);
+  if (open.length) {
+    lines.push(
+      `- \u5F53\u524D\u672A\u5B8C\u6210\u5171 ${open.length} \u6761${dues.length ? `\uFF0C\u6700\u8FD1\u5230\u671F ${dues.sort()[0]}` : ""}`
+    );
+  }
+  return lines;
+}
+function buildDayMarkdown(dateString, gitResult, docResult, note = "", sessionResult = null, todoSection = []) {
   const repos = gitResult.repos || [];
   const docs = docResult.files || [];
   const sessions = sessionResult?.sessions || [];
@@ -1070,6 +1200,7 @@ function buildDayMarkdown(dateString, gitResult, docResult, note = "", sessionRe
     lines.push("## \u6587\u6863\u53D8\u66F4", "", "\u4ECA\u5929\u6CA1\u6709\u626B\u63CF\u5230\u6587\u6863\u53D8\u66F4\u3002", "");
   }
   if (sessionResult) lines.push(...sessionMarkdownSection(sessionResult));
+  if (todoSection?.length) lines.push("## \u5F85\u529E", "", ...todoSection, "");
   lines.push("## \u5907\u6CE8", "", note.trim() || "\uFF08\u53EF\u5728\u6B64\u8865\u5145\u4ECA\u5929\u7684\u5DE5\u4F5C\u8BF4\u660E\uFF09", "");
   return lines.join("\n");
 }
@@ -1078,6 +1209,8 @@ async function archiveDay(config, dateString, { force = false, note = "" } = {})
   if (!force && existsSync3(target)) {
     return { date: dateString, path: target, created: false, existing: true };
   }
+  const isToday = dateString === localDate();
+  const carryResult = isToday ? await carryOverTodos(config, { date: dateString }) : null;
   const [gitResult, docResult, sessionResult] = await Promise.all([
     config.sources?.git === false ? Promise.resolve({ repos: [], errors: [] }) : scanGit(scanRootsOf(config), dateString, config.gitAuthor || ""),
     config.sources?.docs === false ? Promise.resolve({ files: [], errors: [] }) : scanDocs(docRootsOf(config), dateString),
@@ -1087,7 +1220,8 @@ async function archiveDay(config, dateString, { force = false, note = "" } = {})
       errors: [{ source: "sessions", error: String(error?.message || error) }]
     }))
   ]);
-  const text = buildDayMarkdown(dateString, gitResult, docResult, note, sessionResult);
+  const todoSection = await todoDaySection(config, dateString, carryResult);
+  const text = buildDayMarkdown(dateString, gitResult, docResult, note, sessionResult, todoSection);
   await mkdir3(dirname3(target), { recursive: true });
   await writeFile3(target, text, "utf8");
   return {
@@ -1101,6 +1235,7 @@ async function archiveDay(config, dateString, { force = false, note = "" } = {})
     docCount: docResult.files.length,
     sessionCount: sessionResult?.sessions?.length || 0,
     turnCount: sessionResult?.totals?.turns || 0,
+    carriedCount: carryResult?.carried?.length || 0,
     repos: gitResult.repos.map((repo) => ({
       name: repo.name,
       path: repo.path,
@@ -1125,7 +1260,7 @@ async function maybeAutoArchive(config = loadConfig()) {
     date: today,
     mode: "auto",
     status: result.created ? "ok" : "skip",
-    note: result.created ? `\u81EA\u52A8\u5F52\u6863\uFF1A${result.commitCount} \u63D0\u4EA4 / ${result.docCount} \u6587\u6863 / ${result.sessionCount || 0} \u4F1A\u8BDD` : "\u5F53\u5929\u5DF2\u6709\u5F52\u6863",
+    note: result.created ? `\u81EA\u52A8\u5F52\u6863\uFF1A${result.commitCount} \u63D0\u4EA4 / ${result.docCount} \u6587\u6863 / ${result.sessionCount || 0} \u4F1A\u8BDD${result.carriedCount ? ` / \u987A\u5EF6 ${result.carriedCount} \u5F85\u529E` : ""}` : "\u5F53\u5929\u5DF2\u6709\u5F52\u6863",
     commitCount: result.commitCount || 0,
     docCount: result.docCount || 0
   });
@@ -1187,10 +1322,13 @@ try {
   ];
   if (!archivedToday && last) parts.push(`\u6700\u8FD1\u5F52\u6863 ${last.date}`);
   if (last === void 0 && !archivedToday) parts.push("\u8FD8\u6CA1\u6709\u4EFB\u4F55\u5F52\u6863");
-  parts.push(`\u5F85\u529E ${open.length} \u6761\u8FDB\u884C\u4E2D${overdue.length ? `\uFF08${overdue.length} \u6761\u903E\u671F\uFF09` : ""}`);
+  parts.push(`\u5F85\u529E ${open.length} \u6761\u8FDB\u884C\u4E2D${overdue.length ? `\uFF08${overdue.length} \u6761\u903E\u671F\uFF0C\u5F52\u6863\u540E\u81EA\u52A8\u987A\u5EF6\u5230\u4ECA\u5929\uFF09` : ""}`);
   if (open.length) {
-    const preview = open.slice(0, 3).map((todo) => todo.title).join("\uFF1B");
-    parts.push(`\u4F8B\u5982\uFF1A${preview}`);
+    const preview = sortTodos(open, today).slice(0, 3).map((todo) => {
+      const carry = todo.carries >= 2 ? `\uFF08\u5DF2\u987A\u5EF6 ${todo.carries} \u6B21\uFF09` : "";
+      return todo.title + carry;
+    }).join("\uFF1B");
+    parts.push(`\u4F18\u5148\u5904\u7406\uFF1A${preview}`);
   }
   if (state.lastAutoDate) parts.push(`\u4E0A\u6B21\u81EA\u52A8\u5F52\u6863 ${state.lastAutoDate}`);
   if (autoNote) parts.push(autoNote);

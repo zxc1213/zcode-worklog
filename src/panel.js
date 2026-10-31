@@ -73,6 +73,8 @@ const state = {
   status: null,
   days: [],
   todos: [],
+  todoFilter: { pri: '', tag: '' },
+  editingTodo: null,
   reports: [],
   backups: [],
   config: null,
@@ -602,10 +604,79 @@ function runSearch() {
   )
 }
 
+const PRI_RANK = { 高: 0, 中: 1, 低: 2 }
+const WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六']
+
+// Mirror of compareTodos in lib/store.mjs (the panel cannot import node
+// modules); test/todo-v2.test.mjs pins both to the same fixtures — keep in sync.
+function compareTodos(a, b, todayText) {
+  const aDone = a.status === 'done'
+  const bDone = b.status === 'done'
+  if (aDone !== bDone) return aDone ? 1 : -1
+  if (aDone) return String(b.done_at || '').localeCompare(String(a.done_at || ''))
+  const aOver = a.due && a.due < todayText ? 1 : 0
+  const bOver = b.due && b.due < todayText ? 1 : 0
+  if (aOver !== bOver) return bOver - aOver
+  const aRank = aOver ? -1 : PRI_RANK[a.pri] ?? 3
+  const bRank = bOver ? -1 : PRI_RANK[b.pri] ?? 3
+  if (aRank !== bRank) return aRank - bRank
+  if (a.due !== b.due) {
+    if (!a.due) return 1
+    if (!b.due) return -1
+    return a.due.localeCompare(b.due)
+  }
+  return String(b.created || '').localeCompare(String(a.created || ''))
+}
+
+function repeatLabel(repeat) {
+  const text = String(repeat || '')
+  const weekly = text.match(/^weekly:([0-6])$/)
+  if (weekly) {
+    const weekday = WEEKDAY_LABELS[Number(weekly[1])]
+    return '每周' + weekday
+  }
+  const monthly = text.match(/^monthly:(\d{1,2})$/)
+  if (monthly) {
+    const day = monthly[1]
+    return '每月' + day + '号'
+  }
+  return text === 'daily' ? '每天' : text
+}
+
+function filterSortTodos(list, todayText) {
+  const { pri, tag } = state.todoFilter
+  let items = list
+  if (pri) items = items.filter((todo) => todo.pri === pri)
+  if (tag) items = items.filter((todo) => (todo.tags || []).includes(tag))
+  return [...items].sort((a, b) => compareTodos(a, b, todayText))
+}
+
+function filterChip(value, current, onPick, label) {
+  return h(
+    'button',
+    {
+      className: `wl-chip${current === value ? ' on' : ''}`,
+      onClick: () => {
+        onPick(current === value ? '' : value)
+        render()
+      },
+    },
+    label,
+  )
+}
+
 function todosTab() {
-  const open = state.todos.filter((item) => item.status !== 'done')
-  const done = state.todos.filter((item) => item.status === 'done')
   const todayText = today()
+  const stats = state.status?.todos?.stats || null
+  const open = filterSortTodos(
+    state.todos.filter((item) => item.status !== 'done'),
+    todayText,
+  )
+  const done = filterSortTodos(
+    state.todos.filter((item) => item.status === 'done'),
+    todayText,
+  ).sort((a, b) => String(b.done_at || '').localeCompare(String(a.done_at || '')))
+  const allTags = [...new Set(state.todos.flatMap((todo) => todo.tags || []))].sort()
 
   return h(
     'div',
@@ -620,7 +691,7 @@ function todosTab() {
         h('input', {
           className: 'wl-input',
           id: 'wl-todo-title',
-          placeholder: '新待办，支持 !高 / @2026-10-30',
+          placeholder: '新待办，支持 !高 / @2026-10-31',
           onKeydown: (event) => {
             if (event.key === 'Enter') addTodoFromForm()
           },
@@ -647,7 +718,6 @@ function todosTab() {
           h('option', { value: '低' }, '低'),
         ),
         h('input', { className: 'wl-input', id: 'wl-todo-due', type: 'date', style: { width: '136px' } }),
-        h('span', { className: 'wl-hint' }, `${open.length} 进行中 / ${done.length} 已完成`),
         h(
           'button',
           {
@@ -663,12 +733,35 @@ function todosTab() {
         ),
       ),
     ),
+    h(
+      'div',
+      { className: 'wl-row', style: { marginTop: '8px' } },
+      h('span', { className: 'wl-hint' }, '筛选'),
+      filterChip('高', state.todoFilter.pri, (value) => (state.todoFilter.pri = value), '高'),
+      filterChip('中', state.todoFilter.pri, (value) => (state.todoFilter.pri = value), '中'),
+      filterChip('低', state.todoFilter.pri, (value) => (state.todoFilter.pri = value), '低'),
+      ...allTags.map((item) =>
+        filterChip(item, state.todoFilter.tag, (value) => (state.todoFilter.tag = value), `#${item}`),
+      ),
+    ),
+    h(
+      'div',
+      { className: 'wl-hint', style: { marginTop: '4px' } },
+      '进行中 ' +
+        (stats?.open ?? open.length) +
+        ' · 逾期 ' +
+        (stats?.overdue || 0) +
+        ' · 今日完成 ' +
+        (stats?.doneToday || 0) +
+        ' · 本周完成 ' +
+        (stats?.doneWeek || 0),
+    ),
     h('div', { className: 'wl-label' }, '进行中'),
     open.length
       ? h(
           'div',
           { className: 'wl-list' },
-          open.map((todo) => todoItem(todo, todayText)),
+          open.map((todo) => (state.editingTodo === todo.id ? todoEditForm(todo) : todoItem(todo, todayText))),
         )
       : h('div', { className: 'wl-empty' }, '没有进行中的待办。'),
     done.length
@@ -689,6 +782,12 @@ function todosTab() {
 function todoItem(todo, todayText) {
   const isDone = todo.status === 'done'
   const overdue = !isDone && todo.due && todo.due < todayText
+  const subTotal = (todo.subtasks || []).length
+  const subDone = (todo.subtasks || []).filter((sub) => sub.done).length
+  const carryNode =
+    !isDone && todo.carries
+      ? h('span', { className: todo.carries >= 2 ? 'wl-carry hot' : 'wl-carry' }, '顺延 ' + todo.carries)
+      : null
   return h(
     'div',
     { className: `wl-item${isDone ? ' done' : ''}${overdue ? ' overdue' : ''}`, key: todo.id },
@@ -710,10 +809,26 @@ function todoItem(todo, todayText) {
         { className: 'wl-item-meta' },
         priorityTag(todo.pri),
         todo.due ? h('span', null, `${overdue ? '已逾期 ' : '到期 '}${todo.due}`) : null,
-        todo.repeat ? h('span', null, todo.repeat) : null,
+        todo.repeat ? h('span', null, repeatLabel(todo.repeat)) : null,
+        carryNode,
+        (todo.tags || []).map((tag) => h('span', { className: 'wl-tag' }, '#' + tag)),
+        subTotal ? h('span', null, '子任务 ' + subDone + '/' + subTotal) : null,
         isDone && todo.done_at ? h('span', null, `完成于 ${String(todo.done_at).slice(0, 10)}`) : null,
       ),
     ),
+    !isDone
+      ? h(
+          'button',
+          {
+            className: 'wl-btn tiny',
+            onClick: () => {
+              state.editingTodo = todo.id
+              render()
+            },
+          },
+          '编辑',
+        )
+      : null,
     h(
       'button',
       {
@@ -726,6 +841,141 @@ function todoItem(todo, todayText) {
       '删除',
     ),
   )
+}
+
+function todoEditForm(todo) {
+  const current = String(todo.repeat || '')
+  const repeatType = current === 'daily' ? 'daily' : current.match(/^weekly:/) ? 'weekly' : current.match(/^monthly:/) ? 'monthly' : ''
+  const save = () => {
+    const title = String(document.getElementById('wl-edit-title')?.value || '').trim()
+    if (!title) {
+      setNotice('err', '标题不能为空')
+      render()
+      return
+    }
+    const repeatTypeNow = document.getElementById('wl-edit-repeat')?.value || ''
+    let repeat = ''
+    if (repeatTypeNow === 'daily') {
+      repeat = 'daily'
+    } else if (repeatTypeNow === 'weekly') {
+      const weekday = Number(document.getElementById('wl-edit-weekday')?.value ?? 1)
+      repeat = 'weekly:' + weekday
+    } else if (repeatTypeNow === 'monthly') {
+      const monthday = Math.min(28, Math.max(1, Number(document.getElementById('wl-edit-monthday')?.value || 1)))
+      repeat = 'monthly:' + monthday
+    }
+    const patch = {
+      id: todo.id,
+      title,
+      pri: document.getElementById('wl-edit-pri')?.value || '',
+      due: document.getElementById('wl-edit-due')?.value || '',
+      repeat,
+      md: document.getElementById('wl-edit-md')?.value || '',
+    }
+    act('todo-edit', async () => {
+      await call('todos', { action: 'update', ...patch })
+      state.editingTodo = null
+      setNotice('ok', '已保存：' + title)
+    })
+  }
+  return h(
+    'div',
+    { className: 'wl-item editing', key: todo.id },
+    h(
+      'div',
+      { className: 'grow' },
+      h('input', { className: 'wl-input', id: 'wl-edit-title', value: todo.title }),
+      h(
+        'div',
+        { className: 'wl-row', style: { marginTop: '6px' } },
+        h(
+          'select',
+          { className: 'wl-select', id: 'wl-edit-pri', style: { width: '86px' } },
+          h('option', { value: '', selected: !todo.pri }, '优先级'),
+          h('option', { value: '高', selected: todo.pri === '高' }, '高'),
+          h('option', { value: '中', selected: todo.pri === '中' }, '中'),
+          h('option', { value: '低', selected: todo.pri === '低' }, '低'),
+        ),
+        h('input', {
+          className: 'wl-input',
+          id: 'wl-edit-due',
+          type: 'date',
+          value: todo.due || '',
+          style: { width: '136px' },
+        }),
+        h(
+          'select',
+          { className: 'wl-select', id: 'wl-edit-repeat', style: { width: '92px' } },
+          h('option', { value: '', selected: !repeatType }, '不重复'),
+          h('option', { value: 'daily', selected: repeatType === 'daily' }, '每天'),
+          h('option', { value: 'weekly', selected: repeatType === 'weekly' }, '每周…'),
+          h('option', { value: 'monthly', selected: repeatType === 'monthly' }, '每月…'),
+        ),
+        repeatType === 'weekly'
+          ? h(
+              'select',
+              { className: 'wl-select', id: 'wl-edit-weekday', style: { width: '92px' } },
+              ...WEEKDAY_LABELS.map((label, index) =>
+                h('option', { value: index, selected: current === 'weekly:' + index }, '周' + label),
+              ),
+            )
+          : null,
+        repeatType === 'monthly'
+          ? h('input', {
+              className: 'wl-input',
+              id: 'wl-edit-monthday',
+              type: 'number',
+              min: 1,
+              max: 28,
+              value: current.match(/^monthly:(\d{1,2})$/) ? Number(current.slice(8)) : 1,
+              style: { width: '64px' },
+            })
+          : null,
+      ),
+      h('textarea', {
+        className: 'wl-input',
+        id: 'wl-edit-md',
+        rows: 2,
+        placeholder: '备注（详情、链接、上下文）',
+        style: { marginTop: '6px' },
+      }, todo.md || ''),
+      (todo.tags || []).length || (todo.subtasks || []).length
+        ? h(
+            'div',
+            { className: 'wl-item-meta', style: { marginTop: '4px' } },
+            (todo.tags || []).map((tag) => h('span', { className: 'wl-tag' }, '#' + tag)),
+            subCountNode(todo),
+          )
+        : null,
+      h(
+        'div',
+        { className: 'wl-row', style: { marginTop: '6px' } },
+        h(
+          'button',
+          { className: 'wl-btn primary', disabled: state.busy === 'todo-edit', onClick: save },
+          '保存',
+        ),
+        h(
+          'button',
+          {
+            className: 'wl-btn',
+            onClick: () => {
+              state.editingTodo = null
+              render()
+            },
+          },
+          '取消',
+        ),
+      ),
+    ),
+  )
+}
+
+function subCountNode(todo) {
+  const subTotal = (todo.subtasks || []).length
+  if (!subTotal) return null
+  const subDone = (todo.subtasks || []).filter((sub) => sub.done).length
+  return h('span', null, '子任务 ' + subDone + '/' + subTotal)
 }
 
 function addTodoFromForm() {

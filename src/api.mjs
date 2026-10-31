@@ -16,23 +16,27 @@ import {
 import { archiveDay, archiveDays } from '../lib/archive.mjs'
 import {
   addTodo,
+  carryOverTodos,
   clearDoneTodos,
   createBackup,
   deleteBackup,
   deleteTodo,
   extractProjects,
   getDay,
+  getTodoStats,
   importWorkLog,
   listBackups,
   listDays,
   listReports,
   loadState,
   loadTodos,
+  queryTodos,
   readReport,
   recordRun,
   restoreBackup,
   saveDay,
   searchDays,
+  todoStats,
   updateTodo,
 } from '../lib/store.mjs'
 import { askArchive, generateReport, listAiModels, summarizeAiUsage } from '../lib/report.mjs'
@@ -71,6 +75,7 @@ export async function statusPayload(config = loadConfig()) {
       count: todos.length,
       open: todos.filter((todo) => todo.status !== 'done').length,
       overdue: todos.filter((todo) => todo.status !== 'done' && todo.due && todo.due < today).length,
+      stats: todoStats(todos, today),
       recent: todos
         .filter((todo) => todo.status !== 'done')
         .sort((a, b) => String(a.due || '9999').localeCompare(String(b.due || '9999')))
@@ -107,7 +112,9 @@ export async function archiveAction(config, args = {}) {
       mode: args.mode === 'auto' ? 'auto' : 'manual',
       status: result.created ? 'ok' : 'skip',
       note: result.created
-        ? `${result.commitCount} 提交 / ${result.docCount} 文档 / ${result.sessionCount || 0} 会话`
+        ? `${result.commitCount} 提交 / ${result.docCount} 文档 / ${result.sessionCount || 0} 会话${
+            result.carriedCount ? ` / 顺延 ${result.carriedCount} 待办` : ''
+          }`
         : '当天已有归档',
       commitCount: result.commitCount || 0,
       docCount: result.docCount || 0,
@@ -137,8 +144,23 @@ export async function archiveAction(config, args = {}) {
 
 export async function todoAction(config, args = {}) {
   const action = args.action || 'list'
-  if (action === 'list') return loadTodos(config)
+  if (action === 'list') {
+    const todos = await loadTodos(config)
+    return queryTodos(todos, { status: args.status, pri: args.pri, tag: args.tag, q: args.q, sort: args.sort })
+  }
   if (action === 'add') return addTodo(config, args)
+  if (action === 'update') {
+    return updateTodo(config, {
+      id: args.id,
+      title: args.title,
+      md: args.md ?? args.detail,
+      pri: args.pri,
+      due: args.due,
+      repeat: args.repeat,
+      tags: args.tags,
+      subtasks: args.subtasks,
+    })
+  }
   if (action === 'complete' || action === 'reopen') {
     return updateTodo(config, {
       id: args.id,
@@ -152,6 +174,8 @@ export async function todoAction(config, args = {}) {
   }
   if (action === 'delete') return deleteTodo(config, args.id)
   if (action === 'clear_done') return clearDoneTodos(config)
+  if (action === 'carry_over') return carryOverTodos(config, { date: args.date || localDate() })
+  if (action === 'stats') return getTodoStats(config)
   throw new Error(`未知 action: ${action}`)
 }
 
@@ -271,7 +295,9 @@ export async function maybeAutoArchive(config = loadConfig()) {
     mode: 'auto',
     status: result.created ? 'ok' : 'skip',
       note: result.created
-        ? `自动归档：${result.commitCount} 提交 / ${result.docCount} 文档 / ${result.sessionCount || 0} 会话`
+        ? `自动归档：${result.commitCount} 提交 / ${result.docCount} 文档 / ${
+            result.sessionCount || 0
+          } 会话${result.carriedCount ? ` / 顺延 ${result.carriedCount} 待办` : ''}`
         : '当天已有归档',
     commitCount: result.commitCount || 0,
     docCount: result.docCount || 0,
