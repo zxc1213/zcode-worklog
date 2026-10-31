@@ -2207,12 +2207,17 @@ function settingsTab() {
 }
 
 async function loadSched() {
-  if (state.schedData) return
+  // Guard both 'already loaded' and 'load in flight': schedSection re-renders
+  // on every state change, and an unguarded call here once froze the panel
+  // in a render loop while the fetch was in flight or failing.
+  if (state.schedData || state.schedLoading) return
   state.schedLoading = true
   render()
   try {
-    state.schedData = await call('collect', { action: 'diagnostics' })
+    const data = await call('collect', { action: 'diagnostics' })
+    state.schedData = data && typeof data === 'object' ? data : { error: '空响应', tasks: [], sources: [], watchDirs: [], history: [] }
   } catch (error) {
+    state.schedData = { error: String(error?.message || error), tasks: [], sources: [], watchDirs: [], history: [] }
     setNotice('err', '采集诊断与调度加载失败：' + String(error?.message || error))
   } finally {
     state.schedLoading = false
@@ -2289,7 +2294,7 @@ function taskRow(task) {
 
 function schedSection() {
   const open = Boolean(state.settingsOpen.sched)
-  if (open) loadSched().then(render)
+  if (open && !state.schedData && !state.schedLoading) loadSched().then(render)
   const data = state.schedData
   const tasks = data?.tasks || []
   const sources = data?.sources || []
@@ -2876,18 +2881,19 @@ function scheduleTab() {
 }
 
 async function loadTpls() {
-  if (state.tplList) return
+  if (state.tplList || state.tplLoading) return
   state.tplLoading = true
   render()
   try {
     const data = await call('templates', { action: 'list' })
-    state.tplList = data?.templates || []
+    state.tplList = (data && Array.isArray(data.templates) ? data.templates : [])
     const first = state.tplList[0]
     if (first && !state.tplDraft) {
       state.tplDraft = { scene: first.scene, name: first.name, system: first.system, user: first.user, source: first.source }
     }
   } catch (error) {
-    setNotice('err', '模板加载失败：' + String(error?.message || error))
+    state.tplList = []
+    setNotice('err', '模板加载失败：' + String(error?.message || error) + '（重开折叠可重试）')
   } finally {
     state.tplLoading = false
   }
@@ -2902,7 +2908,7 @@ function tplDraftFor(scene) {
 
 function tplSection() {
   const open = Boolean(state.settingsOpen.tpls)
-  if (open) loadTpls().then(render)
+  if (open && !state.tplList && !state.tplLoading) loadTpls().then(render)
   const list = state.tplList || []
   const draft = state.tplDraft
   const current = draft ? list.find((item) => item.scene === draft.scene) : null
@@ -3034,13 +3040,15 @@ function tplSection() {
 }
 
 async function loadConns() {
-  if (state.connList) return
+  if (state.connList || state.connLoading) return
   state.connLoading = true
   render()
   try {
-    state.connList = await call('connectors', { action: 'list' })
+    const list = await call('connectors', { action: 'list' })
+    state.connList = list && typeof list === 'object' ? list : { connectors: [], types: [] }
   } catch (error) {
-    setNotice('err', '连接器加载失败：' + String(error?.message || error))
+    state.connList = { connectors: [], types: [] }
+    setNotice('err', '连接器加载失败：' + String(error?.message || error) + '（重开折叠可重试）')
   } finally {
     state.connLoading = false
   }
@@ -3218,7 +3226,7 @@ function connEditor() {
 
 function connectorsSection() {
   const open = Boolean(state.settingsOpen.conns)
-  if (open) loadConns().then(render)
+  if (open && !state.connList && !state.connLoading) loadConns().then(render)
   const connectors = state.connList?.connectors || []
   return h(
     'div',

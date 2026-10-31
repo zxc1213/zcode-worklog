@@ -106,6 +106,12 @@ function respond(window, message) {
       structured = { builtAt: '2026-10-31T09:00:00.000Z', nodeCount: 3, edgeCount: 3, types: { project: 1, person: 1, tool: 1 }, nodes: [{ key: 'project:商城', type: 'project', label: '商城', weight: 5 }, { key: 'person:Ray', type: 'person', label: 'Ray', weight: 3 }] }
     else if (op === 'graph' && args.entity)
       structured = { entity: args.entity, found: true, type: 'project', label: args.entity, weight: 5, relations: [{ kind: '提交了', count: 3, direction: 'in', other: 'Ray', otherType: 'person' }] }
+    else if (op === 'collect' && args.action === 'diagnostics')
+      structured = { tasks: [{ id: 'collect-sessions', kind: 'collect-sessions', title: 'AI 会话采集', description: 'x', enabled: false, everyHours: 4, dailyAt: '', lastRunAt: '', lastStatus: '', lastError: '' }], history: [], sources: [{ id: 'claude', label: 'Claude Code', path: 'C:/x', kind: 'dir', exists: true, enabled: true }], watchDirs: [] }
+    else if (op === 'templates' && args.action === 'list')
+      structured = { templates: [{ scene: 'report', name: '报告润色', hint: '周报月报', kind: 'report', source: 'builtin', system: 'S', user: 'U' }] }
+    else if (op === 'connectors' && args.action === 'list')
+      structured = { connectors: [], types: [{ type: 'feishu', title: '飞书', description: 'd', fields: [{ key: 'appId', label: 'App ID', type: 'text' }] }] }
     else if (op === 'calendar' && args.action === 'day')
       structured = { date: args.date, archived: true, path: 'x', sessions: [{ title: '日历模拟会话', label: 'Claude', turns: 2, timeRange: '10:00' }], todosDone: [{ title: '测试待办', doneAt: '' }], entries: { count: 3, bySource: { git: 2, sessions: 1 }, items: [{ time: '10:00', title: 'feat: x', project: 'demo', source: 'git', ref: 'a1' }] }, hasDailyReport: false }
     else if (op === 'todos' && args.action === 'list') structured = { items: bootstrap.todos }
@@ -304,6 +310,26 @@ assert.equal(modelPick.querySelectorAll('option').length, 4, 'placeholder plus t
 const manualInput = [...doc.querySelectorAll('input')].find((el) => el.placeholder === '或手动填写模型名')
 assert.ok(manualInput, 'manual model input renders when models are loaded')
 assert.equal(text().split('已加载 3 个模型').length - 1, 1, 'model hint renders exactly once')
+// regression: expanding the async settings folds must not freeze the panel
+const schedFold = [...doc.querySelectorAll('.wl-fold-head')].find((item) => item.textContent.includes('采集调度与诊断'))
+assert.ok(schedFold, 'sched fold head exists')
+schedFold.click()
+await new Promise((resolve) => setTimeout(resolve, 80))
+assert.ok(text().includes('调度任务'), 'sched fold rendered body')
+const tplFold = [...doc.querySelectorAll('.wl-fold-head')].find((item) => item.textContent.includes('提示词模板'))
+assert.ok(tplFold, 'tpl fold head exists')
+tplFold.click()
+await new Promise((resolve) => setTimeout(resolve, 80))
+assert.ok(text().includes('变量：'), 'tpl fold rendered body')
+const connFold = [...doc.querySelectorAll('.wl-fold-head')].find((item) => item.textContent.includes('外部连接器'))
+assert.ok(connFold, 'conn fold head exists')
+connFold.click()
+await new Promise((resolve) => setTimeout(resolve, 80))
+assert.ok(text().includes('新建连接器'), 'conn fold rendered body')
+
+connFold.click()
+await new Promise((resolve) => setTimeout(resolve, 20))
+console.log('settings folds OK')
 console.log('settings OK')
 
 const ops = messages
