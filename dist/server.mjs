@@ -315,7 +315,7 @@ var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.14.0";
+    PLUGIN_VERSION = "0.16.0";
   }
 });
 
@@ -38816,6 +38816,16 @@ function sessionMonthCounts(sessions, month) {
   }
   return days;
 }
+async function getSessionDetail(config2, key, { home = homedir4(), dshHome } = {}) {
+  const index = await loadSessionIndex(config2);
+  const meta3 = index.sessions.find((item) => item.key === String(key || ""));
+  if (!meta3) throw new Error("\u4F1A\u8BDD\u4E0D\u5728\u7D22\u5F15\u4E2D\uFF0C\u8BF7\u5148\u540C\u6B65\u5168\u90E8\u4F1A\u8BDD");
+  const { all } = await collectAllSessions(config2, { home, dshHome });
+  const session = all.find((item) => item.source === meta3.source && item.file === meta3.file);
+  if (!session) return { ...meta3, available: false, note: "\u6E90\u6587\u4EF6\u5DF2\u79FB\u52A8\u6216\u5220\u9664\uFF0C\u65E0\u6CD5\u8BFB\u53D6\u6458\u5F55" };
+  const dates = Object.entries(session.dates || {}).map(([date5, day]) => ({ date: date5, turns: day.turns || 0, texts: day.texts || [] })).sort((a, b) => a.date.localeCompare(b.date));
+  return { ...meta3, available: true, dates };
+}
 
 // lib/scheduler.mjs
 init_config();
@@ -39570,6 +39580,9 @@ async function sessionAction(config2, args = {}) {
   if (action === "query") {
     return querySessions(config2, args);
   }
+  if (action === "content") {
+    return getSessionDetail(config2, args.key, { home: args.home || void 0, dshHome: args.dshHome || void 0 });
+  }
   if (action === "mark") return markSessions(config2, args.keys, args.mark);
   if (action === "unmark") return markSessions(config2, args.keys, args.mark, { remove: true });
   if (action === "group") return setSessionGroup(config2, args.keys, args.group);
@@ -39797,7 +39810,7 @@ tool(
     title: "\u672C\u673A AI \u4F1A\u8BDD\u6C47\u603B",
     description: "\u8BFB\u53D6\u672C\u673A AI \u5DE5\u5177\u4F1A\u8BDD\uFF1Aaction=sync_all \u4E00\u952E\u5168\u91CF\u540C\u6B65\u6240\u6709\u5DE5\u5177\u7684\u5168\u90E8\u5386\u53F2\u4F1A\u8BDD\u5230\u6301\u4E45\u7D22\u5F15\uFF08force \u5FFD\u7565\u7F13\u5B58\u3001windowDays \u9650\u5236 sqlite \u6E90\u7A97\u53E3\uFF09\uFF1Baction=query \u6309\u6761\u4EF6\u7B5B\u9009 {q \u5173\u952E\u8BCD, project/cwd, source, start/end \u65E5\u671F, minTurns, mark, group, workOnly \u4EC5\u5DE5\u4F5C\u76F8\u5173(\u6309\u626B\u63CF\u76EE\u5F55\u4E0E workKeywords), workKeywords[], groupBy=project|source|date|mark|group}\uFF0C\u8FD4\u56DE\u547D\u4E2D\u4F1A\u8BDD+\u5173\u952E\u8BCD\u5206\u6790(keywords)+\u5206\u7EC4(groups)\uFF1Baction=mark/unmark {keys, mark} \u6253/\u53BB\u6807\u8BB0\uFF1Baction=group {keys, group} \u8BBE\u81EA\u5B9A\u4E49\u5206\u7EC4\uFF1Bindex_status \u67E5\u7D22\u5F15\u72B6\u6001\uFF1Blist \u6309\u5929\u89C6\u56FE\uFF1Bsources \u5217\u6765\u6E90\uFF1Brefresh \u5F3A\u5236\u91CD\u626B\u3002",
     inputSchema: external_exports.object({
-      action: external_exports.enum(["list", "sources", "refresh", "sync_all", "query", "mark", "unmark", "group", "index_status", "month"]).optional(),
+      action: external_exports.enum(["list", "sources", "refresh", "sync_all", "query", "mark", "unmark", "group", "index_status", "month", "content"]).optional(),
       q: external_exports.string().optional(),
       project: external_exports.string().optional(),
       source: external_exports.string().optional(),

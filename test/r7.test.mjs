@@ -123,3 +123,28 @@ describe('r7 session manager', () => {
 function sep() {
   return process.platform === 'win32' ? '\\' : '/'
 }
+
+describe('r7 session content', () => {
+  it('loads per-date excerpts for an indexed session', async () => {
+    const config = loadConfig()
+    const index = await manager.loadSessionIndex(config)
+    const work = index.sessions.find((item) => item.title.includes('worklog'))
+    assert.ok(work, 'indexed work session present')
+    const detail = await api.sessionAction(config, {
+      action: 'content', key: work.key, home: fakeHome, dshHome: join(fakeHome, '.dsh'),
+    })
+    assert.equal(detail.available, true)
+    assert.ok(detail.dates.length >= 2, 'both dates carry excerpts')
+    const texts = detail.dates.flatMap((day) => day.texts)
+    assert.ok(texts.some((text) => text.includes('session 管理功能')))
+    assert.ok(texts.some((text) => text.includes('筛选与标记')))
+
+    await assert.rejects(
+      async () => {
+        const { getSessionDetail } = await import('../lib/session-manager.mjs')
+        await getSessionDetail(config, 'ghost-key', { home: fakeHome, dshHome: join(fakeHome, '.dsh') })
+      },
+      /不在索引中/,
+    )
+  })
+})

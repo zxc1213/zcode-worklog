@@ -702,3 +702,7 @@ body {
   color: var(--wl-ok);
   border-color: var(--wl-ok-soft);
 }
+
+.wl-card.clickable:hover {
+  border-color: var(--wl-accent);
+}

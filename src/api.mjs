@@ -45,7 +45,7 @@ import { askArchive, aiComplete, generateReport, listAiModels, summarizeAiUsage,
 import { listTemplates, render as renderTpl, resetTemplate, saveTemplate } from '../lib/templates.mjs'
 import { detectAiCandidates, findAiCandidate, publicCandidate } from '../lib/ai-detect.mjs'
 import { listSessionSources, parseSessionLines, scanSessions } from '../lib/sessions.mjs'
-import { buildSessionIndex, loadSessionIndex, markSessions, querySessions, sessionMonthCounts, setSessionGroup } from '../lib/session-manager.mjs'
+import { buildSessionIndex, getSessionDetail, loadSessionIndex, markSessions, querySessions, sessionMonthCounts, setSessionGroup } from '../lib/session-manager.mjs'
 import { getHistory, getTasks, runDueTasks, updateTask } from '../lib/scheduler.mjs'
 import { calendarDay, calendarMonth } from '../lib/calendar.mjs'
 import { CONNECTOR_TYPES, adapterFor, listConnectors, normalizeConnector, publicConnectorList, syncConnectors } from '../lib/connectors.mjs'
@@ -508,6 +508,9 @@ export async function sessionAction(config, args = {}) {
   }
   if (action === 'query') {
     return querySessions(config, args)
+  }
+  if (action === 'content') {
+    return getSessionDetail(config, args.key, { home: args.home || undefined, dshHome: args.dshHome || undefined })
   }
   if (action === 'mark') return markSessions(config, args.keys, args.mark)
   if (action === 'unmark') return markSessions(config, args.keys, args.mark, { remove: true })

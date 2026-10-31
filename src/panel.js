@@ -105,6 +105,7 @@ const state = {
   sessCalData: null,
   sessCalLoading: false,
   sessCalSelected: '',
+  sessContent: {},
   reportsOpen: false,
   logCalMonth: '',
   logCalData: null,
@@ -324,7 +325,13 @@ function overviewTab() {
         false,
         () => gotoTab('schedule'),
       ),
-      card('项目', `${projects.length} 个`, `${status.backups?.count || 0} 份备份`),
+      card(
+        '项目',
+        `${projects.length} 个`,
+        `${status.backups?.count || 0} 份备份 · 点看项目档案`,
+        false,
+        () => { gotoTab('logs'); state.reportsOpen = true; state.reportKind = 'project' },
+      ),
       card('AI 会话', `${status.sessions?.count || 0} 场`, `${status.sessions?.turns || 0} 轮 · 点看今日`, false, () => { gotoTab('sessions'); state.sessFilters.start = state.sessFilters.end = status.today?.date || today(); state.sessResult = null; runSessQuery() }),
     ),
     h(
@@ -3540,15 +3547,57 @@ function sessRow(session) {
         h('span', null, session.turns + ' 轮'),
       ),
       expanded
-        ? h(
-            'div',
-            { className: 'wl-hint', style: { marginTop: '4px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' } },
-            (session.preview || '（无摘录，点「按日扫描」可看当天详情）') +
-              '\n目录：' + (session.cwd || '—') +
-              '\n文件：' + (session.file || '—') +
-              '\n日期：' + session.first + ' ~ ' + session.last,
-          )
+        ? [
+            h(
+              'div',
+              { className: 'wl-hint', style: { marginTop: '4px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' } },
+              (session.preview || '（无摘录，点「按日扫描」可看当天详情）') +
+                '\n目录：' + (session.cwd || '—') +
+                '\n文件：' + (session.file || '—') +
+                '\n日期：' + session.first + ' ~ ' + session.last,
+            ),
+            state.sessContent[session.key] === undefined
+              ? h(
+                  'button',
+                  {
+                    className: 'wl-btn tiny',
+                    style: { marginTop: '4px' },
+                    disabled: state.busy === 'sess-content',
+                    onClick: () =>
+                      act('sess-content', async () => {
+                        const data = await call('sessions', { action: 'content', key: session.key })
+                        state.sessContent[session.key] = data
+                      }, { refresh: false }),
+                  },
+                  '加载完整摘录',
+                )
+              : sessContentNode(state.sessContent[session.key]),
+          ]
         : null,
+    ),
+  )
+}
+
+function sessContentNode(data) {
+  if (!data) return null
+  if (!data.available) return h('div', { className: 'wl-carry', style: { marginTop: '4px' } }, data.note || '源文件不可读')
+  if (!(data.dates || []).length) return h('div', { className: 'wl-hint', style: { marginTop: '4px' } }, '没有缓存的摘录（可在设置里把该工具目录加入会话目录后重新同步）')
+  return h(
+    'div',
+    { className: 'wl-list', style: { marginTop: '4px' } },
+    data.dates.map((day) =>
+      h(
+        'div',
+        { className: 'wl-item', key: day.date },
+        h(
+          'div',
+          { className: 'grow' },
+          h('div', { className: 'wl-item-meta' }, day.date + ' · ' + day.turns + ' 轮 · 用户提问摘录 ' + day.texts.length + ' 条'),
+          day.texts.map((text, index) =>
+            h('div', { className: 'wl-hint', key: index, style: { marginTop: '2px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' } }, '· ' + text),
+          ),
+        ),
+      ),
     ),
   )
 }
