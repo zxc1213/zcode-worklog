@@ -140,7 +140,7 @@ zcode plugins install zcode-worklog@zcode-worklog
 
 ## Agent 工具
 
-`worklog_status`、`worklog_day`、`worklog_search`、`worklog_todos`、`worklog_archive`、`worklog_sessions`、`worklog_report`、`worklog_ask`、`worklog_projects`、`worklog_usage`、`worklog_backup`、`worklog_config`、`worklog_open`、`worklog_collect`（采集调度与诊断）、`worklog_wizard`（AI 工具配置向导）、`worklog_calendar`（日历聚合）。
+`worklog_status`、`worklog_day`、`worklog_search`、`worklog_todos`、`worklog_archive`、`worklog_sessions`、`worklog_report`、`worklog_ask`、`worklog_projects`、`worklog_usage`、`worklog_backup`、`worklog_config`、`worklog_open`、`worklog_collect`（采集调度与诊断）、`worklog_wizard`（AI 工具配置向导）、`worklog_calendar`（日历聚合）、`worklog_templates`（提示词模板：list/save/reset）。
 
 工具名在会话里通常带 `mcp__plugin_zcode-worklog_worklog__` 前缀。
 
@@ -178,7 +178,7 @@ zcode plugins install zcode-worklog@zcode-worklog
 ## 与旧版 / dsh-worklog 的区别
 
 - 独立维护，不依赖 WorkLog 的 Python 后端、Claude CLI、8377 端口。
-- 已实现：Git/文档归档、日志编辑/搜索、待办（子任务/标签/AI 助手）、确定性汇报、可选 AI 润色/问答、AI 会话汇总、备份、旧归档导入、自动归档、侧边面板、采集调度器（补偿式定时）、AI 工具配置向导、监控目录指纹扫描（本地/网盘/git）。
+- 已实现：Git/文档归档、日志编辑/搜索、待办（子任务/标签/AI 助手）、确定性汇报、任意范围总结（summarize，无 AI 降级）、可选 AI 润色/问答、AI 会话汇总、备份、旧归档导入、自动归档、侧边面板、采集调度器（补偿式定时）、AI 工具配置向导、监控目录指纹扫描、统一条目时间轴、交互日历、提示词模板系统（5 场景可自定义）。
 - 尚未实现：Cursor/Trae/Windsurf 的 VS Code 数据库会话扫描、Word/Excel 导出、绩效模板 Excel 还原、飞书工时、业务流程图。后续可以按需从 dsh-worklog 继续移植。
 
 ## 开发

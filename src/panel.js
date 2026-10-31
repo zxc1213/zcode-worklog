@@ -90,6 +90,9 @@ const state = {
   wizardTypes: null,
   wizardDraft: { type: 'claude', location: '' },
   wizardProbe: null,
+  tplList: null,
+  tplDraft: null,
+  tplLoading: false,
   reports: [],
   backups: [],
   config: null,
@@ -108,7 +111,7 @@ const state = {
   aiModels: [],
   aiModelsBusy: false,
   aiModelsNote: '',
-  settingsOpen: { data: false, ai: false, backup: false, import: false, sched: false, wizard: false },
+  settingsOpen: { data: false, ai: false, backup: false, import: false, sched: false, wizard: false, tpls: false },
 }
 
 function h(tag, props = {}, ...children) {
@@ -2162,6 +2165,7 @@ function settingsTab() {
     ),
     schedSection(),
     wizardSection(),
+    tplSection(),
   )
 }
 
@@ -2685,6 +2689,164 @@ function calendarTab() {
       calGrid(),
     ),
     h('div', { className: 'wl-card wide' }, calDayDetail()),
+  )
+}
+
+async function loadTpls() {
+  if (state.tplList) return
+  state.tplLoading = true
+  render()
+  try {
+    const data = await call('templates', { action: 'list' })
+    state.tplList = data?.templates || []
+    const first = state.tplList[0]
+    if (first && !state.tplDraft) {
+      state.tplDraft = { scene: first.scene, name: first.name, system: first.system, user: first.user, source: first.source }
+    }
+  } catch (error) {
+    setNotice('err', '模板加载失败：' + String(error?.message || error))
+  } finally {
+    state.tplLoading = false
+  }
+}
+
+function tplDraftFor(scene) {
+  const found = (state.tplList || []).find((item) => item.scene === scene)
+  if (!found) return state.tplDraft
+  state.tplDraft = { scene, name: found.name, system: found.system, user: found.user, source: found.source }
+  return state.tplDraft
+}
+
+function tplSection() {
+  const open = Boolean(state.settingsOpen.tpls)
+  if (open) loadTpls().then(render)
+  const list = state.tplList || []
+  const draft = state.tplDraft
+  const current = draft ? list.find((item) => item.scene === draft.scene) : null
+  return h(
+    'div',
+    { className: `wl-fold${open ? ' open' : ''}` },
+    h(
+      'button',
+      {
+        className: 'wl-fold-head',
+        type: 'button',
+        onClick: () => {
+          state.settingsOpen.tpls = !open
+          render()
+        },
+      },
+      h('span', { className: 'wl-fold-caret' }, open ? '▾' : '▸'),
+      '提示词模板',
+      h('span', { className: 'wl-hint' }, '全部 AI 调用的提示词可自定义'),
+    ),
+    open
+      ? h(
+          'div',
+          { className: 'wl-fold-body' },
+          !list.length
+            ? h('div', { className: 'wl-hint' }, state.tplLoading ? '加载中…' : '无模板')
+            : [
+                h(
+                  'div',
+                  { className: 'wl-row' },
+                  h(
+                    'select',
+                    {
+                      className: 'wl-select',
+                      style: { width: '150px' },
+                      value: draft?.scene || '',
+                      onChange: (event) => {
+                        tplDraftFor(event.target.value)
+                        render()
+                      },
+                    },
+                    list.map((item) =>
+                      h('option', { value: item.scene, selected: draft?.scene === item.scene }, item.name),
+                    ),
+                  ),
+                  h('span', { className: 'wl-hint' }, current?.hint || ''),
+                  h('span', { className: `wl-tag ${current?.source === 'user' ? 'mid' : ''}` }, current?.source === 'user' ? '自定义' : '内置'),
+                ),
+                h('div', { className: 'wl-hint', style: { marginTop: '4px' } },
+                  '变量：{{today}} {{rangeStart}} {{rangeEnd}} {{content}} {{todos}} {{question}} {{text}}，缺失安全置空'),
+                draft
+                  ? h('input', {
+                      className: 'wl-input',
+                      value: draft.name,
+                      placeholder: '模板名',
+                      style: { marginTop: '6px' },
+                      onInput: (event) => {
+                        draft.name = event.target.value
+                      },
+                    })
+                  : null,
+                draft
+                  ? h('textarea', {
+                      className: 'wl-input',
+                      rows: 5,
+                      value: draft.system,
+                      placeholder: 'SYSTEM 段（角色与硬性规则）',
+                      style: { marginTop: '6px' },
+                      onInput: (event) => {
+                        draft.system = event.target.value
+                      },
+                    })
+                  : null,
+                draft
+                  ? h('textarea', {
+                      className: 'wl-input',
+                      rows: 7,
+                      value: draft.user,
+                      placeholder: 'USER 段（内容与变量）',
+                      style: { marginTop: '6px' },
+                      onInput: (event) => {
+                        draft.user = event.target.value
+                      },
+                    })
+                  : null,
+                h(
+                  'div',
+                  { className: 'wl-row', style: { marginTop: '6px' } },
+                  h(
+                    'button',
+                    {
+                      className: 'wl-btn primary',
+                      disabled: state.busy === 'tpl-save',
+                      onClick: () =>
+                        act('tpl-save', async () => {
+                          await call('templates', {
+                            action: 'save',
+                            scene: draft.scene,
+                            name: draft.name,
+                            system: draft.system,
+                            user: draft.user,
+                          })
+                          state.tplList = null
+                          setNotice('ok', '模板已保存：' + draft.name)
+                        }),
+                    },
+                    '保存',
+                  ),
+                  h(
+                    'button',
+                    {
+                      className: 'wl-btn',
+                      disabled: state.busy === 'tpl-reset',
+                      onClick: () =>
+                        act('tpl-reset', async () => {
+                          await call('templates', { action: 'reset', scene: draft.scene })
+                          state.tplList = null
+                          state.tplDraft = null
+                          setNotice('ok', '已恢复内置模板')
+                        }),
+                    },
+                    '恢复默认',
+                  ),
+                ),
+              ],
+        )
+      : null,
   )
 }
 

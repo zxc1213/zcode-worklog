@@ -12,6 +12,7 @@ description: 生成日报/周报/月报/季报/绩效素材/项目档案
 - `quarter [YYYY-Q1..Q4]` → `kind: "quarter"`, `quarter`
 - `perf [YYYY-MM]` → `kind: "perf"`, `month`
 - `project <项目名>` → `kind: "project"`, `project`
+- `summarize <开始> [结束]` → `{ action: "summarize", start, end }`，用「自由总结」提示词模板总结任意日期范围（未配置 AI 时输出规则摘要）
 - 为空默认 `weekly`
 
 默认生成确定性草稿。只有用户明确要求「AI 润色」且 `worklog_config` 显示已配置 `ai.baseUrl`/`ai.model` 时，才传 `useAi: true`。

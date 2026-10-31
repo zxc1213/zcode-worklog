@@ -302,7 +302,7 @@ describe('todos v2 ai actions', () => {
       assert.equal(suggestion.picks[0].reason, '逾期且顺延多次')
 
       const state = await store.loadState(config)
-      assert.equal(state.aiUsage[0].kind, 'todo')
+      assert.equal(state.aiUsage[0].kind, 'todo-suggest')
     } finally {
       server.close()
       saveConfig({ ai: { baseUrl: '', model: '', clearApiKey: true } })

@@ -50,7 +50,7 @@ Ray：单人使用，本机多 AI 工具（ZCode/DSH/Claude Code/Codex/Gemini…
 - **REQ-O3（P1）知识图谱**：实体（项目/人/AI 工具/主题标签/外部系统对象）与关系（提交了/参与了/提及/依赖）；规则抽取为主（git author、项目名、标签、会话归属），AI 抽取可选增强；数据存 data/graph.json；面板「图谱」页签可浏览实体详情与关系列表（v1 列表式 + 简单可视化，不追求力导向大图）；提供 worklog_graph 查询工具。
 
 ### C 提炼 Distill
-- **REQ-D1（P0）提示词模板系统**：模板 = frontmatter{id,name,scene,system,user} + 正文；场景 scene 枚举（report-daily/report-weekly/report-month/report-quarter/ask/parse/suggest/summarize/custom-*）；变量 {{today}} {{rangeStart}} {{rangeEnd}} {{content}} {{todos}} {{entries}} 等，缺失变量安全置空；模板存 data/templates/*.md，用户可增删改、设为场景默认、导入导出；所有 AI 调用点（润色/问答/parse/suggest/总结）统一走模板引擎。
+- **REQ-D1（P0，R3 已实现）提示词模板系统**：模板 = frontmatter{id,name,scene,system,user} + 正文；场景 scene 枚举（report-daily/report-weekly/report-month/report-quarter/ask/parse/suggest/summarize/custom-*）；变量 {{today}} {{rangeStart}} {{rangeEnd}} {{content}} {{todos}} {{entries}} 等，缺失变量安全置空；模板存 data/templates/*.md，用户可增删改、设为场景默认、导入导出；所有 AI 调用点（润色/问答/parse/suggest/总结）统一走模板引擎。
 - **REQ-D2（P1）周期工作推荐**：规则引擎打分（逾期顺延待办 > 外部系统高优/临期任务 > 活跃项目无日志 > 日历临近事项）产出「建议关注」清单；自动注入周报/日卡片，面板可手动刷新；每条建议可标记采纳/忽略，反馈记录用于调整权重（简单计数权重，不引入 ML）。
 
 ### D 交付 Deliver
@@ -94,5 +94,6 @@ Ray：单人使用，本机多 AI 工具（ZCode/DSH/Claude Code/Codex/Gemini…
 ## 8. 变更记录
 
 - v0.1（2026-10-31）：首版。九条基线映射完成，现状差距明确，路线图 R1-R6。
+- v0.4（2026-10-31）：R3 发布（0.6.0）。D1 已实现：lib/templates.mjs 五场景（report/ask/todo-parse/todo-suggest/summarize），文件格式 frontmatter + ### SYSTEM/### USER，用户模板缺失段回落内置；四个 AI 调用点全部迁移；新增 worklog_report action=summarize（自由总结，无 AI 降级规则摘要）；worklog_templates 工具（17 个）；设置页「提示词模板」编辑块。自测修复：模板读取误用 async 导致内置回落（改 readFileSync）。设计复审：用量 kind 精确到场景名（todo-parse/todo-suggest/summarize）。
 - v0.3（2026-10-31）：R2 发布（0.5.0）。O1/O2 已实现：lib/entries.mjs（append-only+指纹去重+上限裁剪）、采集接线（归档 git/docs/sessions、watch 变化、调度会话扫描）、日报新增「## 采集条目」小节、lib/calendar.mjs 月/日聚合、面板「日历」页签（月视图+日详情）、worklog_calendar 工具（16 个工具）。设计复审调整：调度会话任务也直接产条目（不再等归档）。
 - v0.2（2026-10-31）：R1 发布（0.4.0）。C1/C2/C3(指纹)/C5 标记已实现；基线映射表"现状"列待 R2 统一条目后一并刷新。

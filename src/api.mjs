@@ -41,7 +41,8 @@ import {
   todoStats,
   updateTodo,
 } from '../lib/store.mjs'
-import { askArchive, aiComplete, generateReport, listAiModels, summarizeAiUsage } from '../lib/report.mjs'
+import { askArchive, aiComplete, generateReport, listAiModels, summarizeAiUsage, summarizeRange } from '../lib/report.mjs'
+import { listTemplates, render as renderTpl, resetTemplate, saveTemplate } from '../lib/templates.mjs'
 import { detectAiCandidates, findAiCandidate, publicCandidate } from '../lib/ai-detect.mjs'
 import { listSessionSources, parseSessionLines, scanSessions } from '../lib/sessions.mjs'
 import { getHistory, getTasks, runDueTasks, updateTask } from '../lib/scheduler.mjs'
@@ -177,17 +178,13 @@ export async function parseTodoDrafts(config, args = {}) {
   if (!text) throw new Error('需要解析的文本不能为空')
   const batch = args.mode === 'batch'
   const today = localDate()
-  const system = [
-    '你是待办解析助手。把用户文本解析成待办 JSON，只输出 JSON，不要输出其他文字。',
-    '格式：{"todos":[{"title":"一句话标题","pri":"高|中|低或空","due":"YYYY-MM-DD或空","repeat":"daily|weekly:0-6|monthly:1-28或空","tags":["标签"]}]}',
-    '今天是 ' + today + '（' + weekdayName(today) + '）。时间规则：周五→最近的周五、下周一→下周、月底→本月最后一天、N天后→今天+N；没有时间信息 due 留空。',
-    '每天/每日→daily；每周X→weekly:X（0=周日）；每月X号→monthly:X（1-28）。',
-    '紧急/尽快/马上→高；不急/有空时→低；#词 提取为 tags（去掉#号）。',
-    'title 不要包含日期、优先级、#标签记号。',
-    batch ? '把文本拆成多条相互独立的待办。' : '只解析出 1 条待办。',
-    '只依据文本内容，不要编造。',
-  ].join('\n')
-  const result = await aiComplete(config, system, text, { kind: 'todo' })
+  const tpl = renderTpl(config, 'todo-parse', {
+    today,
+    weekday: weekdayName(today),
+    modeHint: batch ? '把文本拆成多条相互独立的待办。' : '只解析出 1 条待办。',
+    text,
+  })
+  const result = await aiComplete(config, tpl.system, tpl.user, { kind: tpl.scene })
   const data = extractJson(result.text)
   const list = Array.isArray(data.todos) ? data.todos : []
   const drafts = []
@@ -229,12 +226,8 @@ export async function suggestTopTodos(config) {
       ' | id:' +
       todo.id,
   )
-  const system = [
-    '你是每日计划助手。从待办列表中选出今天最值得做的 3 件要事，只输出 JSON：{"picks":[{"id":"待办id","reason":"一句话理由"}]}。',
-    '选择规则：逾期且顺延次数多的优先，其次高优先级，再次到期日临近；理由要具体到待办内容。',
-    '只输出 JSON，不要输出其他文字。',
-  ].join('\n')
-  const result = await aiComplete(config, system, lines.join('\n'), { kind: 'todo' })
+  const tpl = renderTpl(config, 'todo-suggest', { content: lines.join('\n') })
+  const result = await aiComplete(config, tpl.system, tpl.user, { kind: tpl.scene })
   const data = extractJson(result.text)
   const picks = (Array.isArray(data.picks) ? data.picks : [])
     .map((pick) => {
@@ -274,6 +267,17 @@ export async function collectAction(config, args = {}) {
     return runDueTasks(config, { force: true, id: args.id || '' })
   }
   if (action === 'set') return updateTask(config, args)
+  throw new Error(`未知 action: ${action}`)
+}
+
+export async function templatesAction(config, args = {}) {
+  const action = args.action || 'list'
+  if (action === 'list') return { templates: listTemplates(config) }
+  if (action === 'save') {
+    const template = await saveTemplate(config, args.scene, { name: args.name, system: args.system, user: args.user })
+    return { saved: true, template }
+  }
+  if (action === 'reset') return { template: await resetTemplate(config, args.scene) }
   throw new Error(`未知 action: ${action}`)
 }
 
@@ -335,6 +339,7 @@ export async function todoAction(config, args = {}) {
 export async function reportAction(config, args = {}) {
   const action = args.action || 'generate'
   if (action === 'list') return listReports(config)
+  if (action === 'summarize') return summarizeRange(config, args)
   if (action === 'read') return readReport(config, args.name)
   if (action === 'generate') return generateReport(config, args)
   throw new Error(`未知 action: ${action}`)
@@ -503,6 +508,8 @@ export async function dispatch(op, args = {}) {
       return wizardAction(args)
     case 'calendar':
       return calendarAction(config, args)
+    case 'templates':
+      return templatesAction(config, args)
     case 'days':
       return listDays(config)
     case 'reports':

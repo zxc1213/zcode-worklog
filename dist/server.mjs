@@ -275,7 +275,7 @@ var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.5.0";
+    PLUGIN_VERSION = "0.6.0";
   }
 });
 
@@ -1084,22 +1084,22 @@ __export(watch_exports, {
   normalizeWatchDirs: () => normalizeWatchDirs2,
   scanWatchDirs: () => scanWatchDirs
 });
-import { existsSync as existsSync5 } from "node:fs";
-import { readdir as readdir4, readFile as readFile4, stat as stat4, writeFile as writeFile5 } from "node:fs/promises";
-import { basename as basename4, dirname as dirname5, join as join7 } from "node:path";
+import { existsSync as existsSync6 } from "node:fs";
+import { readdir as readdir4, readFile as readFile5, stat as stat4, writeFile as writeFile6 } from "node:fs/promises";
+import { basename as basename4, dirname as dirname5, join as join8 } from "node:path";
 function watchCacheFile(config2) {
-  return join7(config2.dataDir, "watch-cache.json");
+  return join8(config2.dataDir, "watch-cache.json");
 }
 async function loadWatchCache(config2) {
   try {
-    const parsed = JSON.parse(await readFile4(watchCacheFile(config2), "utf8"));
+    const parsed = JSON.parse(await readFile5(watchCacheFile(config2), "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
   }
 }
 async function saveWatchCache(config2, cache) {
-  await writeFile5(watchCacheFile(config2), JSON.stringify(cache, null, 2) + "\n", "utf8");
+  await writeFile6(watchCacheFile(config2), JSON.stringify(cache, null, 2) + "\n", "utf8");
 }
 function normalizeWatchDirs2(input2) {
   const list = Array.isArray(input2) ? input2 : [];
@@ -1123,7 +1123,7 @@ async function walk2(dir, depth, visit2) {
     return;
   }
   for (const entry of entries) {
-    const full = join7(dir, entry.name);
+    const full = join8(dir, entry.name);
     if (entry.isDirectory()) {
       if (SKIP_DIRS2.has(entry.name)) continue;
       await walk2(full, depth + 1, visit2);
@@ -1162,7 +1162,7 @@ async function scanWatchDirs(config2) {
     };
     visit2.count = 0;
     try {
-      if (!existsSync5(dir.path)) throw new Error("\u76EE\u5F55\u4E0D\u5B58\u5728");
+      if (!existsSync6(dir.path)) throw new Error("\u76EE\u5F55\u4E0D\u5B58\u5728");
       await walk2(dir.path, 0, visit2);
       if (visit2.count > MAX_FILES_PER_DIR) truncated = true;
     } catch (walkError) {
@@ -1224,8 +1224,8 @@ var init_watch = __esm({
 });
 
 // src/server.mjs
-import { readFile as readFile5 } from "node:fs/promises";
-import { dirname as dirname6, join as join9 } from "node:path";
+import { readFile as readFile6 } from "node:fs/promises";
+import { dirname as dirname6, join as join10 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // node_modules/@modelcontextprotocol/server/dist/chunk-vYduTEsO.mjs
@@ -36613,6 +36613,181 @@ async function archiveDays(config2, dates, options = {}) {
 // lib/report.mjs
 init_config();
 init_sessions();
+
+// lib/templates.mjs
+init_config();
+import { existsSync as existsSync5, readFileSync as readFileSync2 } from "node:fs";
+import { mkdir as mkdir5, readFile as readFile4, unlink as unlink2, writeFile as writeFile5 } from "node:fs/promises";
+import { join as join6 } from "node:path";
+var MAX_USER_FILE = 64 * 1024;
+var SCENES = [
+  { scene: "report", name: "\u62A5\u544A\u6DA6\u8272", kind: "report", hint: "\u5468\u62A5/\u6708\u62A5/\u5B63\u62A5\u7684 AI \u6DA6\u8272" },
+  { scene: "ask", name: "\u65E5\u5FD7\u95EE\u7B54", kind: "ask", hint: "worklog_ask \u7684\u56DE\u7B54\u53E3\u5F84" },
+  { scene: "todo-parse", name: "\u5F85\u529E\u89E3\u6790", kind: "todo", hint: "AI \u586B\u5355/\u6279\u91CF\u89E3\u6790" },
+  { scene: "todo-suggest", name: "\u6BCF\u65E5\u4E09\u4EF6\u4E8B", kind: "todo", hint: "\u4ECA\u65E5 3 \u4EF6\u8981\u4E8B" },
+  { scene: "summarize", name: "\u81EA\u7531\u603B\u7ED3", kind: "summarize", hint: "\u5BF9\u4EFB\u610F\u8303\u56F4\u5185\u5BB9\u7684\u603B\u7ED3" }
+];
+function templatesDir(config2) {
+  return join6(config2.dataDir, "templates");
+}
+function templateFile(config2, scene) {
+  return join6(templatesDir(config2), scene + ".md");
+}
+function validScene(scene) {
+  return SCENES.some((item) => item.scene === scene);
+}
+function builtinTemplate(scene) {
+  return BUILTINS[scene] || null;
+}
+function parseTemplateFile(text) {
+  let frontmatter = {};
+  let body = String(text || "");
+  const match = body.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (match) {
+    for (const line of match[1].split(/\r?\n/)) {
+      const idx = line.indexOf(":");
+      if (idx > 0) frontmatter[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+    }
+    body = body.slice(match[0].length);
+  }
+  const system = [];
+  const user = [];
+  let target = user;
+  for (const line of body.split(/\r?\n/)) {
+    if (line.trim() === "### SYSTEM") {
+      target = system;
+      continue;
+    }
+    if (line.trim() === "### USER") {
+      target = user;
+      continue;
+    }
+    target.push(line);
+  }
+  return {
+    name: frontmatter.name || "",
+    system: system.join("\n").trim(),
+    user: user.join("\n").trim()
+  };
+}
+function readTemplateFile(config2, scene) {
+  const file2 = templateFile(config2, scene);
+  if (!existsSync5(file2)) return null;
+  try {
+    return parseTemplateFile(readFileSync2(file2, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function resolveTemplate(config2, scene) {
+  if (!validScene(scene)) throw new Error("\u672A\u77E5\u6A21\u677F\u573A\u666F\uFF1A" + scene);
+  const builtin = builtinTemplate(scene) || { name: "", system: "", user: "{{content}}" };
+  const custom2 = readTemplateFile(config2, scene);
+  if (!custom2) return { scene, name: builtin.name, system: builtin.system, user: builtin.user, source: "builtin" };
+  return {
+    scene,
+    name: custom2.name || builtin.name,
+    system: custom2.system || builtin.system,
+    user: custom2.user || builtin.user,
+    source: "user"
+  };
+}
+function renderTemplate(text, vars = {}) {
+  return String(text || "").replace(/\{\{(\w+)\}\}/g, (all, key) => {
+    const value = vars[key];
+    if (value === void 0 || value === null) return "";
+    return String(value);
+  });
+}
+function render(config2, scene, vars = {}) {
+  const resolved = resolveTemplate(config2, scene);
+  return {
+    scene: resolved.scene,
+    name: resolved.name,
+    source: resolved.source,
+    system: renderTemplate(resolved.system, vars),
+    user: renderTemplate(resolved.user, vars)
+  };
+}
+function listTemplates(config2) {
+  return SCENES.map((item) => {
+    const resolved = resolveTemplate(config2, item.scene);
+    return {
+      scene: item.scene,
+      name: resolved.name,
+      hint: item.hint,
+      kind: item.kind,
+      source: resolved.source,
+      system: resolved.system,
+      user: resolved.user
+    };
+  });
+}
+async function saveTemplate(config2, scene, { name, system, user } = {}) {
+  if (!validScene(scene)) throw new Error("\u672A\u77E5\u6A21\u677F\u573A\u666F\uFF1A" + scene);
+  const body = "---\nscene: " + scene + "\nname: " + String(name || SCENES.find((s) => s.scene === scene)?.name || scene) + "\n---\n\n### SYSTEM\n" + String(system || "") + "\n\n### USER\n" + String(user || "");
+  await mkdir5(templatesDir(config2), { recursive: true });
+  await writeFile5(templateFile(config2, scene), body, "utf8");
+  return resolveTemplate(config2, scene);
+}
+async function resetTemplate(config2, scene) {
+  if (!validScene(scene)) throw new Error("\u672A\u77E5\u6A21\u677F\u573A\u666F\uFF1A" + scene);
+  try {
+    await unlink2(templateFile(config2, scene));
+  } catch {
+  }
+  return resolveTemplate(config2, scene);
+}
+var BUILTINS = {
+  report: {
+    name: "\u62A5\u544A\u6DA6\u8272",
+    system: [
+      "\u4F60\u662F\u5DE5\u4F5C\u65E5\u5FD7\u6574\u7406\u52A9\u624B\u3002\u8BF7\u628A\u7ED9\u5B9A\u7684\u7D20\u6750\u6574\u7406\u6210\u7ED3\u6784\u6E05\u6670\u3001\u53EF\u76F4\u63A5\u4EA4\u4ED8\u7684\u4E2D\u6587\u5468\u62A5/\u6708\u62A5/\u5B63\u62A5\u3002",
+      "\u4FDD\u7559\u9879\u76EE\u540D\u3001\u63D0\u4EA4 hash \u548C\u5173\u952E\u6570\u5B57\uFF0C\u4E0D\u8981\u7F16\u9020\u6CA1\u6709\u7684\u4E8B\u5B9E\u3002"
+    ].join("\n"),
+    user: "{{content}}"
+  },
+  ask: {
+    name: "\u65E5\u5FD7\u95EE\u7B54",
+    system: [
+      "\u4F60\u662F\u5DE5\u4F5C\u65E5\u5FD7\u95EE\u7B54\u52A9\u624B\u3002\u56DE\u7B54\u8981\u7B80\u6D01\u3001\u6709\u4F9D\u636E\uFF0C\u5F15\u7528\u65E5\u671F\u548C\u9879\u76EE\u540D\uFF1B\u4E0D\u8981\u7F16\u9020\u4E0D\u5B58\u5728\u7684\u8BB0\u5F55\u3002"
+    ].join("\n"),
+    user: ["\u95EE\u9898\uFF1A{{question}}", "", "\u4EE5\u4E0B\u662F\u672C\u5730\u5DE5\u4F5C\u65E5\u5FD7\u6458\u5F55\uFF0C\u8BF7\u53EA\u4F9D\u636E\u8FD9\u4E9B\u5185\u5BB9\u56DE\u7B54\uFF1B\u5982\u679C\u6750\u6599\u4E0D\u8DB3\uFF0C\u76F4\u63A5\u8BF4\u660E\u3002", "", "{{content}}"].join("\n")
+  },
+  "todo-parse": {
+    name: "\u5F85\u529E\u89E3\u6790",
+    system: [
+      "\u4F60\u662F\u5F85\u529E\u89E3\u6790\u52A9\u624B\u3002\u628A\u7528\u6237\u6587\u672C\u89E3\u6790\u6210\u5F85\u529E JSON\uFF0C\u53EA\u8F93\u51FA JSON\uFF0C\u4E0D\u8981\u8F93\u51FA\u5176\u4ED6\u6587\u5B57\u3002",
+      '\u683C\u5F0F\uFF1A{"todos":[{"title":"\u4E00\u53E5\u8BDD\u6807\u9898","pri":"\u9AD8|\u4E2D|\u4F4E\u6216\u7A7A","due":"YYYY-MM-DD\u6216\u7A7A","repeat":"daily|weekly:0-6|monthly:1-28\u6216\u7A7A","tags":["\u6807\u7B7E"]}]}',
+      "\u4ECA\u5929\u662F {{today}}\uFF08{{weekday}}\uFF09\u3002\u65F6\u95F4\u89C4\u5219\uFF1A\u5468\u4E94\u2192\u6700\u8FD1\u7684\u5468\u4E94\u3001\u4E0B\u5468\u4E00\u2192\u4E0B\u5468\u3001\u6708\u5E95\u2192\u672C\u6708\u6700\u540E\u4E00\u5929\u3001N\u5929\u540E\u2192\u4ECA\u5929+N\uFF1B\u6CA1\u6709\u65F6\u95F4\u4FE1\u606F due \u7559\u7A7A\u3002",
+      "\u6BCF\u5929/\u6BCF\u65E5\u2192daily\uFF1B\u6BCF\u5468X\u2192weekly:X\uFF080=\u5468\u65E5\uFF09\uFF1B\u6BCF\u6708X\u53F7\u2192monthly:X\uFF081-28\uFF09\u3002",
+      "\u7D27\u6025/\u5C3D\u5FEB/\u9A6C\u4E0A\u2192\u9AD8\uFF1B\u4E0D\u6025/\u6709\u7A7A\u65F6\u2192\u4F4E\uFF1B#\u8BCD \u63D0\u53D6\u4E3A tags\uFF08\u53BB\u6389#\u53F7\uFF09\u3002",
+      "title \u4E0D\u8981\u5305\u542B\u65E5\u671F\u3001\u4F18\u5148\u7EA7\u3001#\u6807\u7B7E\u8BB0\u53F7\u3002",
+      "{{modeHint}}",
+      "\u53EA\u4F9D\u636E\u6587\u672C\u5185\u5BB9\uFF0C\u4E0D\u8981\u7F16\u9020\u3002"
+    ].join("\n"),
+    user: "{{text}}"
+  },
+  "todo-suggest": {
+    name: "\u6BCF\u65E5\u4E09\u4EF6\u4E8B",
+    system: [
+      '\u4F60\u662F\u6BCF\u65E5\u8BA1\u5212\u52A9\u624B\u3002\u4ECE\u5F85\u529E\u5217\u8868\u4E2D\u9009\u51FA\u4ECA\u5929\u6700\u503C\u5F97\u505A\u7684 3 \u4EF6\u8981\u4E8B\uFF0C\u53EA\u8F93\u51FA JSON\uFF1A{"picks":[{"id":"\u5F85\u529Eid","reason":"\u4E00\u53E5\u8BDD\u7406\u7531"}]}\u3002',
+      "\u9009\u62E9\u89C4\u5219\uFF1A\u903E\u671F\u4E14\u987A\u5EF6\u6B21\u6570\u591A\u7684\u4F18\u5148\uFF0C\u5176\u6B21\u9AD8\u4F18\u5148\u7EA7\uFF0C\u518D\u6B21\u5230\u671F\u65E5\u4E34\u8FD1\uFF1B\u7406\u7531\u8981\u5177\u4F53\u5230\u5F85\u529E\u5185\u5BB9\u3002",
+      "\u53EA\u8F93\u51FA JSON\uFF0C\u4E0D\u8981\u8F93\u51FA\u5176\u4ED6\u6587\u5B57\u3002"
+    ].join("\n"),
+    user: "{{content}}"
+  },
+  summarize: {
+    name: "\u81EA\u7531\u603B\u7ED3",
+    system: [
+      "\u4F60\u662F\u5DE5\u4F5C\u603B\u7ED3\u52A9\u624B\u3002\u57FA\u4E8E\u7ED9\u5B9A\u6750\u6599\u5199\u4E00\u4EFD\u7ED3\u6784\u5316\u603B\u7ED3\uFF1A\u5148\u4E00\u53E5\u8BDD\u7ED3\u8BBA\uFF0C\u518D\u5206\u300C\u4E3B\u8981\u8FDB\u5C55\u300D\u300C\u5F85\u8DDF\u8FDB\u300D\u300C\u98CE\u9669\u300D\u4E09\u6BB5\u3002",
+      "\u4FDD\u7559\u5177\u4F53\u9879\u76EE\u540D\u3001\u6570\u5B57\u4E0E\u65E5\u671F\uFF0C\u4E0D\u8981\u7F16\u9020\u6750\u6599\u91CC\u6CA1\u6709\u7684\u5185\u5BB9\u3002"
+    ].join("\n"),
+    user: ["\u603B\u7ED3\u8303\u56F4\uFF1A{{rangeStart}} \u81F3 {{rangeEnd}}", "", "\u5F85\u529E\u5B8C\u6210\u60C5\u51B5\uFF1A{{todos}}", "", "\u6750\u6599\uFF1A", "{{content}}"].join("\n")
+  }
+};
+
+// lib/report.mjs
 function pad(n) {
   return String(n).padStart(2, "0");
 }
@@ -36853,11 +37028,8 @@ async function generateReport(config2, options = {}) {
   let ai = false;
   if (options.useAi && config2.ai.baseUrl && config2.ai.model) {
     try {
-      const polished = await aiComplete(
-        config2,
-        "\u4F60\u662F\u5DE5\u4F5C\u65E5\u5FD7\u6574\u7406\u52A9\u624B\u3002\u8BF7\u628A\u7ED9\u5B9A\u7684\u7D20\u6750\u6574\u7406\u6210\u7ED3\u6784\u6E05\u6670\u3001\u53EF\u76F4\u63A5\u4EA4\u4ED8\u7684\u4E2D\u6587\u5468\u62A5/\u6708\u62A5/\u5B63\u62A5\u3002\u4FDD\u7559\u9879\u76EE\u540D\u3001\u63D0\u4EA4 hash \u548C\u5173\u952E\u6570\u5B57\uFF0C\u4E0D\u8981\u7F16\u9020\u6CA1\u6709\u7684\u4E8B\u5B9E\u3002",
-        draft
-      );
+      const tpl = render(config2, "report", { content: draft });
+      const polished = await aiComplete(config2, tpl.system, tpl.user, { kind: tpl.scene });
       finalText = polished.text;
       ai = true;
     } catch (error62) {
@@ -36873,6 +37045,50 @@ ${(await todoReportSection(config2, dates)).join("\n")}`;
   const name = reportName(kind, key);
   const path = await writeReport(config2, name, finalText);
   return { kind, key, name, path: path.path, text: finalText, days: days.length, ai };
+}
+async function summarizeRange(config2, options = {}) {
+  const dateOk = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+  const start = String(options.start || localDate());
+  const end = String(options.end || start);
+  if (!dateOk(start) || !dateOk(end)) throw new Error("\u65E5\u671F\u683C\u5F0F\u5E94\u4E3A YYYY-MM-DD");
+  const dates = [];
+  const cursor = new Date(Number(start.slice(0, 4)), Number(start.slice(5, 7)) - 1, Number(start.slice(8, 10)));
+  for (let i = 0; i < 400; i++) {
+    const iso = localDate(cursor);
+    if (iso > end) break;
+    dates.push(iso);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  const days = await readDays(config2, dates);
+  const todos = await loadTodos(config2);
+  const doneInRange = todos.filter((todo) => {
+    const day = String(todo.done_at || "").slice(0, 10);
+    return todo.status === "done" && day >= start && day <= end;
+  });
+  const todoLines = doneInRange.length ? doneInRange.map((todo) => "- " + todo.title).join("\n") : "\uFF08\u533A\u95F4\u5185\u6CA1\u6709\u5DF2\u5B8C\u6210\u7684\u5F85\u529E\uFF09";
+  const content = days.filter((day) => day.text).map((day) => "## " + day.date + "\n\n" + day.text.slice(0, 4e3)).join("\n\n");
+  const tpl = render(config2, "summarize", {
+    rangeStart: start,
+    rangeEnd: end,
+    todos: todoLines,
+    content: content.slice(0, 24e3)
+  });
+  const useAi = options.useAi !== false && config2.ai.baseUrl && config2.ai.model;
+  if (!useAi) {
+    const digest = [
+      "# \u603B\u7ED3\uFF08\u65E0 AI \u89C4\u5219\u6458\u8981\uFF09 " + start + " \u81F3 " + end,
+      "",
+      "- \u8986\u76D6 " + days.filter((day) => day.text).length + " \u5929\u65E5\u5FD7\uFF0C\u5B8C\u6210\u5F85\u529E " + doneInRange.length + " \u6761",
+      todoLines
+    ].join("\n");
+    const name = reportName("summarize", start + "_" + end);
+    const path = await writeReport(config2, name, digest);
+    return { kind: "summarize", key: start + "_" + end, name, path: path.path, text: digest, ai: false };
+  }
+  const result = await aiComplete(config2, tpl.system, tpl.user, { kind: tpl.scene });
+  const name2 = reportName("summarize", start + "_" + end);
+  const path2 = await writeReport(config2, name2, result.text);
+  return { kind: "summarize", key: start + "_" + end, name: name2, path: path2.path, text: result.text, ai: true, usage: result.usage };
 }
 function aiEndpoint(baseUrl, apiFormat = "openai") {
   const base = String(baseUrl || "").trim().replace(/\/+$/, "");
@@ -37020,16 +37236,8 @@ ${hits.map((hit) => `- ${hit.date}\uFF08${hit.count} \u5904\uFF09\uFF1A${hit.sni
 
 ${day.text.slice(0, 6e3)}`);
   }
-  const prompt = `\u95EE\u9898\uFF1A${q}
-
-\u4EE5\u4E0B\u662F\u672C\u5730\u5DE5\u4F5C\u65E5\u5FD7\u6458\u5F55\uFF0C\u8BF7\u53EA\u4F9D\u636E\u8FD9\u4E9B\u5185\u5BB9\u56DE\u7B54\uFF1B\u5982\u679C\u6750\u6599\u4E0D\u8DB3\uFF0C\u76F4\u63A5\u8BF4\u660E\u3002
-
-${excerpts.join("\n\n")}`;
-  const result = await aiComplete(
-    config2,
-    "\u4F60\u662F\u5DE5\u4F5C\u65E5\u5FD7\u95EE\u7B54\u52A9\u624B\u3002\u56DE\u7B54\u8981\u7B80\u6D01\u3001\u6709\u4F9D\u636E\uFF0C\u5F15\u7528\u65E5\u671F\u548C\u9879\u76EE\u540D\uFF1B\u4E0D\u8981\u7F16\u9020\u4E0D\u5B58\u5728\u7684\u8BB0\u5F55\u3002",
-    prompt
-  );
+  const tpl = render(config2, "ask", { question: q, content: excerpts.join("\n\n") });
+  const result = await aiComplete(config2, tpl.system, tpl.user, { kind: tpl.scene });
   return { answer: result.text, refs, ai: true, usage: result.usage };
 }
 function summarizeAiUsage(entries = []) {
@@ -37055,19 +37263,19 @@ function summarizeAiUsage(entries = []) {
 }
 
 // lib/ai-detect.mjs
-import { readdirSync, readFileSync as readFileSync2 } from "node:fs";
+import { readdirSync, readFileSync as readFileSync3 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
-import { join as join6 } from "node:path";
+import { join as join7 } from "node:path";
 function readJson3(file2) {
   try {
-    return JSON.parse(readFileSync2(file2, "utf8"));
+    return JSON.parse(readFileSync3(file2, "utf8"));
   } catch {
     return null;
   }
 }
 function readText(file2) {
   try {
-    return readFileSync2(file2, "utf8");
+    return readFileSync3(file2, "utf8");
   } catch {
     return null;
   }
@@ -37133,10 +37341,10 @@ function parseTomlLite(text) {
   return root;
 }
 function zcodeCandidates(home) {
-  const config2 = readJson3(join6(home, ".zcode", "v2", "config.json"));
+  const config2 = readJson3(join7(home, ".zcode", "v2", "config.json"));
   const providers = config2?.provider;
   if (!providers || typeof providers !== "object") return [];
-  const settings = readJson3(join6(home, ".zcode", "v2", "setting.json")) || {};
+  const settings = readJson3(join7(home, ".zcode", "v2", "setting.json")) || {};
   const selected = Object.values(settings.modelProviderFamilySelectedKeys || {}).map(String);
   const isSelected = (key) => selected.some((value) => value === key || value.endsWith(`:${key}`));
   const out = [];
@@ -37265,7 +37473,7 @@ function readDshSettings(dshHome) {
   };
   let profiles = [];
   try {
-    profiles = readdirSync(join6(dshHome, "profiles"), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+    profiles = readdirSync(join7(dshHome, "profiles"), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
   } catch {
     profiles = [];
   }
@@ -37278,7 +37486,7 @@ function readDshSettings(dshHome) {
   });
   for (const name of profiles) {
     for (const file2 of ["cordis.patch.yml", "cordis.yml"]) {
-      const text = readText(join6(dshHome, "profiles", name, file2));
+      const text = readText(join7(dshHome, "profiles", name, file2));
       if (!text) continue;
       const entries = pluginEntries(parseYamlLite(text));
       const llm = entries.find((entry) => entry?.id === "llm-pi-ai" && entry?.config?.providers);
@@ -37292,7 +37500,7 @@ function readDshSettings(dshHome) {
       };
     }
   }
-  const settingsText = readText(join6(dshHome, "settings.yaml")) || readText(join6(dshHome, "settings-legacy.yaml"));
+  const settingsText = readText(join7(dshHome, "settings.yaml")) || readText(join7(dshHome, "settings-legacy.yaml"));
   if (!settingsText) return empty;
   const settings = parseYamlLite(settingsText);
   const providers = settings["llm-pi-ai"]?.providers;
@@ -37306,11 +37514,11 @@ function readDshSettings(dshHome) {
   };
 }
 function dshCandidates(home, env) {
-  const dshHome = String(env.DSH_HOME || "").trim() || join6(home, ".dsh");
+  const dshHome = String(env.DSH_HOME || "").trim() || join7(home, ".dsh");
   const settings = readDshSettings(dshHome);
   const providers = settings.providers;
   if (!providers || typeof providers !== "object") return [];
-  const credentials = parseYamlLite(readText(join6(dshHome, ".credentials.yaml")) || "");
+  const credentials = parseYamlLite(readText(join7(dshHome, ".credentials.yaml")) || "");
   const refs = credentials.refs && typeof credentials.refs === "object" ? credentials.refs : {};
   const defaultProvider = settings.defaultProvider;
   const defaultModelId = settings.defaultModelId;
@@ -37371,7 +37579,7 @@ function dshCandidates(home, env) {
   return out;
 }
 function claudeCandidates(home) {
-  const settings = readJson3(join6(home, ".claude", "settings.json"));
+  const settings = readJson3(join7(home, ".claude", "settings.json"));
   const env = settings?.env;
   if (!env || typeof env !== "object") return [];
   const baseUrl = String(env.ANTHROPIC_BASE_URL || "").trim();
@@ -37396,10 +37604,10 @@ function claudeCandidates(home) {
   ];
 }
 function codexCandidates(home, env) {
-  const text = readText(join6(home, ".codex", "config.toml"));
+  const text = readText(join7(home, ".codex", "config.toml"));
   if (!text) return [];
   const toml = parseTomlLite(text);
-  const auth = readJson3(join6(home, ".codex", "auth.json")) || {};
+  const auth = readJson3(join7(home, ".codex", "auth.json")) || {};
   const providerId = String(toml.model_provider || "").trim();
   const providers = toml.model_providers && typeof toml.model_providers === "object" ? toml.model_providers : {};
   const provider = providerId && providers[providerId] || providers.openai || {};
@@ -37424,11 +37632,11 @@ function codexCandidates(home, env) {
   ];
 }
 function geminiCandidates(home, env) {
-  const dotenv = readText(join6(home, ".gemini", ".env")) || "";
+  const dotenv = readText(join7(home, ".gemini", ".env")) || "";
   const dotenvKey = /^\s*GEMINI_API_KEY\s*=\s*(.+)$/m.exec(dotenv)?.[1]?.trim().replace(/^["']|["']$/g, "");
   const apiKey = String(env.GEMINI_API_KEY || dotenvKey || "").trim();
   if (!apiKey) return [];
-  const settings = readJson3(join6(home, ".gemini", "settings.json")) || {};
+  const settings = readJson3(join7(home, ".gemini", "settings.json")) || {};
   return [
     makeCandidate({
       id: "gemini-cli",
@@ -37747,7 +37955,7 @@ init_watch();
 // lib/wizard.mjs
 import { statSync } from "node:fs";
 import { readdir as readdir5 } from "node:fs/promises";
-import { join as join8 } from "node:path";
+import { join as join9 } from "node:path";
 var TYPE_MATCHERS = {
   zcode: (id) => id.startsWith("zcode:"),
   dsh: (id) => id.startsWith("dsh:"),
@@ -37773,7 +37981,7 @@ async function countFiles(root, depth = 0, cap = 2e3) {
     return 0;
   }
   for (const entry of entries) {
-    const full = join8(root, entry.name);
+    const full = join9(root, entry.name);
     if (entry.isDirectory()) {
       if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
       count += await countFiles(full, depth + 1, cap - count);
@@ -37951,17 +38159,13 @@ async function parseTodoDrafts(config2, args = {}) {
   if (!text) throw new Error("\u9700\u8981\u89E3\u6790\u7684\u6587\u672C\u4E0D\u80FD\u4E3A\u7A7A");
   const batch = args.mode === "batch";
   const today = localDate();
-  const system = [
-    "\u4F60\u662F\u5F85\u529E\u89E3\u6790\u52A9\u624B\u3002\u628A\u7528\u6237\u6587\u672C\u89E3\u6790\u6210\u5F85\u529E JSON\uFF0C\u53EA\u8F93\u51FA JSON\uFF0C\u4E0D\u8981\u8F93\u51FA\u5176\u4ED6\u6587\u5B57\u3002",
-    '\u683C\u5F0F\uFF1A{"todos":[{"title":"\u4E00\u53E5\u8BDD\u6807\u9898","pri":"\u9AD8|\u4E2D|\u4F4E\u6216\u7A7A","due":"YYYY-MM-DD\u6216\u7A7A","repeat":"daily|weekly:0-6|monthly:1-28\u6216\u7A7A","tags":["\u6807\u7B7E"]}]}',
-    "\u4ECA\u5929\u662F " + today + "\uFF08" + weekdayName(today) + "\uFF09\u3002\u65F6\u95F4\u89C4\u5219\uFF1A\u5468\u4E94\u2192\u6700\u8FD1\u7684\u5468\u4E94\u3001\u4E0B\u5468\u4E00\u2192\u4E0B\u5468\u3001\u6708\u5E95\u2192\u672C\u6708\u6700\u540E\u4E00\u5929\u3001N\u5929\u540E\u2192\u4ECA\u5929+N\uFF1B\u6CA1\u6709\u65F6\u95F4\u4FE1\u606F due \u7559\u7A7A\u3002",
-    "\u6BCF\u5929/\u6BCF\u65E5\u2192daily\uFF1B\u6BCF\u5468X\u2192weekly:X\uFF080=\u5468\u65E5\uFF09\uFF1B\u6BCF\u6708X\u53F7\u2192monthly:X\uFF081-28\uFF09\u3002",
-    "\u7D27\u6025/\u5C3D\u5FEB/\u9A6C\u4E0A\u2192\u9AD8\uFF1B\u4E0D\u6025/\u6709\u7A7A\u65F6\u2192\u4F4E\uFF1B#\u8BCD \u63D0\u53D6\u4E3A tags\uFF08\u53BB\u6389#\u53F7\uFF09\u3002",
-    "title \u4E0D\u8981\u5305\u542B\u65E5\u671F\u3001\u4F18\u5148\u7EA7\u3001#\u6807\u7B7E\u8BB0\u53F7\u3002",
-    batch ? "\u628A\u6587\u672C\u62C6\u6210\u591A\u6761\u76F8\u4E92\u72EC\u7ACB\u7684\u5F85\u529E\u3002" : "\u53EA\u89E3\u6790\u51FA 1 \u6761\u5F85\u529E\u3002",
-    "\u53EA\u4F9D\u636E\u6587\u672C\u5185\u5BB9\uFF0C\u4E0D\u8981\u7F16\u9020\u3002"
-  ].join("\n");
-  const result = await aiComplete(config2, system, text, { kind: "todo" });
+  const tpl = render(config2, "todo-parse", {
+    today,
+    weekday: weekdayName(today),
+    modeHint: batch ? "\u628A\u6587\u672C\u62C6\u6210\u591A\u6761\u76F8\u4E92\u72EC\u7ACB\u7684\u5F85\u529E\u3002" : "\u53EA\u89E3\u6790\u51FA 1 \u6761\u5F85\u529E\u3002",
+    text
+  });
+  const result = await aiComplete(config2, tpl.system, tpl.user, { kind: tpl.scene });
   const data = extractJson(result.text);
   const list = Array.isArray(data.todos) ? data.todos : [];
   const drafts = [];
@@ -37985,12 +38189,8 @@ async function suggestTopTodos(config2) {
   const lines = open2.map(
     (todo, index) => index + 1 + ". " + todo.title + " | \u4F18\u5148\u7EA7:" + (todo.pri || "\u65E0") + " | \u5230\u671F:" + (todo.due || "\u65E0") + " | \u5DF2\u987A\u5EF6:" + (todo.carries || 0) + "\u6B21 | \u6807\u7B7E:" + ((todo.tags || []).join(",") || "\u65E0") + " | id:" + todo.id
   );
-  const system = [
-    '\u4F60\u662F\u6BCF\u65E5\u8BA1\u5212\u52A9\u624B\u3002\u4ECE\u5F85\u529E\u5217\u8868\u4E2D\u9009\u51FA\u4ECA\u5929\u6700\u503C\u5F97\u505A\u7684 3 \u4EF6\u8981\u4E8B\uFF0C\u53EA\u8F93\u51FA JSON\uFF1A{"picks":[{"id":"\u5F85\u529Eid","reason":"\u4E00\u53E5\u8BDD\u7406\u7531"}]}\u3002',
-    "\u9009\u62E9\u89C4\u5219\uFF1A\u903E\u671F\u4E14\u987A\u5EF6\u6B21\u6570\u591A\u7684\u4F18\u5148\uFF0C\u5176\u6B21\u9AD8\u4F18\u5148\u7EA7\uFF0C\u518D\u6B21\u5230\u671F\u65E5\u4E34\u8FD1\uFF1B\u7406\u7531\u8981\u5177\u4F53\u5230\u5F85\u529E\u5185\u5BB9\u3002",
-    "\u53EA\u8F93\u51FA JSON\uFF0C\u4E0D\u8981\u8F93\u51FA\u5176\u4ED6\u6587\u5B57\u3002"
-  ].join("\n");
-  const result = await aiComplete(config2, system, lines.join("\n"), { kind: "todo" });
+  const tpl = render(config2, "todo-suggest", { content: lines.join("\n") });
+  const result = await aiComplete(config2, tpl.system, tpl.user, { kind: tpl.scene });
   const data = extractJson(result.text);
   const picks = (Array.isArray(data.picks) ? data.picks : []).map((pick2) => {
     const todo = open2.find((item) => item.id === pick2?.id);
@@ -38026,6 +38226,16 @@ async function collectAction(config2, args = {}) {
     return runDueTasks(config2, { force: true, id: args.id || "" });
   }
   if (action === "set") return updateTask(config2, args);
+  throw new Error(`\u672A\u77E5 action: ${action}`);
+}
+async function templatesAction(config2, args = {}) {
+  const action = args.action || "list";
+  if (action === "list") return { templates: listTemplates(config2) };
+  if (action === "save") {
+    const template = await saveTemplate(config2, args.scene, { name: args.name, system: args.system, user: args.user });
+    return { saved: true, template };
+  }
+  if (action === "reset") return { template: await resetTemplate(config2, args.scene) };
   throw new Error(`\u672A\u77E5 action: ${action}`);
 }
 async function calendarAction(config2, args = {}) {
@@ -38083,6 +38293,7 @@ async function todoAction(config2, args = {}) {
 async function reportAction(config2, args = {}) {
   const action = args.action || "generate";
   if (action === "list") return listReports(config2);
+  if (action === "summarize") return summarizeRange(config2, args);
   if (action === "read") return readReport(config2, args.name);
   if (action === "generate") return generateReport(config2, args);
   throw new Error(`\u672A\u77E5 action: ${action}`);
@@ -38231,6 +38442,8 @@ async function dispatch(op, args = {}) {
       return wizardAction(args);
     case "calendar":
       return calendarAction(config2, args);
+    case "templates":
+      return templatesAction(config2, args);
     case "days":
       return listDays(config2);
     case "reports":
@@ -38383,15 +38596,17 @@ tool(
   "worklog_report",
   {
     title: "\u751F\u6210\u6216\u67E5\u770B\u6C47\u62A5",
-    description: "\u751F\u6210/\u67E5\u770B\u672C\u5730\u6C47\u62A5\uFF1Adaily\u3001weekly\u3001month\u3001quarter\u3001perf\u3001project\u3002\u9ED8\u8BA4\u751F\u6210\u786E\u5B9A\u6027\u8349\u7A3F\uFF1B\u914D\u7F6E\u4E86 AI \u63A5\u53E3\u540E\u53EF\u4F20 useAi=true \u6DA6\u8272\u3002",
+    description: "\u751F\u6210/\u67E5\u770B\u672C\u5730\u6C47\u62A5\uFF1Adaily\u3001weekly\u3001month\u3001quarter\u3001perf\u3001project\uFF1Baction=summarize {start, end?, useAi?} \u7528\u300C\u81EA\u7531\u603B\u7ED3\u300D\u6A21\u677F\u505A\u4EFB\u610F\u65E5\u671F\u8303\u56F4\u603B\u7ED3\uFF08\u65E0 AI \u65F6\u8F93\u51FA\u89C4\u5219\u6458\u8981\uFF09\u3002\u9ED8\u8BA4\u751F\u6210\u786E\u5B9A\u6027\u8349\u7A3F\uFF1B\u914D\u7F6E\u4E86 AI \u63A5\u53E3\u540E\u53EF\u4F20 useAi=true \u6DA6\u8272\u3002",
     inputSchema: external_exports.object({
-      action: external_exports.enum(["generate", "list", "read"]).optional(),
+      action: external_exports.enum(["generate", "list", "read", "summarize"]).optional(),
       kind: external_exports.enum(["daily", "weekly", "month", "quarter", "perf", "project"]).optional(),
       date: external_exports.string().optional(),
       monday: external_exports.string().optional(),
       month: external_exports.string().optional(),
       quarter: external_exports.string().optional(),
       project: external_exports.string().optional(),
+      start: external_exports.string().optional(),
+      end: external_exports.string().optional(),
       name: external_exports.string().optional().describe("read \u7684\u62A5\u544A\u6587\u4EF6\u540D"),
       useAi: external_exports.boolean().optional()
     })
@@ -38483,6 +38698,21 @@ tool(
   (args) => calendarAction(loadConfig(), args)
 );
 tool(
+  "worklog_templates",
+  {
+    title: "\u63D0\u793A\u8BCD\u6A21\u677F",
+    description: "WorkLog \u63D0\u793A\u8BCD\u6A21\u677F\u7CFB\u7EDF\uFF1A\u6240\u6709 AI \u8C03\u7528\uFF08\u62A5\u544A\u6DA6\u8272/\u95EE\u7B54/\u5F85\u529E\u89E3\u6790/\u6BCF\u65E5\u4E09\u4EF6\u4E8B/\u81EA\u7531\u603B\u7ED3\uFF09\u90FD\u6309\u573A\u666F\u6A21\u677F\u6267\u884C\u3002action=list \u5217\u51FA 5 \u4E2A\u573A\u666F\u7684\u5F53\u524D\u6A21\u677F\uFF08system/user \u5168\u6587\u4E0E\u6765\u6E90 builtin|user\uFF09\uFF1Baction=save {scene, name?, system, user} \u4FDD\u5B58\u7528\u6237\u6A21\u677F\uFF08\u5199 data/templates/<scene>.md\uFF0C\u7F3A\u5931\u6BB5\u843D\u56DE\u843D\u5185\u7F6E\uFF09\uFF1Baction=reset {scene} \u5220\u9664\u7528\u6237\u6A21\u677F\u6062\u590D\u5185\u7F6E\u3002\u53D8\u91CF\u8BED\u6CD5 {{today}} {{rangeStart}} {{rangeEnd}} {{content}} {{todos}} {{question}} {{text}} \u7B49\uFF0C\u7F3A\u5931\u53D8\u91CF\u5B89\u5168\u7F6E\u7A7A\u3002summarize \u573A\u666F\u914D\u5408 worklog_report\uFF08action=summarize, start/end\uFF09\u505A\u4EFB\u610F\u8303\u56F4\u603B\u7ED3\u3002",
+    inputSchema: external_exports.object({
+      action: external_exports.enum(["list", "save", "reset"]).optional(),
+      scene: external_exports.string().optional(),
+      name: external_exports.string().optional(),
+      system: external_exports.string().optional(),
+      user: external_exports.string().optional()
+    })
+  },
+  (args) => templatesAction(loadConfig(), args)
+);
+tool(
   "worklog_config",
   {
     title: "WorkLog \u914D\u7F6E",
@@ -38529,7 +38759,8 @@ server.registerTool(
         "ai",
         "collect",
         "wizard",
-        "calendar"
+        "calendar",
+        "templates"
       ]),
       args: external_exports.record(external_exports.string(), external_exports.unknown()).optional()
     }),
@@ -38544,7 +38775,7 @@ server.registerTool(
   }
 );
 async function asset(name) {
-  return readFile5(join9(HERE, name), "utf8");
+  return readFile6(join10(HERE, name), "utf8");
 }
 var panelHtmlPromise;
 function panelDocument() {

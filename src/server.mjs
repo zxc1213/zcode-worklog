@@ -17,6 +17,7 @@ import {
   archiveAction,
   backupAction,
   calendarAction,
+  templatesAction,
   collectAction,
   configAction,
   wizardAction,
@@ -194,15 +195,17 @@ tool(
   {
     title: '生成或查看汇报',
     description:
-      '生成/查看本地汇报：daily、weekly、month、quarter、perf、project。默认生成确定性草稿；配置了 AI 接口后可传 useAi=true 润色。',
+      '生成/查看本地汇报：daily、weekly、month、quarter、perf、project；action=summarize {start, end?, useAi?} 用「自由总结」模板做任意日期范围总结（无 AI 时输出规则摘要）。默认生成确定性草稿；配置了 AI 接口后可传 useAi=true 润色。',
     inputSchema: z.object({
-      action: z.enum(['generate', 'list', 'read']).optional(),
+      action: z.enum(['generate', 'list', 'read', 'summarize']).optional(),
       kind: z.enum(['daily', 'weekly', 'month', 'quarter', 'perf', 'project']).optional(),
       date: z.string().optional(),
       monday: z.string().optional(),
       month: z.string().optional(),
       quarter: z.string().optional(),
       project: z.string().optional(),
+      start: z.string().optional(),
+      end: z.string().optional(),
       name: z.string().optional().describe('read 的报告文件名'),
       useAi: z.boolean().optional(),
     }),
@@ -307,6 +310,23 @@ tool(
 )
 
 tool(
+  'worklog_templates',
+  {
+    title: '提示词模板',
+    description:
+      'WorkLog 提示词模板系统：所有 AI 调用（报告润色/问答/待办解析/每日三件事/自由总结）都按场景模板执行。action=list 列出 5 个场景的当前模板（system/user 全文与来源 builtin|user）；action=save {scene, name?, system, user} 保存用户模板（写 data/templates/<scene>.md，缺失段落回落内置）；action=reset {scene} 删除用户模板恢复内置。变量语法 {{today}} {{rangeStart}} {{rangeEnd}} {{content}} {{todos}} {{question}} {{text}} 等，缺失变量安全置空。summarize 场景配合 worklog_report（action=summarize, start/end）做任意范围总结。',
+    inputSchema: z.object({
+      action: z.enum(['list', 'save', 'reset']).optional(),
+      scene: z.string().optional(),
+      name: z.string().optional(),
+      system: z.string().optional(),
+      user: z.string().optional(),
+    }),
+  },
+  (args) => templatesAction(loadConfig(), args),
+)
+
+tool(
   'worklog_config',
   {
     title: 'WorkLog 配置',
@@ -359,6 +379,7 @@ server.registerTool(
         'collect',
         'wizard',
         'calendar',
+        'templates',
       ]),
       args: z.record(z.string(), z.unknown()).optional(),
     }),
