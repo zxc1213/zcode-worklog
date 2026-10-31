@@ -74,12 +74,12 @@ Ray：单人使用，本机多 AI 工具（ZCode/DSH/Claude Code/Codex/Gemini…
 
 | 里程碑 | 内容 | 版本 | 状态 |
 | --- | --- | --- | --- |
-| R1 | REQ-C5 调度器 + REQ-C2 配置向导 + REQ-C3 网盘指纹 + 诊断块雏形 | 0.4.0 | todo |
-| R2 | REQ-O1 统一条目 + REQ-O2 日历页签 | 0.5.0 | todo |
-| R3 | REQ-D1 提示词模板系统 + 总结场景接入 | 0.6.0 | todo |
-| R4 | REQ-C4 适配器框架 + 飞书/禅道连接器（Hermes 通用占位） | 0.7.0 | todo |
-| R5 | REQ-D2 推荐引擎 + 报告融入（E1） | 0.8.0 | todo |
-| R6 | REQ-O3 知识图谱 + P4 页签重组收尾 | 0.9.0 | todo |
+| R1 | REQ-C5 调度器 + REQ-C2 配置向导 + REQ-C3 网盘指纹 + 诊断块雏形 | 0.4.0 | ✅ |
+| R2 | REQ-O1 统一条目 + REQ-O2 历页签 | 0.5.0 | ✅ |
+| R3 | REQ-D1 提示词模板系统 + 总结场景接入 | 0.6.0 | ✅ |
+| R4 | REQ-C4 适配器框架 + 飞书/禅道连接器（Hermes 通用连接器承接） | 0.7.0 | ✅ |
+| R5 | REQ-D2 推荐引擎 + 报告注入（E1） | 0.8.0 | ✅ |
+| R6 | REQ-O3 知识图谱 + P4 页签重组收尾 | 0.9.0 | ✅ |
 
 每个里程碑：设计补充 → 实现 → 测试 → 全量验证 → 发布试用 → 评审更新本文档。
 
@@ -100,3 +100,5 @@ Ray：单人使用，本机多 AI 工具（ZCode/DSH/Claude Code/Codex/Gemini…
 - v0.4（2026-10-31）：R3 发布（0.6.0）。D1 已实现：lib/templates.mjs 五场景（report/ask/todo-parse/todo-suggest/summarize），文件格式 frontmatter + ### SYSTEM/### USER，用户模板缺失段回落内置；四个 AI 调用点全部迁移；新增 worklog_report action=summarize（自由总结，无 AI 降级规则摘要）；worklog_templates 工具（17 个）；设置页「提示词模板」编辑块。自测修复：模板读取误用 async 导致内置回落（改 readFileSync）。设计复审：用量 kind 精确到场景名（todo-parse/todo-suggest/summarize）。
 - v0.3（2026-10-31）：R2 发布（0.5.0）。O1/O2 已实现：lib/entries.mjs（append-only+指纹去重+上限裁剪）、采集接线（归档 git/docs/sessions、watch 变化、调度会话扫描）、日报新增「## 采集条目」小节、lib/calendar.mjs 月/日聚合、面板「日历」页签（月视图+日详情）、worklog_calendar 工具（16 个工具）。设计复审调整：调度会话任务也直接产条目（不再等归档）。
 - v0.2（2026-10-31）：R1 发布（0.4.0）。C1/C2/C3(指纹)/C5 标记已实现；基线映射表"现状"列待 R2 统一条目后一并刷新。
+
+- v0.8（2026-10-31）：R1-R6 全部完成（0.4.0→0.9.0），九条基线全部落地。1.x 候选方向：飞书子项真机验证、对外回写（E2）、AI 主题抽取增强图谱、力导向可视化、日历周视图。
