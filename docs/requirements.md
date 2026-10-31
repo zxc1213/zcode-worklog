@@ -47,7 +47,7 @@ Ray：单人使用，本机多 AI 工具（ZCode/DSH/Claude Code/Codex/Gemini…
 ### B 组织 Organize
 - **REQ-O1（P0，R2 已实现）统一条目模型**：entry = {id, source, type, time, title, detail, project?, tags[], ref}；append-only + 指纹（source+nativeId）去重；现有 git/docs/sessions 归档同时产出条目；条目是日历/图谱/推荐的统一数据底座。
 - **REQ-O2（P0，R2 已实现）日历视图**：面板新增「日历」页签：月视图（默认当月），每格显示当天活动密度（采集条目数/待办完成/是否有归档/报告）；点日期 → 当日详情（归档摘要、AI 会话列表、待办完成、外部条目、当天报告/总结）；可切换查看总结文本。
-- **REQ-O3（P1）知识图谱**：实体（项目/人/AI 工具/主题标签/外部系统对象）与关系（提交了/参与了/提及/依赖）；规则抽取为主（git author、项目名、标签、会话归属），AI 抽取可选增强；数据存 data/graph.json；面板「图谱」页签可浏览实体详情与关系列表（v1 列表式 + 简单可视化，不追求力导向大图）；提供 worklog_graph 查询工具。
+- **REQ-O3（P1，R6 已实现）知识图谱**：实体（项目/人/AI 工具/主题标签/外部系统对象）与关系（提交了/参与了/提及/依赖）；规则抽取为主（git author、项目名、标签、会话归属），AI 抽取可选增强；数据存 data/graph.json；面板「图谱」页签可浏览实体详情与关系列表（v1 列表式 + 简单可视化，不追求力导向大图）；提供 worklog_graph 查询工具。
 
 ### C 提炼 Distill
 - **REQ-D1（P0，R3 已实现）提示词模板系统**：模板 = frontmatter{id,name,scene,system,user} + 正文；场景 scene 枚举（report-daily/report-weekly/report-month/report-quarter/ask/parse/suggest/summarize/custom-*）；变量 {{today}} {{rangeStart}} {{rangeEnd}} {{content}} {{todos}} {{entries}} 等，缺失变量安全置空；模板存 data/templates/*.md，用户可增删改、设为场景默认、导入导出；所有 AI 调用点（润色/问答/parse/suggest/总结）统一走模板引擎。
@@ -61,7 +61,7 @@ Ray：单人使用，本机多 AI 工具（ZCode/DSH/Claude Code/Codex/Gemini…
 - **REQ-P1（P0）配置中心**：设置页重组为：采集来源（目录/AI 工具）+ 连接器（飞书/禅道/Hermes/通用）+ 调度任务 + 提示词模板 + 数据与备份；全部自定义可维护。
 - **REQ-P2（P0）数据安全**：key/secret 只在配置文件明文存储、面板/工具回显一律掩码；备份覆盖新增数据文件（entries/graph/templates）。
 - **REQ-P3（P1）可维护性**：设置页「诊断」块：各来源/连接器最近一次运行状态、错误信息、缓存大小、一键重扫。
-- **REQ-P4（P1）体验**：面板页签重组为 概览/日历/日志/待办/汇报/图谱/会话/设置；操作反馈统一 notice 体系；长操作显示 busy 态。
+- **REQ-P4（P1，R6 已实现）体验**：面板页签重组为 概览/日历/日志/待办/汇报/图谱/会话/设置；操作反馈统一 notice 体系；长操作显示 busy 态。
 
 ## 5. 非功能需求
 
@@ -94,6 +94,7 @@ Ray：单人使用，本机多 AI 工具（ZCode/DSH/Claude Code/Codex/Gemini…
 ## 8. 变更记录
 
 - v0.1（2026-10-31）：首版。九条基线映射完成，现状差距明确，路线图 R1-R6。
+- v0.7（2026-10-31）：R6 发布（0.9.0）。O3/P4 已实现：lib/graph.mjs 规则抽取（人-提交了→项目、AI工具-用于→项目、外部系统-提供→项目、主题-出现于→项目），data/graph.json 全量重建（≤2000 节点/5000 边，去孤岛），归档后自动重建；worklog_graph query/rebuild（20 个工具）；面板「图谱」页签（类型分组 chips→实体关系视图，重建按钮）；页签重组完成。基线九条全部落地。已知噪声：panel-sim 日历阶段有一条 jsdom TDZ 日志（不影响任何断言与真机，待查）。
 - v0.6（2026-10-31）：R5 发布（0.8.0）。D2 已实现：lib/recommend.mjs 规则引擎（overdue/external/no-log-project/upcoming/stale 五类规则，评分=基础分×反馈权重），采纳/忽略反馈抑制同类权重，周报/月报自动注入「## 建议关注」，面板概览推荐卡片（采纳/忽略/刷新），worklog_recommend 工具（19 个）。
 - v0.5（2026-10-31）：R4 发布（0.7.0）。C4/C6 已实现：lib/adapters/{core,feishu,zentao,generic}.mjs + lib/connectors.mjs（注册/掩码/同步/占位符保密）；worklog_connectors 工具（18 个）；面板「外部连接器」块（新建/编辑/测试/同步/删除）；调度任务 connector-sync（默认 6h）。飞书子项（群消息/wiki）需真机 app 凭据验证——开放问题仍待 Ray。自测修复：连接器动作强制读最新配置（防旧句柄覆盖密钥）、zentao mapItem 作用域 bug。
 - v0.4（2026-10-31）：R3 发布（0.6.0）。D1 已实现：lib/templates.mjs 五场景（report/ask/todo-parse/todo-suggest/summarize），文件格式 frontmatter + ### SYSTEM/### USER，用户模板缺失段回落内置；四个 AI 调用点全部迁移；新增 worklog_report action=summarize（自由总结，无 AI 降级规则摘要）；worklog_templates 工具（17 个）；设置页「提示词模板」编辑块。自测修复：模板读取误用 async 导致内置回落（改 readFileSync）。设计复审：用量 kind 精确到场景名（todo-parse/todo-suggest/summarize）。

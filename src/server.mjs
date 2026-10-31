@@ -20,6 +20,7 @@ import {
   templatesAction,
   connectorsAction,
   recommendAction,
+  graphAction,
   collectAction,
   configAction,
   wizardAction,
@@ -312,6 +313,20 @@ tool(
 )
 
 tool(
+  'worklog_graph',
+  {
+    title: '知识图谱',
+    description:
+      'WorkLog 知识图谱（规则抽取，可解释）：action=query 不带 entity 返回总览（节点/边计数与类型分布）；action=query {entity:"项目名或人名"} 返回该实体的关系列表（提交了/用于/提供/出现于 + 方向与次数）；action=rebuild 从统一条目全量重建 data/graph.json（归档后也会自动重建）。',
+    inputSchema: z.object({
+      action: z.enum(['query', 'rebuild']).optional(),
+      entity: z.string().optional(),
+    }),
+  },
+  (args) => graphAction(loadConfig(), args),
+)
+
+tool(
   'worklog_recommend',
   {
     title: '工作建议',
@@ -419,6 +434,7 @@ server.registerTool(
         'templates',
         'connectors',
         'recommend',
+        'graph',
       ]),
       args: z.record(z.string(), z.unknown()).optional(),
     }),

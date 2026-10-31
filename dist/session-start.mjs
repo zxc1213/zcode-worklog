@@ -316,7 +316,7 @@ var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.8.0";
+    PLUGIN_VERSION = "0.9.0";
   }
 });
 
@@ -2043,9 +2043,93 @@ init_store();
 init_entries();
 import { execFile } from "node:child_process";
 import { existsSync as existsSync4 } from "node:fs";
-import { mkdir as mkdir4, readdir as readdir4, stat as stat4, writeFile as writeFile5 } from "node:fs/promises";
-import { basename as basename4, dirname as dirname5, extname, join as join6, relative as relative2, resolve as resolve2 } from "node:path";
+import { mkdir as mkdir5, readdir as readdir4, stat as stat4, writeFile as writeFile6 } from "node:fs/promises";
+import { basename as basename4, dirname as dirname6, extname, join as join7, relative as relative2, resolve as resolve2 } from "node:path";
 import { promisify } from "node:util";
+
+// lib/graph.mjs
+init_store();
+init_entries();
+import { mkdir as mkdir4, readFile as readFile5, writeFile as writeFile5 } from "node:fs/promises";
+import { dirname as dirname5, join as join6 } from "node:path";
+var MAX_NODES = 2e3;
+var MAX_EDGES = 5e3;
+function graphFile(config) {
+  return join6(config.dataDir, "graph.json");
+}
+async function saveGraph(config, graph) {
+  await mkdir4(dirname5(graphFile(config)), { recursive: true });
+  await writeFile5(graphFile(config), JSON.stringify(graph, null, 2) + "\n", "utf8");
+  return graph;
+}
+function addNode(graph, id, type, label, weight = 1) {
+  const key = type + ":" + String(label || id).slice(0, 60);
+  const node = graph.nodes[key];
+  if (node) {
+    node.weight += weight;
+    return key;
+  }
+  graph.nodes[key] = { type, label: String(label || id).slice(0, 60), weight };
+  return key;
+}
+function addEdge(graph, from, to, kind) {
+  const edge = graph.edges.find((item) => item.from === from && item.to === to && item.kind === kind);
+  if (edge) edge.count += 1;
+  else graph.edges.push({ from, to, kind, count: 1 });
+}
+async function rebuildGraph(config) {
+  const graph = { nodes: {}, edges: [], builtAt: (/* @__PURE__ */ new Date()).toISOString() };
+  const entries = await loadEntries(config);
+  const ensurePerson = (name) => addNode(graph, "", "person", name);
+  const ensureProject = (name) => addNode(graph, "", "project", name);
+  const ensureTool = (name) => addNode(graph, "", "tool", name);
+  const ensureTopic = (name) => addNode(graph, "", "topic", name);
+  const ensureSource = (name) => addNode(graph, "", "source", name);
+  for (const entry of entries) {
+    const project = entry.project;
+    const projectKey = project ? ensureProject(project) : "";
+    if (entry.source === "git") {
+      const author = (entry.tags || [])[0];
+      if (author) {
+        const personKey = ensurePerson(author);
+        if (projectKey) addEdge(graph, personKey, projectKey, "\u63D0\u4EA4\u4E86");
+      }
+    }
+    if (entry.source === "sessions") {
+      const toolLabel = (entry.tags || [])[0] || "AI";
+      const toolKey = ensureTool(toolLabel);
+      if (projectKey) addEdge(graph, toolKey, projectKey, "\u7528\u4E8E");
+      else addNode(graph, "", "tool", toolLabel);
+    }
+    if (["zentao", "feishu", "generic"].includes(entry.source)) {
+      const sourceKey = ensureSource(entry.source);
+      if (projectKey) addEdge(graph, sourceKey, projectKey, "\u63D0\u4F9B");
+    }
+    for (const tag of (entry.tags || []).slice(1)) {
+      const topicKey = ensureTopic(tag);
+      if (projectKey) addEdge(graph, topicKey, projectKey, "\u51FA\u73B0\u4E8E");
+    }
+  }
+  graph.edges = graph.edges.slice(0, MAX_EDGES);
+  const connected = /* @__PURE__ */ new Set();
+  for (const edge of graph.edges) {
+    connected.add(edge.from);
+    connected.add(edge.to);
+  }
+  for (const key of Object.keys(graph.nodes)) {
+    if (!connected.has(key)) {
+      const node = graph.nodes[key];
+      const standalone = node.type === "person" || node.type === "tool" || node.type === "source";
+      if (!standalone) delete graph.nodes[key];
+    }
+  }
+  const keys = Object.keys(graph.nodes).slice(0, MAX_NODES);
+  graph.nodes = Object.fromEntries(keys.map((key) => [key, graph.nodes[key]]));
+  await saveGraph(config, graph);
+  return { nodes: Object.keys(graph.nodes).length, edges: graph.edges.length };
+}
+
+// lib/archive.mjs
 var execFileAsync = promisify(execFile);
 var SKIP_DIRS2 = /* @__PURE__ */ new Set([
   ".git",
@@ -2097,7 +2181,7 @@ async function walk3(root, maxDepth, visitDir, visitFile) {
     }
     await visitDir?.(dir, depth);
     for (const entry of entries) {
-      const full = join6(dir, entry.name);
+      const full = join7(dir, entry.name);
       if (entry.isDirectory()) {
         if (depth < maxDepth && !isSkippedDir(entry.name)) queue.push({ dir: full, depth: depth + 1 });
       } else if (entry.isFile()) {
@@ -2120,7 +2204,7 @@ async function findGitRepos(roots = []) {
   const repos = [];
   for (const root of roots) {
     await walk3(root, 3, async (dir) => {
-      if (existsSync4(join6(dir, ".git"))) repos.push(dir);
+      if (existsSync4(join7(dir, ".git"))) repos.push(dir);
     });
   }
   return [...new Set(repos)];
@@ -2312,7 +2396,7 @@ async function archiveDay(config, dateString, { force = false, note = "" } = {})
       date: dateString,
       time: String(doc.time || "").slice(0, 5),
       title: doc.relative || basename4(doc.path),
-      project: basename4(dirname5(doc.path)),
+      project: basename4(dirname6(doc.path)),
       ref: doc.path,
       nativeId: doc.path + "|" + (doc.time || "")
     });
@@ -2331,10 +2415,12 @@ async function archiveDay(config, dateString, { force = false, note = "" } = {})
     });
   }
   await appendEntries(config, entriesInput);
+  await rebuildGraph(config).catch(() => {
+  });
   const entriesSection = await entriesDaySection(config, dateString);
   const text = buildDayMarkdown(dateString, gitResult, docResult, note, sessionResult, todoSection, entriesSection);
-  await mkdir4(dirname5(target), { recursive: true });
-  await writeFile5(target, text, "utf8");
+  await mkdir5(dirname6(target), { recursive: true });
+  await writeFile6(target, text, "utf8");
   return {
     date: dateString,
     path: target,

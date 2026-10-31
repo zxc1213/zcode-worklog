@@ -315,7 +315,7 @@ var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.8.0";
+    PLUGIN_VERSION = "0.9.0";
   }
 });
 
@@ -2171,21 +2171,21 @@ __export(watch_exports, {
   scanWatchDirs: () => scanWatchDirs
 });
 import { existsSync as existsSync6 } from "node:fs";
-import { readdir as readdir4, readFile as readFile5, stat as stat4, writeFile as writeFile6 } from "node:fs/promises";
-import { basename as basename4, dirname as dirname5, join as join8 } from "node:path";
+import { readdir as readdir4, readFile as readFile6, stat as stat4, writeFile as writeFile7 } from "node:fs/promises";
+import { basename as basename4, dirname as dirname6, join as join9 } from "node:path";
 function watchCacheFile(config2) {
-  return join8(config2.dataDir, "watch-cache.json");
+  return join9(config2.dataDir, "watch-cache.json");
 }
 async function loadWatchCache(config2) {
   try {
-    const parsed = JSON.parse(await readFile5(watchCacheFile(config2), "utf8"));
+    const parsed = JSON.parse(await readFile6(watchCacheFile(config2), "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
   }
 }
 async function saveWatchCache(config2, cache) {
-  await writeFile6(watchCacheFile(config2), JSON.stringify(cache, null, 2) + "\n", "utf8");
+  await writeFile7(watchCacheFile(config2), JSON.stringify(cache, null, 2) + "\n", "utf8");
 }
 function normalizeWatchDirs2(input2) {
   const list = Array.isArray(input2) ? input2 : [];
@@ -2209,7 +2209,7 @@ async function walk3(dir, depth, visit2) {
     return;
   }
   for (const entry of entries) {
-    const full = join8(dir, entry.name);
+    const full = join9(dir, entry.name);
     if (entry.isDirectory()) {
       if (SKIP_DIRS2.has(entry.name)) continue;
       await walk3(full, depth + 1, visit2);
@@ -2267,7 +2267,7 @@ async function scanWatchDirs(config2) {
         date: localDate(now),
         time: localTime(now),
         title: "\u6587\u4EF6\u53D8\u5316 " + basename4(item.file),
-        project: basename4(dirname5(item.file)),
+        project: basename4(dirname6(item.file)),
         tags: [item.kind],
         ref: item.file,
         nativeId: item.file + "|" + (item.fp || "")
@@ -2310,8 +2310,8 @@ var init_watch = __esm({
 });
 
 // src/server.mjs
-import { readFile as readFile6 } from "node:fs/promises";
-import { dirname as dirname6, join as join10 } from "node:path";
+import { readFile as readFile7 } from "node:fs/promises";
+import { dirname as dirname7, join as join11 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // node_modules/@modelcontextprotocol/server/dist/chunk-vYduTEsO.mjs
@@ -36810,9 +36810,124 @@ init_store();
 init_entries();
 import { execFile } from "node:child_process";
 import { existsSync as existsSync4 } from "node:fs";
-import { mkdir as mkdir4, readdir as readdir3, stat as stat3, writeFile as writeFile4 } from "node:fs/promises";
-import { basename as basename3, dirname as dirname4, extname, join as join5, relative as relative2, resolve as resolve2 } from "node:path";
+import { mkdir as mkdir5, readdir as readdir3, stat as stat3, writeFile as writeFile5 } from "node:fs/promises";
+import { basename as basename3, dirname as dirname5, extname, join as join6, relative as relative2, resolve as resolve2 } from "node:path";
 import { promisify } from "node:util";
+
+// lib/graph.mjs
+init_store();
+init_entries();
+import { mkdir as mkdir4, readFile as readFile4, writeFile as writeFile4 } from "node:fs/promises";
+import { dirname as dirname4, join as join5 } from "node:path";
+var MAX_NODES = 2e3;
+var MAX_EDGES = 5e3;
+function graphFile(config2) {
+  return join5(config2.dataDir, "graph.json");
+}
+async function loadGraph(config2) {
+  try {
+    const parsed = JSON.parse(await readFile4(graphFile(config2), "utf8"));
+    if (parsed && typeof parsed === "object" && parsed.nodes && parsed.edges) return parsed;
+  } catch {
+  }
+  return { nodes: {}, edges: [], builtAt: "" };
+}
+async function saveGraph(config2, graph) {
+  await mkdir4(dirname4(graphFile(config2)), { recursive: true });
+  await writeFile4(graphFile(config2), JSON.stringify(graph, null, 2) + "\n", "utf8");
+  return graph;
+}
+function addNode(graph, id, type, label, weight = 1) {
+  const key = type + ":" + String(label || id).slice(0, 60);
+  const node2 = graph.nodes[key];
+  if (node2) {
+    node2.weight += weight;
+    return key;
+  }
+  graph.nodes[key] = { type, label: String(label || id).slice(0, 60), weight };
+  return key;
+}
+function addEdge(graph, from, to, kind) {
+  const edge = graph.edges.find((item) => item.from === from && item.to === to && item.kind === kind);
+  if (edge) edge.count += 1;
+  else graph.edges.push({ from, to, kind, count: 1 });
+}
+async function rebuildGraph(config2) {
+  const graph = { nodes: {}, edges: [], builtAt: (/* @__PURE__ */ new Date()).toISOString() };
+  const entries = await loadEntries(config2);
+  const ensurePerson = (name) => addNode(graph, "", "person", name);
+  const ensureProject = (name) => addNode(graph, "", "project", name);
+  const ensureTool = (name) => addNode(graph, "", "tool", name);
+  const ensureTopic = (name) => addNode(graph, "", "topic", name);
+  const ensureSource = (name) => addNode(graph, "", "source", name);
+  for (const entry of entries) {
+    const project = entry.project;
+    const projectKey = project ? ensureProject(project) : "";
+    if (entry.source === "git") {
+      const author = (entry.tags || [])[0];
+      if (author) {
+        const personKey = ensurePerson(author);
+        if (projectKey) addEdge(graph, personKey, projectKey, "\u63D0\u4EA4\u4E86");
+      }
+    }
+    if (entry.source === "sessions") {
+      const toolLabel = (entry.tags || [])[0] || "AI";
+      const toolKey = ensureTool(toolLabel);
+      if (projectKey) addEdge(graph, toolKey, projectKey, "\u7528\u4E8E");
+      else addNode(graph, "", "tool", toolLabel);
+    }
+    if (["zentao", "feishu", "generic"].includes(entry.source)) {
+      const sourceKey = ensureSource(entry.source);
+      if (projectKey) addEdge(graph, sourceKey, projectKey, "\u63D0\u4F9B");
+    }
+    for (const tag of (entry.tags || []).slice(1)) {
+      const topicKey = ensureTopic(tag);
+      if (projectKey) addEdge(graph, topicKey, projectKey, "\u51FA\u73B0\u4E8E");
+    }
+  }
+  graph.edges = graph.edges.slice(0, MAX_EDGES);
+  const connected = /* @__PURE__ */ new Set();
+  for (const edge of graph.edges) {
+    connected.add(edge.from);
+    connected.add(edge.to);
+  }
+  for (const key of Object.keys(graph.nodes)) {
+    if (!connected.has(key)) {
+      const node2 = graph.nodes[key];
+      const standalone = node2.type === "person" || node2.type === "tool" || node2.type === "source";
+      if (!standalone) delete graph.nodes[key];
+    }
+  }
+  const keys = Object.keys(graph.nodes).slice(0, MAX_NODES);
+  graph.nodes = Object.fromEntries(keys.map((key) => [key, graph.nodes[key]]));
+  await saveGraph(config2, graph);
+  return { nodes: Object.keys(graph.nodes).length, edges: graph.edges.length };
+}
+async function queryGraph(config2, entity = "") {
+  const graph = await loadGraph(config2);
+  if (!entity) {
+    const types = {};
+    for (const [key, node3] of Object.entries(graph.nodes)) {
+      types[node3.type] = (types[node3.type] || 0) + 1;
+    }
+    const nodes = Object.entries(graph.nodes).map(([key, node3]) => ({ key, type: node3.type, label: node3.label, weight: node3.weight })).sort((a, b) => b.weight - a.weight).slice(0, 100);
+    return { builtAt: graph.builtAt, nodeCount: Object.keys(graph.nodes).length, edgeCount: graph.edges.length, types, nodes };
+  }
+  const wanted = String(entity).toLowerCase();
+  const matchKey = Object.keys(graph.nodes).find((key) => key.toLowerCase().includes(wanted));
+  if (!matchKey) return { entity, found: false };
+  const node2 = graph.nodes[matchKey];
+  const relations = graph.edges.filter((edge) => edge.from === matchKey || edge.to === matchKey).map((edge) => ({
+    kind: edge.kind,
+    count: edge.count,
+    direction: edge.from === matchKey ? "out" : "in",
+    other: graph.nodes[edge.from === matchKey ? edge.to : edge.from]?.label || edge.to,
+    otherType: graph.nodes[edge.from === matchKey ? edge.to : edge.from]?.type || ""
+  })).sort((a, b) => b.count - a.count);
+  return { entity, found: true, key: matchKey, type: node2.type, label: node2.label, weight: node2.weight, relations };
+}
+
+// lib/archive.mjs
 var execFileAsync = promisify(execFile);
 var SKIP_DIRS = /* @__PURE__ */ new Set([
   ".git",
@@ -36864,7 +36979,7 @@ async function walk(root, maxDepth, visitDir, visitFile) {
     }
     await visitDir?.(dir, depth);
     for (const entry of entries) {
-      const full = join5(dir, entry.name);
+      const full = join6(dir, entry.name);
       if (entry.isDirectory()) {
         if (depth < maxDepth && !isSkippedDir(entry.name)) queue.push({ dir: full, depth: depth + 1 });
       } else if (entry.isFile()) {
@@ -36887,7 +37002,7 @@ async function findGitRepos(roots = []) {
   const repos = [];
   for (const root of roots) {
     await walk(root, 3, async (dir) => {
-      if (existsSync4(join5(dir, ".git"))) repos.push(dir);
+      if (existsSync4(join6(dir, ".git"))) repos.push(dir);
     });
   }
   return [...new Set(repos)];
@@ -37079,7 +37194,7 @@ async function archiveDay(config2, dateString, { force = false, note = "" } = {}
       date: dateString,
       time: String(doc.time || "").slice(0, 5),
       title: doc.relative || basename3(doc.path),
-      project: basename3(dirname4(doc.path)),
+      project: basename3(dirname5(doc.path)),
       ref: doc.path,
       nativeId: doc.path + "|" + (doc.time || "")
     });
@@ -37098,10 +37213,12 @@ async function archiveDay(config2, dateString, { force = false, note = "" } = {}
     });
   }
   await appendEntries(config2, entriesInput);
+  await rebuildGraph(config2).catch(() => {
+  });
   const entriesSection = await entriesDaySection(config2, dateString);
   const text = buildDayMarkdown(dateString, gitResult, docResult, note, sessionResult, todoSection, entriesSection);
-  await mkdir4(dirname4(target), { recursive: true });
-  await writeFile4(target, text, "utf8");
+  await mkdir5(dirname5(target), { recursive: true });
+  await writeFile5(target, text, "utf8");
   return {
     date: dateString,
     path: target,
@@ -37145,8 +37262,8 @@ init_sessions();
 // lib/templates.mjs
 init_config();
 import { existsSync as existsSync5, readFileSync as readFileSync2 } from "node:fs";
-import { mkdir as mkdir5, readFile as readFile4, unlink as unlink2, writeFile as writeFile5 } from "node:fs/promises";
-import { join as join6 } from "node:path";
+import { mkdir as mkdir6, readFile as readFile5, unlink as unlink2, writeFile as writeFile6 } from "node:fs/promises";
+import { join as join7 } from "node:path";
 var MAX_USER_FILE = 64 * 1024;
 var SCENES = [
   { scene: "report", name: "\u62A5\u544A\u6DA6\u8272", kind: "report", hint: "\u5468\u62A5/\u6708\u62A5/\u5B63\u62A5\u7684 AI \u6DA6\u8272" },
@@ -37156,10 +37273,10 @@ var SCENES = [
   { scene: "summarize", name: "\u81EA\u7531\u603B\u7ED3", kind: "summarize", hint: "\u5BF9\u4EFB\u610F\u8303\u56F4\u5185\u5BB9\u7684\u603B\u7ED3" }
 ];
 function templatesDir(config2) {
-  return join6(config2.dataDir, "templates");
+  return join7(config2.dataDir, "templates");
 }
 function templateFile(config2, scene) {
-  return join6(templatesDir(config2), scene + ".md");
+  return join7(templatesDir(config2), scene + ".md");
 }
 function validScene(scene) {
   return SCENES.some((item) => item.scene === scene);
@@ -37254,8 +37371,8 @@ function listTemplates(config2) {
 async function saveTemplate(config2, scene, { name, system, user } = {}) {
   if (!validScene(scene)) throw new Error("\u672A\u77E5\u6A21\u677F\u573A\u666F\uFF1A" + scene);
   const body = "---\nscene: " + scene + "\nname: " + String(name || SCENES.find((s) => s.scene === scene)?.name || scene) + "\n---\n\n### SYSTEM\n" + String(system || "") + "\n\n### USER\n" + String(user || "");
-  await mkdir5(templatesDir(config2), { recursive: true });
-  await writeFile5(templateFile(config2, scene), body, "utf8");
+  await mkdir6(templatesDir(config2), { recursive: true });
+  await writeFile6(templateFile(config2, scene), body, "utf8");
   return resolveTemplate(config2, scene);
 }
 async function resetTemplate(config2, scene) {
@@ -37943,7 +38060,7 @@ function summarizeAiUsage(entries = []) {
 // lib/ai-detect.mjs
 import { readdirSync, readFileSync as readFileSync3 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
-import { join as join7 } from "node:path";
+import { join as join8 } from "node:path";
 function readJson3(file2) {
   try {
     return JSON.parse(readFileSync3(file2, "utf8"));
@@ -38019,10 +38136,10 @@ function parseTomlLite(text) {
   return root;
 }
 function zcodeCandidates(home) {
-  const config2 = readJson3(join7(home, ".zcode", "v2", "config.json"));
+  const config2 = readJson3(join8(home, ".zcode", "v2", "config.json"));
   const providers = config2?.provider;
   if (!providers || typeof providers !== "object") return [];
-  const settings = readJson3(join7(home, ".zcode", "v2", "setting.json")) || {};
+  const settings = readJson3(join8(home, ".zcode", "v2", "setting.json")) || {};
   const selected = Object.values(settings.modelProviderFamilySelectedKeys || {}).map(String);
   const isSelected = (key) => selected.some((value) => value === key || value.endsWith(`:${key}`));
   const out = [];
@@ -38151,7 +38268,7 @@ function readDshSettings(dshHome) {
   };
   let profiles = [];
   try {
-    profiles = readdirSync(join7(dshHome, "profiles"), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+    profiles = readdirSync(join8(dshHome, "profiles"), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
   } catch {
     profiles = [];
   }
@@ -38164,7 +38281,7 @@ function readDshSettings(dshHome) {
   });
   for (const name of profiles) {
     for (const file2 of ["cordis.patch.yml", "cordis.yml"]) {
-      const text = readText(join7(dshHome, "profiles", name, file2));
+      const text = readText(join8(dshHome, "profiles", name, file2));
       if (!text) continue;
       const entries = pluginEntries(parseYamlLite(text));
       const llm = entries.find((entry) => entry?.id === "llm-pi-ai" && entry?.config?.providers);
@@ -38178,7 +38295,7 @@ function readDshSettings(dshHome) {
       };
     }
   }
-  const settingsText = readText(join7(dshHome, "settings.yaml")) || readText(join7(dshHome, "settings-legacy.yaml"));
+  const settingsText = readText(join8(dshHome, "settings.yaml")) || readText(join8(dshHome, "settings-legacy.yaml"));
   if (!settingsText) return empty;
   const settings = parseYamlLite(settingsText);
   const providers = settings["llm-pi-ai"]?.providers;
@@ -38192,11 +38309,11 @@ function readDshSettings(dshHome) {
   };
 }
 function dshCandidates(home, env) {
-  const dshHome = String(env.DSH_HOME || "").trim() || join7(home, ".dsh");
+  const dshHome = String(env.DSH_HOME || "").trim() || join8(home, ".dsh");
   const settings = readDshSettings(dshHome);
   const providers = settings.providers;
   if (!providers || typeof providers !== "object") return [];
-  const credentials = parseYamlLite(readText(join7(dshHome, ".credentials.yaml")) || "");
+  const credentials = parseYamlLite(readText(join8(dshHome, ".credentials.yaml")) || "");
   const refs = credentials.refs && typeof credentials.refs === "object" ? credentials.refs : {};
   const defaultProvider = settings.defaultProvider;
   const defaultModelId = settings.defaultModelId;
@@ -38257,7 +38374,7 @@ function dshCandidates(home, env) {
   return out;
 }
 function claudeCandidates(home) {
-  const settings = readJson3(join7(home, ".claude", "settings.json"));
+  const settings = readJson3(join8(home, ".claude", "settings.json"));
   const env = settings?.env;
   if (!env || typeof env !== "object") return [];
   const baseUrl = String(env.ANTHROPIC_BASE_URL || "").trim();
@@ -38282,10 +38399,10 @@ function claudeCandidates(home) {
   ];
 }
 function codexCandidates(home, env) {
-  const text = readText(join7(home, ".codex", "config.toml"));
+  const text = readText(join8(home, ".codex", "config.toml"));
   if (!text) return [];
   const toml = parseTomlLite(text);
-  const auth = readJson3(join7(home, ".codex", "auth.json")) || {};
+  const auth = readJson3(join8(home, ".codex", "auth.json")) || {};
   const providerId = String(toml.model_provider || "").trim();
   const providers = toml.model_providers && typeof toml.model_providers === "object" ? toml.model_providers : {};
   const provider = providerId && providers[providerId] || providers.openai || {};
@@ -38310,11 +38427,11 @@ function codexCandidates(home, env) {
   ];
 }
 function geminiCandidates(home, env) {
-  const dotenv = readText(join7(home, ".gemini", ".env")) || "";
+  const dotenv = readText(join8(home, ".gemini", ".env")) || "";
   const dotenvKey = /^\s*GEMINI_API_KEY\s*=\s*(.+)$/m.exec(dotenv)?.[1]?.trim().replace(/^["']|["']$/g, "");
   const apiKey = String(env.GEMINI_API_KEY || dotenvKey || "").trim();
   if (!apiKey) return [];
-  const settings = readJson3(join7(home, ".gemini", "settings.json")) || {};
+  const settings = readJson3(join8(home, ".gemini", "settings.json")) || {};
   return [
     makeCandidate({
       id: "gemini-cli",
@@ -38649,7 +38766,7 @@ init_watch();
 // lib/wizard.mjs
 import { statSync } from "node:fs";
 import { readdir as readdir5 } from "node:fs/promises";
-import { join as join9 } from "node:path";
+import { join as join10 } from "node:path";
 var TYPE_MATCHERS = {
   zcode: (id) => id.startsWith("zcode:"),
   dsh: (id) => id.startsWith("dsh:"),
@@ -38675,7 +38792,7 @@ async function countFiles(root, depth = 0, cap = 2e3) {
     return 0;
   }
   for (const entry of entries) {
-    const full = join9(root, entry.name);
+    const full = join10(root, entry.name);
     if (entry.isDirectory()) {
       if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
       count += await countFiles(full, depth + 1, cap - count);
@@ -38920,6 +39037,15 @@ async function collectAction(config2, args = {}) {
     return runDueTasks(config2, { force: true, id: args.id || "" });
   }
   if (action === "set") return updateTask(config2, args);
+  throw new Error(`\u672A\u77E5 action: ${action}`);
+}
+async function graphAction(config2, args = {}) {
+  const action = args.action || "query";
+  if (action === "query") return queryGraph(config2, String(args.entity || ""));
+  if (action === "rebuild") {
+    const stats = await rebuildGraph(config2);
+    return { rebuilt: true, ...stats };
+  }
   throw new Error(`\u672A\u77E5 action: ${action}`);
 }
 async function recommendAction(config2, args = {}) {
@@ -39192,6 +39318,8 @@ async function dispatch(op, args = {}) {
       return connectorsAction(config2, args);
     case "recommend":
       return recommendAction(config2, args);
+    case "graph":
+      return graphAction(config2, args);
     case "days":
       return listDays(config2);
     case "reports":
@@ -39202,7 +39330,7 @@ async function dispatch(op, args = {}) {
 }
 
 // src/server.mjs
-var HERE = dirname6(fileURLToPath(import.meta.url));
+var HERE = dirname7(fileURLToPath(import.meta.url));
 var PANEL_URI = `ui://${PLUGIN_NAME}/panel.html`;
 var SCRIPT_URI = `ui://${PLUGIN_NAME}/panel.js`;
 var STYLE_URI = `ui://${PLUGIN_NAME}/panel.css`;
@@ -39446,6 +39574,18 @@ tool(
   (args) => calendarAction(loadConfig(), args)
 );
 tool(
+  "worklog_graph",
+  {
+    title: "\u77E5\u8BC6\u56FE\u8C31",
+    description: 'WorkLog \u77E5\u8BC6\u56FE\u8C31\uFF08\u89C4\u5219\u62BD\u53D6\uFF0C\u53EF\u89E3\u91CA\uFF09\uFF1Aaction=query \u4E0D\u5E26 entity \u8FD4\u56DE\u603B\u89C8\uFF08\u8282\u70B9/\u8FB9\u8BA1\u6570\u4E0E\u7C7B\u578B\u5206\u5E03\uFF09\uFF1Baction=query {entity:"\u9879\u76EE\u540D\u6216\u4EBA\u540D"} \u8FD4\u56DE\u8BE5\u5B9E\u4F53\u7684\u5173\u7CFB\u5217\u8868\uFF08\u63D0\u4EA4\u4E86/\u7528\u4E8E/\u63D0\u4F9B/\u51FA\u73B0\u4E8E + \u65B9\u5411\u4E0E\u6B21\u6570\uFF09\uFF1Baction=rebuild \u4ECE\u7EDF\u4E00\u6761\u76EE\u5168\u91CF\u91CD\u5EFA data/graph.json\uFF08\u5F52\u6863\u540E\u4E5F\u4F1A\u81EA\u52A8\u91CD\u5EFA\uFF09\u3002',
+    inputSchema: external_exports.object({
+      action: external_exports.enum(["query", "rebuild"]).optional(),
+      entity: external_exports.string().optional()
+    })
+  },
+  (args) => graphAction(loadConfig(), args)
+);
+tool(
   "worklog_recommend",
   {
     title: "\u5DE5\u4F5C\u5EFA\u8BAE",
@@ -39541,7 +39681,8 @@ server.registerTool(
         "calendar",
         "templates",
         "connectors",
-        "recommend"
+        "recommend",
+        "graph"
       ]),
       args: external_exports.record(external_exports.string(), external_exports.unknown()).optional()
     }),
@@ -39556,7 +39697,7 @@ server.registerTool(
   }
 );
 async function asset(name) {
-  return readFile6(join10(HERE, name), "utf8");
+  return readFile7(join11(HERE, name), "utf8");
 }
 var panelHtmlPromise;
 function panelDocument() {

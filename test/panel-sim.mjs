@@ -102,6 +102,10 @@ function respond(window, message) {
     else if (op === 'day') structured = { date: args.date, exists: true, text: '# 测试日志\n' }
     else if (op === 'calendar' && args.action === 'month')
       structured = { month: '2026-10', today: '2026-10-31', days: { '2026-10-31': { date: '2026-10-31', archived: true, hasDailyReport: false, entryCount: 3, bySource: { git: 2, sessions: 1 }, todoDone: 1, sessionCount: 1, commitCount: 2 } } }
+    else if (op === 'graph' && !args.entity)
+      structured = { builtAt: '2026-10-31T09:00:00.000Z', nodeCount: 3, edgeCount: 3, types: { project: 1, person: 1, tool: 1 }, nodes: [{ key: 'project:商城', type: 'project', label: '商城', weight: 5 }, { key: 'person:Ray', type: 'person', label: 'Ray', weight: 3 }] }
+    else if (op === 'graph' && args.entity)
+      structured = { entity: args.entity, found: true, type: 'project', label: args.entity, weight: 5, relations: [{ kind: '提交了', count: 3, direction: 'in', other: 'Ray', otherType: 'person' }] }
     else if (op === 'calendar' && args.action === 'day')
       structured = { date: args.date, archived: true, path: 'x', sessions: [{ title: '日历模拟会话', label: 'Claude', turns: 2, timeRange: '10:00' }], todosDone: [{ title: '测试待办', doneAt: '' }], entries: { count: 3, bySource: { git: 2, sessions: 1 }, items: [{ time: '10:00', title: 'feat: x', project: 'demo', source: 'git', ref: 'a1' }] }, hasDailyReport: false }
     else if (op === 'todos' && args.action === 'list') structured = { items: bootstrap.todos }
@@ -227,6 +231,16 @@ await new Promise((resolve) => setTimeout(resolve, 50))
 assert.ok(text().includes('采集条目 3 条'), 'day detail shows entries')
 assert.ok(text().includes('日历模拟会话'), 'day detail shows sessions')
 console.log('calendar OK')
+
+await clickTab('图谱')
+await new Promise((resolve) => setTimeout(resolve, 50))
+assert.ok(text().includes('知识图谱'), 'graph tab renders')
+const chip = Array.from(doc.querySelectorAll('.wl-chip')).find((el) => el.textContent.includes('商城'))
+assert.ok(chip, 'project chip exists')
+chip.click()
+await new Promise((resolve) => setTimeout(resolve, 50))
+assert.ok(text().includes('提交了'), 'entity relations render')
+console.log('graph OK')
 
 await clickTab('汇报')
 assert.ok(text().includes('周报'), 'reports tab renders')

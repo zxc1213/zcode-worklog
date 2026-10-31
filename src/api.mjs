@@ -49,6 +49,7 @@ import { getHistory, getTasks, runDueTasks, updateTask } from '../lib/scheduler.
 import { calendarDay, calendarMonth } from '../lib/calendar.mjs'
 import { CONNECTOR_TYPES, adapterFor, listConnectors, normalizeConnector, publicConnectorList, syncConnectors } from '../lib/connectors.mjs'
 import { buildRecommendations, recordFeedback } from '../lib/recommend.mjs'
+import { queryGraph, rebuildGraph } from '../lib/graph.mjs'
 import { scanWatchDirs } from '../lib/watch.mjs'
 import { probeAiTool, WIZARD_TYPES } from '../lib/wizard.mjs'
 
@@ -269,6 +270,16 @@ export async function collectAction(config, args = {}) {
     return runDueTasks(config, { force: true, id: args.id || '' })
   }
   if (action === 'set') return updateTask(config, args)
+  throw new Error(`未知 action: ${action}`)
+}
+
+export async function graphAction(config, args = {}) {
+  const action = args.action || 'query'
+  if (action === 'query') return queryGraph(config, String(args.entity || ''))
+  if (action === 'rebuild') {
+    const stats = await rebuildGraph(config)
+    return { rebuilt: true, ...stats }
+  }
   throw new Error(`未知 action: ${action}`)
 }
 
@@ -569,6 +580,8 @@ export async function dispatch(op, args = {}) {
       return connectorsAction(config, args)
     case 'recommend':
       return recommendAction(config, args)
+    case 'graph':
+      return graphAction(config, args)
     case 'days':
       return listDays(config)
     case 'reports':

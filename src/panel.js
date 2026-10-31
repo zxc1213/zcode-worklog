@@ -36,6 +36,7 @@ const TABS = [
   ['logs', '日志'],
   ['todos', '待办'],
   ['reports', '汇报'],
+  ['graph', '图谱'],
   ['sessions', '会话'],
   ['settings', '设置'],
 ]
@@ -98,6 +99,9 @@ const state = {
   connLoading: false,
   recoData: null,
   recoLoading: false,
+  graphData: null,
+  graphEntity: '',
+  graphLoading: false,
   reports: [],
   backups: [],
   config: null,
@@ -3184,6 +3188,144 @@ function recoCard() {
 }
 
 
+async function loadGraphView(entity) {
+  state.graphLoading = true
+  state.graphEntity = entity || ''
+  render()
+  try {
+    state.graphData = await call('graph', { action: 'query', entity: state.graphEntity })
+  } catch (error) {
+    setNotice('err', '图谱加载失败：' + String(error?.message || error))
+  } finally {
+    state.graphLoading = false
+  }
+  render()
+}
+
+function graphTab() {
+  if (!state.graphData && !state.graphLoading) loadGraphView('')
+  const data = state.graphData
+  const loading = h('div', { className: 'wl-hint' }, '加载中…')
+  return h(
+    'div',
+    null,
+    noticeNode(),
+    h(
+      'div',
+      { className: 'wl-card wide' },
+      data
+        ? [
+            h(
+              'div',
+              { className: 'wl-row' },
+              h('div', { className: 'wl-section-title' }, data.found || data.entity ? '实体关系' : '知识图谱'),
+              h('span', { className: 'wl-hint' },
+                data.builtAt ? '构建于 ' + String(data.builtAt).slice(5, 16).replace('T', ' ') : '未构建'),
+              h(
+                'button',
+                {
+                  className: 'wl-btn tiny',
+                  disabled: state.graphLoading,
+                  onClick: () => act('graph-rebuild', async () => {
+                    const stats = await call('graph', { action: 'rebuild' })
+                    setNotice('ok', '图谱已重建：' + stats.nodes + ' 节点 / ' + stats.edges + ' 关系')
+                    state.graphData = null
+                  }),
+                },
+                '重建',
+              ),
+            ),
+            state.graphLoading ? loading : null,
+            !state.graphLoading && data.found === undefined && !data.entity
+              ? graphOverview(data)
+              : null,
+            !state.graphLoading && data.entity ? graphEntityView(data) : null,
+          ]
+        : loading,
+    ),
+  )
+}
+
+function graphOverview(data) {
+  const byType = {}
+  for (const [key, node] of Object.entries(data.nodes || {})) {
+    const list = byType[node.type] || (byType[node.type] = [])
+    list.push({ key, ...node })
+  }
+  const typeLabels = { project: '项目', person: '人', tool: 'AI 工具', source: '外部系统', topic: '主题' }
+  return h(
+    'div',
+    null,
+    h('div', { className: 'wl-hint' },
+      '节点 ' + (data.nodeCount || 0) + ' · 关系 ' + (data.edgeCount || 0) +
+      (Object.keys(data.types || {}).length ? ' · ' + Object.entries(data.types).map(([t, n]) => t + ' ' + n).join('、') : '') +
+      '。点实体看关系。'),
+    Object.entries(byType)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([type, nodes]) =>
+        h(
+          'div',
+          { className: 'wl-section', key: type },
+          h('div', { className: 'wl-section-title' }, typeLabels[type] || type + ' (' + nodes.length + ')'),
+          nodes
+            .sort((a, b) => b.weight - a.weight)
+            .map((node) =>
+              h(
+                'button',
+                {
+                  className: 'wl-chip',
+                  key: node.key,
+                  onClick: () => loadGraphView(node.label),
+                },
+                node.label + ' · ' + node.weight,
+              ),
+            ),
+        ),
+      ),
+  )
+}
+
+function graphEntityView(data) {
+  if (!data.found) {
+    return h(
+      'div',
+      null,
+      h('div', { className: 'wl-empty' }, '没有找到实体：' + data.entity),
+      h(
+        'button',
+        { className: 'wl-btn tiny', onClick: () => { state.graphData = null; state.graphEntity = ''; loadGraphView('') } },
+        '返回总览',
+      ),
+    )
+  }
+  return h(
+    'div',
+    null,
+    h(
+      'div',
+      { className: 'wl-row' },
+      h('div', { className: 'wl-section-title' }, data.label + '（' + data.weight + ' 次出现）'),
+      h(
+        'button',
+        { className: 'wl-btn tiny', onClick: () => { state.graphData = null; state.graphEntity = ''; loadGraphView('') } },
+        '返回总览',
+      ),
+    ),
+    data.relations.length
+      ? data.relations.map((relation) =>
+          h(
+            'div',
+            { className: 'wl-row', key: relation.kind + relation.other },
+            h('span', { className: 'wl-tag' }, relation.kind),
+            h('span', { className: 'grow wl-hint' },
+              (relation.direction === 'out' ? '→ ' : '← ') + relation.other + '（' + relation.otherType + '）'),
+            h('span', { className: 'wl-hint' }, String(relation.count) + ' 次'),
+          ),
+        )
+      : h('div', { className: 'wl-empty' }, '该实体暂无关系'),
+  )
+}
+
 function render() {
   const root = document.getElementById('app')
   if (!root) return
@@ -3212,6 +3354,8 @@ function render() {
         ? overviewTab()
         : state.tab === 'calendar'
           ? calendarTab()
+        : state.tab === 'graph'
+          ? graphTab()
         : state.tab === 'logs'
           ? logsTab()
           : state.tab === 'todos'
