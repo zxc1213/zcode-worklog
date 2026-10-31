@@ -41,7 +41,7 @@ Ray：单人使用，本机多 AI 工具（ZCode/DSH/Claude Code/Codex/Gemini…
 - **REQ-C1（P0，R1 已实现）AI 会话采集**：保持现有 8 类来源扫描；定时采集（见 C5）与手动"立即扫描会话"已接；采集结果写统一条目并保留现有「## AI 会话」日报小节；来源健康视图（每来源：上次扫描时间/文件数/错误）。
 - **REQ-C2（P0，R1 已实现）AI 工具配置向导**：面板分步向导——选工具类型 → 填/选位置（路径或 URL）→ 校验（读取成功即列出：模型列表、来源文件数、key 掩码显示）→ 应用；支持对已知类型（ZCode/DSH/Claude/Codex/Gemini/自定义）逐个引导；自定义类型允许填 sessionRoots 正则与文件格式说明。
 - **REQ-C3（P0，R1 指纹扫描已实现，条目产出待 R2）工作目录监控**：scanRoots/docRoots 保留；新增目录条目标注类型（本地/网盘/git），网盘类（OneDrive/坚果云等同步目录）用 mtime+size 指纹增量扫描；监控结果进统一条目。
-- **REQ-C4（P1）外部系统对接**：飞书（自建应用 tenant_access_token，只读拉取：机器人所在群消息摘要、知识库/文档变更、多维表格记录、日程）；禅道（REST token，拉取：我的任务/缺陷/需求变更）；Hermes（待接口信息，先用通用连接器承接）；所有对接产出统一条目并可在日报/周报引用。
+- **REQ-C4（P1，R4 已实现，Hermes 走通用连接器）外部系统对接**：飞书（自建应用 tenant_access_token，只读拉取：机器人所在群消息摘要、知识库/文档变更、多维表格记录、日程）；禅道（REST token，拉取：我的任务/缺陷/需求变更）；Hermes（待接口信息，先用通用连接器承接）；所有对接产出统一条目并可在日报/周报引用。
 - **REQ-C5（P0，R1 已实现）采集调度器**：任务模型 {id, kind, enabled, intervalHours 或 dailyAt, lastRunAt}；执行载体=SessionStart hook 补偿式（会话启动时把到期任务跑掉）+ 面板手动；运行历史可查；单任务失败不影响其他任务。
 
 ### B 组织 Organize
@@ -94,6 +94,7 @@ Ray：单人使用，本机多 AI 工具（ZCode/DSH/Claude Code/Codex/Gemini…
 ## 8. 变更记录
 
 - v0.1（2026-10-31）：首版。九条基线映射完成，现状差距明确，路线图 R1-R6。
+- v0.5（2026-10-31）：R4 发布（0.7.0）。C4/C6 已实现：lib/adapters/{core,feishu,zentao,generic}.mjs + lib/connectors.mjs（注册/掩码/同步/占位符保密）；worklog_connectors 工具（18 个）；面板「外部连接器」块（新建/编辑/测试/同步/删除）；调度任务 connector-sync（默认 6h）。飞书子项（群消息/wiki）需真机 app 凭据验证——开放问题仍待 Ray。自测修复：连接器动作强制读最新配置（防旧句柄覆盖密钥）、zentao mapItem 作用域 bug。
 - v0.4（2026-10-31）：R3 发布（0.6.0）。D1 已实现：lib/templates.mjs 五场景（report/ask/todo-parse/todo-suggest/summarize），文件格式 frontmatter + ### SYSTEM/### USER，用户模板缺失段回落内置；四个 AI 调用点全部迁移；新增 worklog_report action=summarize（自由总结，无 AI 降级规则摘要）；worklog_templates 工具（17 个）；设置页「提示词模板」编辑块。自测修复：模板读取误用 async 导致内置回落（改 readFileSync）。设计复审：用量 kind 精确到场景名（todo-parse/todo-suggest/summarize）。
 - v0.3（2026-10-31）：R2 发布（0.5.0）。O1/O2 已实现：lib/entries.mjs（append-only+指纹去重+上限裁剪）、采集接线（归档 git/docs/sessions、watch 变化、调度会话扫描）、日报新增「## 采集条目」小节、lib/calendar.mjs 月/日聚合、面板「日历」页签（月视图+日详情）、worklog_calendar 工具（16 个工具）。设计复审调整：调度会话任务也直接产条目（不再等归档）。
 - v0.2（2026-10-31）：R1 发布（0.4.0）。C1/C2/C3(指纹)/C5 标记已实现；基线映射表"现状"列待 R2 统一条目后一并刷新。

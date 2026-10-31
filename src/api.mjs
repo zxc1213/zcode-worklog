@@ -47,6 +47,7 @@ import { detectAiCandidates, findAiCandidate, publicCandidate } from '../lib/ai-
 import { listSessionSources, parseSessionLines, scanSessions } from '../lib/sessions.mjs'
 import { getHistory, getTasks, runDueTasks, updateTask } from '../lib/scheduler.mjs'
 import { calendarDay, calendarMonth } from '../lib/calendar.mjs'
+import { CONNECTOR_TYPES, adapterFor, listConnectors, normalizeConnector, publicConnectorList, syncConnectors } from '../lib/connectors.mjs'
 import { scanWatchDirs } from '../lib/watch.mjs'
 import { probeAiTool, WIZARD_TYPES } from '../lib/wizard.mjs'
 
@@ -267,6 +268,48 @@ export async function collectAction(config, args = {}) {
     return runDueTasks(config, { force: true, id: args.id || '' })
   }
   if (action === 'set') return updateTask(config, args)
+  throw new Error(`未知 action: ${action}`)
+}
+
+export async function connectorsAction(configArg, args = {}) {
+  // Mutating action: always read the freshest config from disk so stale
+  // handles (panel bootstrap / long-lived tool calls) never clobber secrets.
+  const config = loadConfig()
+  const action = args.action || 'list'
+  if (action === 'list') {
+    return { connectors: publicConnectorList(loadConfig()), types: CONNECTOR_TYPES.map((item) => ({ ...item, fields: adapterFor(item.type).FIELDS })) }
+  }
+  if (action === 'set') {
+    const existing = listConnectors(config)
+    const base = existing.find((item) => item.id === String(args.id || ''))
+    const mergedConfig = { ...(base?.config || {}) }
+    if (args.config && typeof args.config === 'object') {
+      for (const field of adapterFor(String(args.type || base?.type || '')).FIELDS) {
+        const incoming = args.config[field.key]
+        if (incoming === undefined) continue
+        if (field.type === 'bool') { mergedConfig[field.key] = Boolean(incoming); continue }
+        if (incoming === '已配置') continue
+        mergedConfig[field.key] = String(incoming)
+      }
+    }
+    const normalized = normalizeConnector({ id: args.id, type: args.type || base?.type, enabled: args.enabled, label: args.label, config: mergedConfig })
+    const merged = existing.some((item) => item.id === normalized.id)
+      ? existing.map((item) => (item.id === normalized.id ? normalized : item))
+      : [...existing, normalized]
+    saveConfig({ connectors: merged })
+    return { connector: publicConnectorList(loadConfig()).find((item) => item.id === normalized.id) }
+  }
+  if (action === 'remove') {
+    const remaining = listConnectors(config).filter((item) => item.id !== String(args.id || ''))
+    saveConfig({ connectors: remaining })
+    return { ok: true }
+  }
+  if (action === 'test') {
+    const connector = listConnectors(config).find((item) => item.id === String(args.id || ''))
+    if (!connector) throw new Error('找不到连接器：' + String(args.id || ''))
+    return adapterFor(connector.type).test(connector.config)
+  }
+  if (action === 'sync') return syncConnectors(config, args.id || '')
   throw new Error(`未知 action: ${action}`)
 }
 
@@ -510,6 +553,8 @@ export async function dispatch(op, args = {}) {
       return calendarAction(config, args)
     case 'templates':
       return templatesAction(config, args)
+    case 'connectors':
+      return connectorsAction(config, args)
     case 'days':
       return listDays(config)
     case 'reports':

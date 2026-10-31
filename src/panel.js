@@ -93,6 +93,9 @@ const state = {
   tplList: null,
   tplDraft: null,
   tplLoading: false,
+  connList: null,
+  connDraft: null,
+  connLoading: false,
   reports: [],
   backups: [],
   config: null,
@@ -111,7 +114,7 @@ const state = {
   aiModels: [],
   aiModelsBusy: false,
   aiModelsNote: '',
-  settingsOpen: { data: false, ai: false, backup: false, import: false, sched: false, wizard: false, tpls: false },
+  settingsOpen: { data: false, ai: false, backup: false, import: false, sched: false, wizard: false, tpls: false, conns: false },
 }
 
 function h(tag, props = {}, ...children) {
@@ -2166,6 +2169,7 @@ function settingsTab() {
     schedSection(),
     wizardSection(),
     tplSection(),
+    connectorsSection(),
   )
 }
 
@@ -2844,6 +2848,256 @@ function tplSection() {
                     '恢复默认',
                   ),
                 ),
+              ],
+        )
+      : null,
+  )
+}
+
+async function loadConns() {
+  if (state.connList) return
+  state.connLoading = true
+  render()
+  try {
+    state.connList = await call('connectors', { action: 'list' })
+  } catch (error) {
+    setNotice('err', '连接器加载失败：' + String(error?.message || error))
+  } finally {
+    state.connLoading = false
+  }
+}
+
+function connTypeMeta(type) {
+  return (state.connList?.types || []).find((item) => item.type === type)
+}
+
+function connRow(connector) {
+  return h(
+    'div',
+    { style: { marginTop: '6px' }, key: connector.id },
+    h(
+      'div',
+      { className: 'wl-row' },
+      h('input', {
+        className: 'wl-check',
+        type: 'checkbox',
+        checked: Boolean(connector.enabled),
+        onChange: () =>
+          act('conn-set', async () => {
+            await call('connectors', { action: 'set', id: connector.id, type: connector.type, label: connector.label, enabled: !connector.enabled, config: connector.config })
+            state.connList = null
+          }),
+      }),
+      h(
+        'div',
+        { className: 'grow' },
+        h('div', { className: 'wl-item-title' }, (connector.label || connector.id) + ' · ' + connector.type),
+        h(
+          'div',
+          { className: 'wl-item-meta' },
+          connector.lastSyncAt ? '上次同步 ' + String(connector.lastSyncAt).slice(5, 16).replace('T', ' ') : '未同步',
+          connector.lastStatus === 'ok' ? ' · ✅' : connector.lastStatus === 'error' ? ' · ❌ ' + (connector.lastError || '') : '',
+        ),
+      ),
+      h(
+        'button',
+        { className: 'wl-btn tiny', disabled: state.busy === 'conn-test', onClick: () => act('conn-test', async () => {
+          const result = await call('connectors', { action: 'test', id: connector.id })
+          setNotice(result.ok ? 'ok' : 'err', (result.ok ? '连接成功：' : '连接失败：') + (result.detail || ''))
+        }) },
+        '测试',
+      ),
+      h(
+        'button',
+        { className: 'wl-btn tiny', disabled: state.busy === 'conn-sync', onClick: () => act('conn-sync', async () => {
+          const result = await call('connectors', { action: 'sync', id: connector.id })
+          const item = result.results?.[0]
+          setNotice(item?.status === 'error' ? 'err' : 'ok', item ? (item.status === 'error' ? '同步失败：' + item.error : '同步完成，新增 ' + item.added + ' 条') : '已触发')
+          state.connList = null
+        }) },
+        '同步',
+      ),
+      h(
+        'button',
+        { className: 'wl-btn danger tiny', onClick: () => act('conn-del', async () => {
+          await call('connectors', { action: 'remove', id: connector.id })
+          state.connList = null
+        }) },
+        '删',
+      ),
+    ),
+  )
+}
+
+function connFieldInput(field, draft) {
+  const value = draft.config[field.key]
+  if (field.type === 'bool') {
+    return h('input', {
+      className: 'wl-check',
+      type: 'checkbox',
+      checked: Boolean(value),
+      onChange: (event) => {
+        draft.config[field.key] = event.target.checked
+        render()
+      },
+    })
+  }
+  return h('input', {
+    className: 'wl-input',
+    type: field.type === 'password' ? 'password' : 'text',
+    value: value || '',
+    placeholder: field.hint || field.label,
+    onInput: (event) => {
+      draft.config[field.key] = event.target.value
+    },
+  })
+}
+
+function connEditor() {
+  const draft = state.connDraft
+  if (!draft) return null
+  const meta = connTypeMeta(draft.type)
+  const fields = meta?.fields || []
+  return h(
+    'div',
+    { className: 'wl-section', style: { marginTop: '6px' } },
+    h(
+      'div',
+      { className: 'wl-row' },
+      h(
+        'select',
+        {
+          className: 'wl-select',
+          style: { width: '220px' },
+          value: draft.type,
+          onChange: (event) => {
+            state.connDraft = { id: '', type: event.target.value, label: '', enabled: true, config: {} }
+            render()
+          },
+        },
+        (state.connList?.types || []).map((item) =>
+          h('option', { value: item.type, selected: draft.type === item.type }, item.title),
+        ),
+      ),
+      h('input', {
+        className: 'wl-input',
+        placeholder: '名称（可选）',
+        value: draft.label,
+        onInput: (event) => {
+          draft.label = event.target.value
+        },
+      }),
+    ),
+    fields.map((field) =>
+      h(
+        'div',
+        { className: 'wl-row', key: field.key, style: { marginTop: '4px' } },
+        h('span', { className: 'wl-hint', style: { width: '120px' } }, field.label + (field.required ? ' *' : '')),
+        connFieldInput(field, draft),
+      ),
+    ),
+    h(
+      'div',
+      { className: 'wl-row', style: { marginTop: '6px' } },
+      h(
+        'button',
+        {
+          className: 'wl-btn primary',
+          disabled: state.busy === 'conn-save',
+          onClick: () =>
+            act('conn-save', async () => {
+              await call('connectors', {
+                action: 'set',
+                id: draft.id,
+                type: draft.type,
+                label: draft.label,
+                enabled: draft.enabled !== false,
+                config: draft.config,
+              })
+              state.connList = null
+              state.connDraft = null
+              setNotice('ok', '连接器已保存')
+            }),
+        },
+        '保存连接器',
+      ),
+      h(
+        'button',
+        {
+          className: 'wl-btn',
+          onClick: () => {
+            state.connDraft = null
+            render()
+          },
+        },
+        '取消',
+      ),
+      h('span', { className: 'wl-hint' }, '密钥回显为「已配置」占位，不改则保留原值'),
+    ),
+  )
+}
+
+function connectorsSection() {
+  const open = Boolean(state.settingsOpen.conns)
+  if (open) loadConns().then(render)
+  const connectors = state.connList?.connectors || []
+  return h(
+    'div',
+    { className: `wl-fold${open ? ' open' : ''}` },
+    h(
+      'button',
+      {
+        className: 'wl-fold-head',
+        type: 'button',
+        onClick: () => {
+          state.settingsOpen.conns = !open
+          render()
+        },
+      },
+      h('span', { className: 'wl-fold-caret' }, open ? '▾' : '▸'),
+      '外部连接器',
+      h('span', { className: 'wl-hint' }, '飞书 / 禅道 / 通用 JSON（只读采集）'),
+    ),
+    open
+      ? h(
+          'div',
+          { className: 'wl-fold-body' },
+          state.connLoading && !state.connList
+            ? h('div', { className: 'wl-hint' }, '加载中…')
+            : [
+                connectors.length
+                  ? connectors.map(connRow)
+                  : h('div', { className: 'wl-hint' }, '还没有连接器。新建一个开始拉取外部数据。'),
+                h(
+                  'div',
+                  { className: 'wl-row', style: { marginTop: '8px' } },
+                  h(
+                    'button',
+                    {
+                      className: 'wl-btn',
+                      disabled: state.connDraft !== null,
+                      onClick: () => {
+                        state.connDraft = { id: '', type: 'feishu', label: '', enabled: true, config: {} }
+                        if (!state.connList) loadConns()
+                        render()
+                      },
+                    },
+                    '新建连接器',
+                  ),
+                  connectors.length
+                    ? h(
+                        'button',
+                        { className: 'wl-btn', disabled: state.busy === 'conn-sync', onClick: () => act('conn-sync', async () => {
+                          const result = await call('connectors', { action: 'sync' })
+                          const okN = result.results.filter((item) => item.status === 'ok').length
+                          setNotice('ok', '同步完成：' + okN + '/' + result.results.length + ' 成功')
+                          state.connList = null
+                        }) },
+                        '同步全部启用项',
+                      )
+                    : null,
+                ),
+                state.connDraft ? connEditor() : null,
               ],
         )
       : null,

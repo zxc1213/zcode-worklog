@@ -15,6 +15,36 @@ var __export = (target, all) => {
 };
 
 // lib/config.mjs
+var config_exports = {};
+__export(config_exports, {
+  PLUGIN_NAME: () => PLUGIN_NAME,
+  PLUGIN_VERSION: () => PLUGIN_VERSION,
+  archiveDir: () => archiveDir,
+  assertDate: () => assertDate,
+  backupsDir: () => backupsDir,
+  configFile: () => configFile,
+  currentMonth: () => currentMonth,
+  currentQuarter: () => currentQuarter,
+  dayFile: () => dayFile,
+  defaultConfig: () => defaultConfig,
+  docRootsOf: () => docRootsOf,
+  ensureDir: () => ensureDir,
+  isDateString: () => isDateString,
+  isWithin: () => isWithin,
+  loadConfig: () => loadConfig,
+  localDate: () => localDate,
+  localTime: () => localTime,
+  mondayOf: () => mondayOf,
+  pluginHome: () => pluginHome,
+  projectDir: () => projectDir,
+  publicConfig: () => publicConfig,
+  reportsDir: () => reportsDir,
+  saveConfig: () => saveConfig,
+  scanRootsOf: () => scanRootsOf,
+  stateFile: () => stateFile,
+  todosFile: () => todosFile,
+  weekPathFor: () => weekPathFor
+});
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
@@ -92,6 +122,10 @@ function normalizeWatchDirs(value) {
   }
   return out;
 }
+function normalizeConnectorsLite(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item) => item && typeof item === "object" && item.type).slice(0, 8);
+}
 function mergeConfig(base, patch = {}) {
   const sources = { ...base.sources || {}, ...patch.sources || {} };
   const ai = { ...base.ai || {}, ...patch.ai || {} };
@@ -105,6 +139,7 @@ function mergeConfig(base, patch = {}) {
     docRoots: normalizeStringArray(patch.docRoots ?? base.docRoots),
     sessionRoots: normalizeStringArray(patch.sessionRoots ?? base.sessionRoots),
     watchDirs: normalizeWatchDirs(patch.watchDirs ?? base.watchDirs),
+    connectors: normalizeConnectorsLite(patch.connectors ?? base.connectors),
     gitAuthor: String(patch.gitAuthor ?? base.gitAuthor ?? "").trim(),
     sources: { git: Boolean(sources.git), docs: Boolean(sources.docs), sessions: sources.sessions !== false },
     autoArchive: Boolean(patch.autoArchive ?? base.autoArchive),
@@ -271,11 +306,16 @@ function assertDate(value) {
   if (!isDateString(value)) throw new Error(`\u65E5\u671F\u683C\u5F0F\u5E94\u4E3A YYYY-MM-DD\uFF1A${value}`);
   return value;
 }
+function isWithin(parent, child) {
+  const base = resolve(parent);
+  const target = resolve(child);
+  return target === base || target.startsWith(base.endsWith(sep) ? base : base + sep);
+}
 var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.6.0";
+    PLUGIN_VERSION = "0.7.0";
   }
 });
 
@@ -1077,6 +1117,451 @@ var init_entries = __esm({
   }
 });
 
+// lib/adapters/core.mjs
+async function fetchJson(url2, options = {}, timeoutMs = 2e4) {
+  let response;
+  try {
+    response = await fetch(url2, {
+      method: options.method || "GET",
+      headers: options.headers || {},
+      body: options.body ? JSON.stringify(options.body) : void 0,
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+  } catch (error62) {
+    throw new Error("\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25\uFF1A" + String(error62?.message || error62));
+  }
+  const raw = await response.text();
+  let data;
+  try {
+    data = raw ? JSON.parse(raw) : {};
+  } catch {
+    data = { raw };
+  }
+  if (!response.ok) {
+    const message = data?.error?.message || data?.message || data?.raw || "";
+    throw new Error("HTTP " + response.status + (message ? "\uFF1A" + String(message).slice(0, 200) : ""));
+  }
+  return data;
+}
+function firstPage(base, params = {}) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== void 0 && value !== null && value !== "") query.set(key, String(value));
+  }
+  const text = query.toString();
+  return text ? base + (base.includes("?") ? "&" : "?") + text : base;
+}
+var init_core = __esm({
+  "lib/adapters/core.mjs"() {
+  }
+});
+
+// lib/adapters/feishu.mjs
+var feishu_exports = {};
+__export(feishu_exports, {
+  FIELDS: () => FIELDS,
+  fetchEntries: () => fetchEntries,
+  test: () => test
+});
+async function token(config2) {
+  const data = await fetchJson((config2.apiDomain || DEFAULT_DOMAIN) + "/open-apis/auth/v3/tenant_access_token/internal", {
+    method: "POST",
+    body: { app_id: config2.appId, app_secret: config2.appSecret }
+  });
+  if (!data.tenant_access_token) {
+    throw new Error("\u83B7\u53D6 tenant_access_token \u5931\u8D25\uFF1A" + String(data.msg || "code " + data.code));
+  }
+  return data.tenant_access_token;
+}
+async function test(config2) {
+  const accessToken = await token(config2);
+  return { ok: true, detail: "token \u83B7\u53D6\u6210\u529F\uFF08" + accessToken.slice(0, 6) + "\u2026\uFF09" };
+}
+async function fetchEntries(config2, { sinceDate = "" } = {}) {
+  const accessToken = await token(config2);
+  const domain2 = config2.apiDomain || DEFAULT_DOMAIN;
+  const headers = { authorization: "Bearer " + accessToken };
+  const now = /* @__PURE__ */ new Date();
+  const entries = [];
+  if (config2.feedMessages !== false && config2.feedMessages) {
+    try {
+      const chats = await fetchJson(firstPage(domain2 + "/open-apis/im/v1/chats", { page_size: 20 }), { headers });
+      const chatList = chats?.data?.items || [];
+      const startTime = sinceDate ? Math.floor((/* @__PURE__ */ new Date(sinceDate + "T00:00:00")).getTime() / 1e3) + "" : Math.floor((Date.now() - 864e5) / 1e3) + "";
+      for (const chat of chatList.slice(0, 10)) {
+        const messages = await fetchJson(
+          firstPage(domain2 + "/open-apis/im/v1/messages", {
+            container_id_type: "chat",
+            container_id: chat.chat_id,
+            start_time: startTime,
+            page_size: 20,
+            sort_type: "ByCreateTimeDesc"
+          }),
+          { headers }
+        );
+        for (const message of (messages?.data?.items || []).slice(0, 10)) {
+          const body = safeParse3(message.body?.content);
+          const text = String(body?.text || body?.content || message.msg_type || "").slice(0, 200);
+          entries.push({
+            source: "feishu",
+            type: "message",
+            date: localDayOf(Number(message.create_time)),
+            time: localTimeOf(Number(message.create_time)),
+            title: (chat.name || "\u7FA4") + "\uFF1A" + (text || "(\u5361\u7247/\u5A92\u4F53\u6D88\u606F)"),
+            project: chat.name || "",
+            tags: ["\u98DE\u4E66"],
+            ref: message.message_id,
+            nativeId: "msg:" + message.message_id
+          });
+        }
+      }
+    } catch (error62) {
+      entries.push(errorEntry("feishu-messages", error62));
+    }
+  }
+  if (config2.feedWiki) {
+    try {
+      const spaces = await fetchJson(firstPage(domain2 + "/open-apis/wiki/v2/spaces", { page_size: 20 }), { headers });
+      for (const space of (spaces?.data?.items || []).slice(0, 5)) {
+        const nodes = await fetchJson(
+          firstPage(domain2 + "/open-apis/wiki/v2/spaces/" + space.space_id + "/nodes", { page_size: 30 }),
+          { headers }
+        );
+        for (const node2 of (nodes?.data?.items || []).slice(0, 20)) {
+          const edited = Number(node2.obj_edit_time) * 1e3;
+          if (sinceDate && edited && new Date(edited).toISOString().slice(0, 10) < sinceDate) continue;
+          entries.push({
+            source: "feishu",
+            type: "wiki",
+            date: localDayOf(edited || Date.now()),
+            time: localTimeOf(edited || Date.now()),
+            title: "\u6587\u6863 " + (node2.title || "(\u65E0\u6807\u9898)") + " \u6709\u53D8\u66F4",
+            project: space.name || "",
+            tags: ["\u98DE\u4E66", "wiki"],
+            ref: node2.url || node2.node_token,
+            nativeId: "wiki:" + node2.node_token + ":" + (node2.obj_edit_time || "")
+          });
+        }
+      }
+    } catch (error62) {
+      entries.push(errorEntry("feishu-wiki", error62));
+    }
+  }
+  return entries;
+}
+function safeParse3(text) {
+  try {
+    return JSON.parse(String(text || "{}"));
+  } catch {
+    return {};
+  }
+}
+function localDayOf(ms) {
+  const d = new Date(ms);
+  const pad2 = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+}
+function localTimeOf(ms) {
+  const d = new Date(ms);
+  const pad2 = (n) => String(n).padStart(2, "0");
+  return pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+}
+function errorEntry(tag, error62) {
+  const now = /* @__PURE__ */ new Date();
+  return {
+    source: "feishu",
+    type: "error",
+    date: localDayOf(now.getTime()),
+    time: localTimeOf(now.getTime()),
+    title: "\u98DE\u4E66 " + tag + " \u62C9\u53D6\u5931\u8D25\uFF1A" + String(error62?.message || error62).slice(0, 120),
+    tags: ["\u98DE\u4E66", "\u9519\u8BEF"],
+    nativeId: "err:" + tag + ":" + now.toISOString().slice(0, 16)
+  };
+}
+var FIELDS, DEFAULT_DOMAIN;
+var init_feishu = __esm({
+  "lib/adapters/feishu.mjs"() {
+    init_core();
+    FIELDS = [
+      { key: "apiDomain", label: "API \u57DF\u540D", type: "text", hint: "\u9ED8\u8BA4 https://open.feishu.cn" },
+      { key: "appId", label: "App ID", type: "text", required: true },
+      { key: "appSecret", label: "App Secret", type: "password", required: true },
+      { key: "feedMessages", label: "\u7FA4\u6D88\u606F\u6458\u8981", type: "bool" },
+      { key: "feedWiki", label: "\u77E5\u8BC6\u5E93\u8282\u70B9\u53D8\u66F4", type: "bool" }
+    ];
+    DEFAULT_DOMAIN = "https://open.feishu.cn";
+  }
+});
+
+// lib/adapters/zentao.mjs
+var zentao_exports = {};
+__export(zentao_exports, {
+  FIELDS: () => FIELDS2,
+  fetchEntries: () => fetchEntries2,
+  test: () => test2
+});
+function joinUrl(base, path) {
+  return base.replace(/\/+$/, "") + "/api.php/v1" + path;
+}
+async function token2(config2) {
+  const data = await fetchJson(joinUrl(config2.url, "/tokens"), {
+    method: "POST",
+    body: { account: config2.account, password: config2.password }
+  });
+  if (!data.token) throw new Error("\u83B7\u53D6\u7985\u9053 token \u5931\u8D25\uFF1A" + String(data.message || data.raw || "\u672A\u77E5\u9519\u8BEF"));
+  return data.token;
+}
+async function test2(config2) {
+  const accessToken = await token2(config2);
+  return { ok: true, detail: "\u767B\u5F55\u6210\u529F" };
+}
+function mapItem(kind, item, baseUrl) {
+  const day = String(item.deadline || item.lastEditedDate || item.openedDate || "").slice(0, 10);
+  return {
+    source: "zentao",
+    type: kind,
+    date: /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : localDate(),
+    time: /^\d{2}:\d{2}/.test(String(item.openedDate || "")) ? String(item.openedDate).slice(11, 16) : "",
+    title: "[" + kindLabel(kind) + (item.pri ? " P" + item.pri : "") + "] " + String(item.name || item.title || "(\u65E0\u6807\u9898)").slice(0, 120),
+    detail: "\u72B6\u6001 " + (item.status || "-") + "\uFF0C\u8D1F\u8D23\u4EBA " + (item.assignedToRealName || item.assignedTo || "-"),
+    project: String(item.product || item.execution || "").slice(0, 60),
+    tags: ["\u7985\u9053"],
+    ref: String(baseUrl || "").replace(/\/+$/, "") + "/bug-browse-" + (item.product || "") + ".html",
+    nativeId: kind + ":" + item.id
+  };
+}
+function kindLabel(kind) {
+  return kind === "bug" ? "\u7F3A\u9677" : "\u4EFB\u52A1";
+}
+async function fetchEntries2(config2, { sinceDate = "" } = {}) {
+  const accessToken = await token2(config2);
+  const headers = { Token: accessToken };
+  const entries = [];
+  const feeds = [
+    { key: "tasks", path: "/tasks", paramKey: "assignedTo" },
+    { key: "bugs", path: "/bugs", paramKey: "assignedTo" }
+  ];
+  for (const feed of feeds) {
+    try {
+      const data = await fetchJson(firstPage(joinUrl(config2.url, feed.path), { limit: 100, zaccount: void 0, [feed.paramKey]: config2.account }), { headers });
+      const list = data?.data?.tasks || data?.data?.bugs || data?.data || [];
+      const items = Array.isArray(list) ? list : list.tasks || list.bugs || [];
+      for (const item of items.slice(0, 100)) {
+        if (item.assignedTo && config2.account && item.assignedTo !== config2.account && item.assignedTo !== "all") continue;
+        entries.push(mapItem(feed.key === "tasks" ? "task" : "bug", item, config2.url));
+      }
+    } catch (error62) {
+      entries.push({
+        source: "zentao",
+        type: "error",
+        date: localDate(),
+        time: localTime(),
+        title: "\u7985\u9053 " + feed.key + " \u62C9\u53D6\u5931\u8D25\uFF1A" + String(error62?.message || error62).slice(0, 120),
+        tags: ["\u7985\u9053", "\u9519\u8BEF"],
+        nativeId: "err:" + feed.key + ":" + localDate() + localTime()
+      });
+    }
+  }
+  return entries;
+}
+var FIELDS2;
+var init_zentao = __esm({
+  "lib/adapters/zentao.mjs"() {
+    init_config();
+    init_core();
+    FIELDS2 = [
+      { key: "url", label: "\u7985\u9053\u5730\u5740", type: "text", required: true, hint: "\u5982 http://zentao.example.com/zentao" },
+      { key: "account", label: "\u8D26\u53F7", type: "text", required: true },
+      { key: "password", label: "\u5BC6\u7801", type: "password", required: true }
+    ];
+  }
+});
+
+// lib/adapters/generic.mjs
+var generic_exports = {};
+__export(generic_exports, {
+  FIELDS: () => FIELDS3,
+  fetchEntries: () => fetchEntries3,
+  test: () => test3
+});
+import { createHash as createHash2 } from "node:crypto";
+async function test3(config2) {
+  if (!/^https?:\/\//.test(String(config2.url || ""))) return { ok: false, detail: "\u9700\u8981 http(s) \u5730\u5740" };
+  const data = await fetchJson(config2.url, { headers: parseHeaders(config2.headersJson) });
+  const list = walk2(data, config2.listPath || "");
+  return { ok: true, detail: "\u53EF\u8FBE\uFF0C\u6309\u5217\u8868\u8DEF\u5F84\u53D6\u5230 " + (Array.isArray(list) ? list.length : 0) + " \u6761" };
+}
+async function fetchEntries3(config2) {
+  const data = await fetchJson(config2.url, { headers: parseHeaders(config2.headersJson) });
+  const list = walk2(data, config2.listPath || "");
+  if (!Array.isArray(list)) return [];
+  const now = /* @__PURE__ */ new Date();
+  return list.slice(0, 100).map((item) => {
+    const title = String(pick2(item, config2.titleField) || pick2(item, "title") || "(\u65E0\u6807\u9898)");
+    const timeValue = String(pick2(item, config2.timeField) || "");
+    const dayMatch = timeValue.match(/^\d{4}-\d{2}-\d{2}/);
+    return {
+      source: "generic",
+      type: "item",
+      date: dayMatch ? dayMatch[0].slice(0, 10) : localDate(now),
+      time: timeValue.length >= 16 ? timeValue.slice(11, 16) : "",
+      title: title.slice(0, 160),
+      detail: "",
+      project: String(pick2(item, config2.projectField) || "").slice(0, 60),
+      tags: ["\u5916\u90E8"],
+      ref: config2.url,
+      nativeId: "gen:" + createHash2("sha1").update(JSON.stringify(item)).digest("hex").slice(0, 16)
+    };
+  });
+}
+function parseHeaders(text) {
+  try {
+    return JSON.parse(String(text || "{}"));
+  } catch {
+    return {};
+  }
+}
+function walk2(value, path) {
+  const parts = String(path || "").replace(/\[\]/g, "").split(".").filter(Boolean);
+  let current = value;
+  for (const part of parts) {
+    if (current === void 0 || current === null) return current;
+    current = current[part];
+  }
+  return current;
+}
+function pick2(obj, path) {
+  if (!path) return "";
+  return walk2(obj, path);
+}
+var FIELDS3;
+var init_generic = __esm({
+  "lib/adapters/generic.mjs"() {
+    init_config();
+    init_core();
+    FIELDS3 = [
+      { key: "url", label: "\u63A5\u53E3\u5730\u5740", type: "text", required: true },
+      { key: "headersJson", label: "\u8BF7\u6C42\u5934 JSON", type: "textarea", hint: "\u53EF\u542B Token \u7B49\u5BC6\u94A5\uFF0C\u56DE\u663E\u63A9\u7801" },
+      { key: "listPath", label: "\u5217\u8868\u8DEF\u5F84", type: "text", hint: "\u70B9\u8DEF\u5F84\uFF0C\u5982 data.items[]" },
+      { key: "titleField", label: "\u6807\u9898\u5B57\u6BB5", type: "text", hint: "\u70B9\u8DEF\u5F84\uFF0C\u5982 title" },
+      { key: "timeField", label: "\u65F6\u95F4\u5B57\u6BB5", type: "text", hint: "\u70B9\u8DEF\u5F84\uFF0C\u5982 updatedAt" },
+      { key: "projectField", label: "\u9879\u76EE\u5B57\u6BB5", type: "text", hint: "\u70B9\u8DEF\u5F84,\u5982 project.name" }
+    ];
+  }
+});
+
+// lib/connectors.mjs
+var connectors_exports = {};
+__export(connectors_exports, {
+  ADAPTERS: () => ADAPTERS,
+  CONNECTOR_TYPES: () => CONNECTOR_TYPES,
+  adapterFor: () => adapterFor,
+  listConnectors: () => listConnectors,
+  normalizeConnector: () => normalizeConnector,
+  publicConnector: () => publicConnector,
+  publicConnectorList: () => publicConnectorList,
+  syncConnectors: () => syncConnectors
+});
+function adapterFor(type) {
+  const adapter = ADAPTERS[type];
+  if (!adapter) throw new Error("\u672A\u77E5\u8FDE\u63A5\u5668\u7C7B\u578B\uFF1A" + type);
+  return adapter;
+}
+function normalizeConnector(raw = {}) {
+  const type = String(raw.type || "").trim();
+  adapterFor(type);
+  return {
+    id: String(raw.id || "").trim() || type + ":" + String(raw.label || "default").trim(),
+    type,
+    enabled: Boolean(raw.enabled),
+    label: String(raw.label || "").slice(0, 40),
+    config: normalizeConfigFor(type, raw.config || {}),
+    lastSyncAt: String(raw.lastSyncAt || ""),
+    lastStatus: String(raw.lastStatus || ""),
+    lastError: String(raw.lastError || "")
+  };
+}
+function normalizeConfigFor(type, input2) {
+  const fields = adapterFor(type).FIELDS;
+  const out = {};
+  for (const field of fields) {
+    if (field.type === "bool") {
+      out[field.key] = Boolean(input2[field.key]);
+    } else {
+      out[field.key] = String(input2[field.key] || "").slice(0, 2e3);
+    }
+  }
+  return out;
+}
+function publicConnector(connector) {
+  const fields = adapterFor(connector.type).FIELDS;
+  const masked = {};
+  for (const field of fields) {
+    const value = connector.config[field.key];
+    if (field.type === "bool") {
+      masked[field.key] = Boolean(value);
+      continue;
+    }
+    if (field.type === "password" || field.type === "textarea") {
+      masked[field.key] = value ? "\u5DF2\u914D\u7F6E" : "";
+      continue;
+    }
+    masked[field.key] = value;
+  }
+  return { ...connector, config: masked };
+}
+function listConnectors(config2) {
+  return (Array.isArray(config2.connectors) ? config2.connectors : []).map(normalizeConnector);
+}
+function publicConnectorList(config2) {
+  return listConnectors(config2).map(publicConnector);
+}
+async function syncConnectors(config2, id = "") {
+  const { saveConfig: saveConfig2, loadConfig: loadConfig2 } = await Promise.resolve().then(() => (init_config(), config_exports));
+  const connectors = listConnectors(config2);
+  const results = [];
+  for (const connector of connectors) {
+    if (id && connector.id !== id) continue;
+    if (!id && !connector.enabled) continue;
+    const adapter = adapterFor(connector.type);
+    let status = "ok";
+    let error62 = "";
+    let added = 0;
+    try {
+      const entries = await adapter.fetchEntries(connector.config, { sinceDate: "" });
+      const outcome = await appendEntries(config2, entries);
+      added = outcome.added;
+    } catch (syncError) {
+      status = "error";
+      error62 = String(syncError?.message || syncError);
+    }
+    results.push({ id: connector.id, type: connector.type, label: connector.label, status, error: error62, added });
+    await saveConfig2({
+      connectors: listConnectors(config2).map(
+        (item) => item.id === connector.id ? { ...item, lastSyncAt: (/* @__PURE__ */ new Date()).toISOString(), lastStatus: status, lastError: error62 } : item
+      )
+    });
+    config2 = loadConfig2();
+  }
+  return { results };
+}
+var ADAPTERS, CONNECTOR_TYPES;
+var init_connectors = __esm({
+  "lib/connectors.mjs"() {
+    init_config();
+    init_entries();
+    init_feishu();
+    init_zentao();
+    init_generic();
+    ADAPTERS = { feishu: feishu_exports, zentao: zentao_exports, generic: generic_exports };
+    CONNECTOR_TYPES = [
+      { type: "feishu", title: "\u98DE\u4E66\uFF08\u81EA\u5EFA\u5E94\u7528\uFF0C\u53EA\u8BFB\uFF09", description: "\u62C9\u53D6\u7FA4\u6D88\u606F\u6458\u8981\u4E0E\u77E5\u8BC6\u5E93\u8282\u70B9\u53D8\u66F4\uFF1B\u4F01\u4E1A\u79DF\u6237\u53EF\u80FD\u9700\u8981\u7BA1\u7406\u5458\u5BA1\u6279 scope" },
+      { type: "zentao", title: "\u7985\u9053\uFF08REST\uFF0C\u53EA\u8BFB\uFF09", description: "\u62C9\u53D6\u6307\u6D3E\u7ED9\u4F60\u7684\u4EFB\u52A1\u4E0E\u7F3A\u9677" },
+      { type: "generic", title: "\u901A\u7528 JSON\uFF08Hermes \u7B49\u5360\u4F4D\uFF09", description: "\u4EFB\u610F HTTP JSON \u63A5\u53E3 + \u5217\u8868\u8DEF\u5F84 + \u5B57\u6BB5\u6620\u5C04" }
+    ];
+  }
+});
+
 // lib/watch.mjs
 var watch_exports = {};
 __export(watch_exports, {
@@ -1114,7 +1599,7 @@ function normalizeWatchDirs2(input2) {
   }
   return out;
 }
-async function walk2(dir, depth, visit2) {
+async function walk3(dir, depth, visit2) {
   if (depth > MAX_DEPTH) return;
   let entries;
   try {
@@ -1126,7 +1611,7 @@ async function walk2(dir, depth, visit2) {
     const full = join8(dir, entry.name);
     if (entry.isDirectory()) {
       if (SKIP_DIRS2.has(entry.name)) continue;
-      await walk2(full, depth + 1, visit2);
+      await walk3(full, depth + 1, visit2);
     } else if (entry.isFile()) {
       await visit2(full);
       if (visit2.count > MAX_FILES_PER_DIR) return;
@@ -1163,7 +1648,7 @@ async function scanWatchDirs(config2) {
     visit2.count = 0;
     try {
       if (!existsSync6(dir.path)) throw new Error("\u76EE\u5F55\u4E0D\u5B58\u5728");
-      await walk2(dir.path, 0, visit2);
+      await walk3(dir.path, 0, visit2);
       if (visit2.count > MAX_FILES_PER_DIR) truncated = true;
     } catch (walkError) {
       error62 = String(walkError?.message || walkError);
@@ -4415,9 +4900,9 @@ var $ZodIBAN = /* @__PURE__ */ $constructor("$ZodIBAN", (inst, def) => {
     });
   };
 });
-function isValidJWT(token, algorithm = null) {
+function isValidJWT(token3, algorithm = null) {
   try {
-    const tokensParts = token.split(".");
+    const tokensParts = token3.split(".");
     if (tokensParts.length !== 3)
       return false;
     const [header] = tokensParts;
@@ -29387,9 +29872,9 @@ var require_utils = /* @__PURE__ */ __commonJSMin(((exports, module) => {
       isIPV6: true
     };
   }
-  function findToken(str, token) {
+  function findToken(str, token3) {
     let ind = 0;
-    for (let i = 0; i < str.length; i++) if (str[i] === token) ind++;
+    for (let i = 0; i < str.length; i++) if (str[i] === token3) ind++;
     return ind;
   }
   function removeDotSegments(path) {
@@ -37461,14 +37946,14 @@ function readDshSettings(dshHome) {
   const pluginEntries = (parsed) => {
     const roots = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.plugins) ? parsed.plugins : [];
     const out = [];
-    const walk3 = (items) => {
+    const walk4 = (items) => {
       for (const item of items) {
         if (!item || typeof item !== "object") continue;
-        if (Array.isArray(item.insert)) walk3(item.insert);
+        if (Array.isArray(item.insert)) walk4(item.insert);
         if (item.id) out.push(item);
       }
     };
-    walk3(roots);
+    walk4(roots);
     return out;
   };
   let profiles = [];
@@ -37730,6 +38215,14 @@ var TASK_DEFS = [
     description: "\u626B\u63CF\u672C\u673A AI \u5DE5\u5177\u4F1A\u8BDD\u5E76\u9884\u70ED\u7F13\u5B58\uFF0C\u5F52\u6863\u4E0E\u65E5\u62A5\u76F4\u63A5\u590D\u7528\u7ED3\u679C\u3002"
   },
   {
+    id: "connector-sync",
+    kind: "connector-sync",
+    title: "\u5916\u90E8\u8FDE\u63A5\u5668\u540C\u6B65",
+    everyHours: 6,
+    dailyAt: "",
+    description: "\u540C\u6B65\u6240\u6709\u542F\u7528\u7684\u5916\u90E8\u8FDE\u63A5\u5668\uFF08\u98DE\u4E66/\u7985\u9053/\u901A\u7528 JSON\uFF09\uFF0C\u4EA7\u51FA\u7EDF\u4E00\u6761\u76EE\u3002"
+  },
+  {
     id: "collect-watch",
     kind: "collect-watch",
     title: "\u76EE\u5F55\u76D1\u63A7\u626B\u63CF",
@@ -37812,6 +38305,11 @@ async function runTask(config2, task) {
       }))
     );
     return { sessions: sessions.length };
+  }
+  if (task.kind === "connector-sync") {
+    const { syncConnectors: syncConnectors2 } = await Promise.resolve().then(() => (init_connectors(), connectors_exports));
+    const outcome = await syncConnectors2(config2);
+    return { added: outcome.results.reduce((sum, item) => sum + item.added, 0), connectors: outcome.results.length };
   }
   if (task.kind === "collect-watch") {
     const { scanWatchDirs: scanWatchDirs2 } = await Promise.resolve().then(() => (init_watch(), watch_exports));
@@ -37950,6 +38448,7 @@ async function calendarDay(config2, dateString) {
 }
 
 // src/api.mjs
+init_connectors();
 init_watch();
 
 // lib/wizard.mjs
@@ -38192,8 +38691,8 @@ async function suggestTopTodos(config2) {
   const tpl = render(config2, "todo-suggest", { content: lines.join("\n") });
   const result = await aiComplete(config2, tpl.system, tpl.user, { kind: tpl.scene });
   const data = extractJson(result.text);
-  const picks = (Array.isArray(data.picks) ? data.picks : []).map((pick2) => {
-    const todo = open2.find((item) => item.id === pick2?.id);
+  const picks = (Array.isArray(data.picks) ? data.picks : []).map((pick3) => {
+    const todo = open2.find((item) => item.id === pick3?.id);
     if (!todo) return null;
     return {
       id: todo.id,
@@ -38201,7 +38700,7 @@ async function suggestTopTodos(config2) {
       pri: todo.pri,
       due: todo.due,
       carries: todo.carries || 0,
-      reason: String(pick2.reason || "").slice(0, 80)
+      reason: String(pick3.reason || "").slice(0, 80)
     };
   }).filter(Boolean).slice(0, 3);
   return { picks };
@@ -38226,6 +38725,46 @@ async function collectAction(config2, args = {}) {
     return runDueTasks(config2, { force: true, id: args.id || "" });
   }
   if (action === "set") return updateTask(config2, args);
+  throw new Error(`\u672A\u77E5 action: ${action}`);
+}
+async function connectorsAction(configArg, args = {}) {
+  const config2 = loadConfig();
+  const action = args.action || "list";
+  if (action === "list") {
+    return { connectors: publicConnectorList(loadConfig()), types: CONNECTOR_TYPES.map((item) => ({ ...item, fields: adapterFor(item.type).FIELDS })) };
+  }
+  if (action === "set") {
+    const existing = listConnectors(config2);
+    const base = existing.find((item) => item.id === String(args.id || ""));
+    const mergedConfig = { ...base?.config || {} };
+    if (args.config && typeof args.config === "object") {
+      for (const field of adapterFor(String(args.type || base?.type || "")).FIELDS) {
+        const incoming = args.config[field.key];
+        if (incoming === void 0) continue;
+        if (field.type === "bool") {
+          mergedConfig[field.key] = Boolean(incoming);
+          continue;
+        }
+        if (incoming === "\u5DF2\u914D\u7F6E") continue;
+        mergedConfig[field.key] = String(incoming);
+      }
+    }
+    const normalized = normalizeConnector({ id: args.id, type: args.type || base?.type, enabled: args.enabled, label: args.label, config: mergedConfig });
+    const merged = existing.some((item) => item.id === normalized.id) ? existing.map((item) => item.id === normalized.id ? normalized : item) : [...existing, normalized];
+    saveConfig({ connectors: merged });
+    return { connector: publicConnectorList(loadConfig()).find((item) => item.id === normalized.id) };
+  }
+  if (action === "remove") {
+    const remaining = listConnectors(config2).filter((item) => item.id !== String(args.id || ""));
+    saveConfig({ connectors: remaining });
+    return { ok: true };
+  }
+  if (action === "test") {
+    const connector = listConnectors(config2).find((item) => item.id === String(args.id || ""));
+    if (!connector) throw new Error("\u627E\u4E0D\u5230\u8FDE\u63A5\u5668\uFF1A" + String(args.id || ""));
+    return adapterFor(connector.type).test(connector.config);
+  }
+  if (action === "sync") return syncConnectors(config2, args.id || "");
   throw new Error(`\u672A\u77E5 action: ${action}`);
 }
 async function templatesAction(config2, args = {}) {
@@ -38444,6 +38983,8 @@ async function dispatch(op, args = {}) {
       return calendarAction(config2, args);
     case "templates":
       return templatesAction(config2, args);
+    case "connectors":
+      return connectorsAction(config2, args);
     case "days":
       return listDays(config2);
     case "reports":
@@ -38698,6 +39239,22 @@ tool(
   (args) => calendarAction(loadConfig(), args)
 );
 tool(
+  "worklog_connectors",
+  {
+    title: "\u5916\u90E8\u8FDE\u63A5\u5668",
+    description: "WorkLog \u5916\u90E8\u7CFB\u7EDF\u8FDE\u63A5\u5668\uFF08\u53EA\u8BFB\u91C7\u96C6\uFF0C\u4EA7\u51FA\u5230\u7EDF\u4E00\u6761\u76EE\u65F6\u95F4\u8F74\uFF09\uFF1Aaction=list \u5217\u51FA\u5DF2\u914D\u7F6E\u8FDE\u63A5\u5668\uFF08\u5BC6\u94A5\u63A9\u7801\uFF09\u4E0E\u53EF\u5EFA\u7C7B\u578B\uFF08feishu/zentao/generic \u53CA\u5B57\u6BB5\u5B9A\u4E49\uFF09\uFF1Baction=set {id?, type, label?, enabled?, config} \u65B0\u5EFA/\u66F4\u65B0\uFF08\u5BC6\u94A5\u56DE\u4F20\u300C\u5DF2\u914D\u7F6E\u300D\u5360\u4F4D\u5219\u4FDD\u7559\u539F\u503C\uFF09\uFF1Baction=remove {id}\uFF1Baction=test {id} \u6D4B\u8BD5\u8FDE\u901A\u6027\uFF1Baction=sync {id?} \u7ACB\u5373\u540C\u6B65\uFF08\u7F3A\u7701\u540C\u6B65\u5168\u90E8\u542F\u7528\u7684\uFF09\u3002\u98DE\u4E66\u9700\u81EA\u5EFA\u5E94\u7528 app_id/app_secret\uFF1B\u7985\u9053 account/password\uFF1Bgeneric \u4EFB\u610F JSON \u63A5\u53E3\u3002",
+    inputSchema: external_exports.object({
+      action: external_exports.enum(["list", "set", "remove", "test", "sync"]).optional(),
+      id: external_exports.string().optional(),
+      type: external_exports.string().optional(),
+      label: external_exports.string().optional(),
+      enabled: external_exports.boolean().optional(),
+      config: external_exports.record(external_exports.string(), external_exports.unknown()).optional()
+    })
+  },
+  (args) => connectorsAction(loadConfig(), args)
+);
+tool(
   "worklog_templates",
   {
     title: "\u63D0\u793A\u8BCD\u6A21\u677F",
@@ -38760,7 +39317,8 @@ server.registerTool(
         "collect",
         "wizard",
         "calendar",
-        "templates"
+        "templates",
+        "connectors"
       ]),
       args: external_exports.record(external_exports.string(), external_exports.unknown()).optional()
     }),

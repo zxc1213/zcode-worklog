@@ -18,6 +18,7 @@ import {
   backupAction,
   calendarAction,
   templatesAction,
+  connectorsAction,
   collectAction,
   configAction,
   wizardAction,
@@ -310,6 +311,24 @@ tool(
 )
 
 tool(
+  'worklog_connectors',
+  {
+    title: '外部连接器',
+    description:
+      'WorkLog 外部系统连接器（只读采集，产出到统一条目时间轴）：action=list 列出已配置连接器（密钥掩码）与可建类型（feishu/zentao/generic 及字段定义）；action=set {id?, type, label?, enabled?, config} 新建/更新（密钥回传「已配置」占位则保留原值）；action=remove {id}；action=test {id} 测试连通性；action=sync {id?} 立即同步（缺省同步全部启用的）。飞书需自建应用 app_id/app_secret；禅道 account/password；generic 任意 JSON 接口。',
+    inputSchema: z.object({
+      action: z.enum(['list', 'set', 'remove', 'test', 'sync']).optional(),
+      id: z.string().optional(),
+      type: z.string().optional(),
+      label: z.string().optional(),
+      enabled: z.boolean().optional(),
+      config: z.record(z.string(), z.unknown()).optional(),
+    }),
+  },
+  (args) => connectorsAction(loadConfig(), args),
+)
+
+tool(
   'worklog_templates',
   {
     title: '提示词模板',
@@ -380,6 +399,7 @@ server.registerTool(
         'wizard',
         'calendar',
         'templates',
+        'connectors',
       ]),
       args: z.record(z.string(), z.unknown()).optional(),
     }),
