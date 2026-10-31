@@ -51,7 +51,7 @@ Six tabs:
 | Logs | Read/edit/save a day's Markdown, search the archive, re-archive, generate a daily report |
 | Todos | Add, inline edit, complete, reopen, delete, clear completed; subtask checklist and tags managed in the edit form; smart order (overdue > priority > due date), pri/tag filters, stats bar; AI smart-fill / batch parse / daily top-3 suggestion (needs AI config); `!high` / `#tag` / `@2026-10-30` / `repeat=daily` shortcuts |
 | Reports | Daily, weekly, monthly, quarterly, performance material, project dossier; optional AI polish; view generated reports |
-| Sessions | Scan local AI tool sessions by date; view source/title/turns/project and session sources; read-only, never writes the archive |
+| Sessions | One-click full-history session sync into a local index; filter by keyword/project dir/source/date/turns or work-related only (scan dirs + custom keywords); group by project/source/date/mark/custom group; mixed EN/CN keyword analysis (click to filter); batch marks and custom groups |
 | Settings | Collapsible blocks: data & scanning, AI polish, backup/restore, import from old WorkLog; sticky save bar on top |
 
 The panel talks to this plugin's own MCP server through the panel-only `worklog_api` tool. The plugin inlines the panel script and stylesheet into `ui://zcode-worklog/panel.html`, so the host loads no external program or subresources. If the panel stays on the loading screen, close and reopen it; if that fails, update the plugin and restart ZCode (`zcode plugins update zcode-worklog@zcode-worklog`).

@@ -315,7 +315,7 @@ var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.9.0";
+    PLUGIN_VERSION = "0.10.0";
   }
 });
 
@@ -323,6 +323,7 @@ var init_config = __esm({
 var sessions_exports = {};
 __export(sessions_exports, {
   cleanUserText: () => cleanUserText,
+  collectAllSessions: () => collectAllSessions,
   dayBounds: () => dayBounds,
   listSessionSources: () => listSessionSources,
   parseSessionLines: () => parseSessionLines,
@@ -807,9 +808,9 @@ function sessionForDay(session, dateString) {
     file: session.file
   };
 }
-async function scanSessions(config2, dateString, { force = false, home = homedir2(), dshHome } = {}) {
+async function collectAllSessions(config2, { force = false, home = homedir2(), dshHome, windowDays = 120, endDate = localDate() } = {}) {
   if (config2.sources?.sessions === false) {
-    return { date: dateString, sessions: [], totals: { sessions: 0, turns: 0 }, errors: [] };
+    return { all: [], errors: [] };
   }
   const resolvedDshHome = dshHome || process.env.DSH_HOME || join2(home, ".dsh");
   const cache = force ? { version: CACHE_VERSION, files: {} } : await loadCache(config2);
@@ -886,15 +887,38 @@ async function scanSessions(config2, dateString, { force = false, home = homedir
       errors.push({ source: "custom", root, error: String(error62?.message || error62) });
     }
   }
-  try {
-    all.push(...await scanZcode(config2, dateString, home));
-  } catch (error62) {
-    errors.push({ source: "zcode", error: String(error62?.message || error62) });
+  const windowDates = [];
+  for (let i = 0; i < windowDays; i++) {
+    const cursor = new Date(endDate);
+    cursor.setDate(cursor.getDate() - i);
+    windowDates.push(localDate(cursor));
   }
-  try {
-    all.push(...await scanOpenCode(config2, dateString, home));
-  } catch (error62) {
-    errors.push({ source: "opencode", error: String(error62?.message || error62) });
+  const windowed = [];
+  for (const date5 of windowDates) {
+    try {
+      windowed.push(...(await scanZcode(config2, date5, home)).map((session) => ({ ...session, __day: date5 })));
+    } catch (error62) {
+      errors.push({ source: "zcode", error: String(error62?.message || error62) });
+    }
+    try {
+      windowed.push(...(await scanOpenCode(config2, date5, home)).map((session) => ({ ...session, __day: date5 })));
+    } catch (error62) {
+      errors.push({ source: "opencode", error: String(error62?.message || error62) });
+    }
+  }
+  const merged = /* @__PURE__ */ new Map();
+  for (const session of windowed) {
+    const key = session.source + "|" + session.file;
+    const existing = merged.get(key);
+    if (existing) {
+      for (const [day, value] of Object.entries(session.dates || {})) existing.dates[day] = value;
+    } else {
+      merged.set(key, session);
+    }
+  }
+  for (const session of merged.values()) {
+    delete session.__day;
+    all.push(session);
   }
   for (const key of Object.keys(cache.files)) {
     if (!seen.has(key)) delete cache.files[key];
@@ -903,6 +927,13 @@ async function scanSessions(config2, dateString, { force = false, home = homedir
     await saveCache(config2, cache);
   } catch {
   }
+  return { all, errors };
+}
+async function scanSessions(config2, dateString, opts = {}) {
+  if (config2.sources?.sessions === false) {
+    return { date: dateString, sessions: [], totals: { sessions: 0, turns: 0 }, errors: [] };
+  }
+  const { all, errors } = await collectAllSessions(config2, { ...opts, windowDays: 1 });
   const sessions = all.map((session) => sessionForDay(session, dateString)).filter(Boolean).sort((a, b) => a.first - b.first || a.label.localeCompare(b.label));
   const turns = sessions.reduce((sum, session) => sum + session.turns, 0);
   return { date: dateString, sessions, totals: { sessions: sessions.length, turns }, errors };
@@ -2171,21 +2202,21 @@ __export(watch_exports, {
   scanWatchDirs: () => scanWatchDirs
 });
 import { existsSync as existsSync6 } from "node:fs";
-import { readdir as readdir4, readFile as readFile6, stat as stat4, writeFile as writeFile7 } from "node:fs/promises";
-import { basename as basename4, dirname as dirname6, join as join9 } from "node:path";
+import { readdir as readdir4, readFile as readFile7, stat as stat4, writeFile as writeFile8 } from "node:fs/promises";
+import { basename as basename5, dirname as dirname7, join as join10 } from "node:path";
 function watchCacheFile(config2) {
-  return join9(config2.dataDir, "watch-cache.json");
+  return join10(config2.dataDir, "watch-cache.json");
 }
 async function loadWatchCache(config2) {
   try {
-    const parsed = JSON.parse(await readFile6(watchCacheFile(config2), "utf8"));
+    const parsed = JSON.parse(await readFile7(watchCacheFile(config2), "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
   }
 }
 async function saveWatchCache(config2, cache) {
-  await writeFile7(watchCacheFile(config2), JSON.stringify(cache, null, 2) + "\n", "utf8");
+  await writeFile8(watchCacheFile(config2), JSON.stringify(cache, null, 2) + "\n", "utf8");
 }
 function normalizeWatchDirs2(input2) {
   const list = Array.isArray(input2) ? input2 : [];
@@ -2209,7 +2240,7 @@ async function walk3(dir, depth, visit2) {
     return;
   }
   for (const entry of entries) {
-    const full = join9(dir, entry.name);
+    const full = join10(dir, entry.name);
     if (entry.isDirectory()) {
       if (SKIP_DIRS2.has(entry.name)) continue;
       await walk3(full, depth + 1, visit2);
@@ -2266,8 +2297,8 @@ async function scanWatchDirs(config2) {
         type: "watch",
         date: localDate(now),
         time: localTime(now),
-        title: "\u6587\u4EF6\u53D8\u5316 " + basename4(item.file),
-        project: basename4(dirname6(item.file)),
+        title: "\u6587\u4EF6\u53D8\u5316 " + basename5(item.file),
+        project: basename5(dirname7(item.file)),
         tags: [item.kind],
         ref: item.file,
         nativeId: item.file + "|" + (item.fp || "")
@@ -2310,8 +2341,8 @@ var init_watch = __esm({
 });
 
 // src/server.mjs
-import { readFile as readFile7 } from "node:fs/promises";
-import { dirname as dirname7, join as join11 } from "node:path";
+import { readFile as readFile8 } from "node:fs/promises";
+import { dirname as dirname8, join as join12 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // node_modules/@modelcontextprotocol/server/dist/chunk-vYduTEsO.mjs
@@ -38513,6 +38544,262 @@ function findAiCandidate(id, options = {}) {
 // src/api.mjs
 init_sessions();
 
+// lib/session-manager.mjs
+init_config();
+init_sessions();
+import { createHash as createHash3 } from "node:crypto";
+import { mkdir as mkdir7, readFile as readFile6, writeFile as writeFile7 } from "node:fs/promises";
+import { basename as basename4, dirname as dirname6, join as join9 } from "node:path";
+import { homedir as homedir4 } from "node:os";
+var MAX_SESSIONS = 5e3;
+var STOPWORDS = /* @__PURE__ */ new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "this",
+  "that",
+  "file",
+  "using",
+  "into",
+  "from",
+  "have",
+  "what",
+  "when",
+  "please",
+  "should",
+  "there",
+  "about",
+  "which",
+  "your",
+  "\u7684",
+  "\u4E86",
+  "\u662F",
+  "\u5728",
+  "\u6211",
+  "\u6709",
+  "\u548C",
+  "\u5C31",
+  "\u4E0D",
+  "\u4EBA",
+  "\u90FD",
+  "\u6211\u4EEC",
+  "\u4F60\u4EEC",
+  "\u4ED6\u4EEC",
+  "\u8FD9\u4E2A",
+  "\u90A3\u4E2A",
+  "\u4EC0\u4E48",
+  "\u600E\u4E48",
+  "\u5982\u4F55",
+  "\u53EF\u4EE5",
+  "\u9700\u8981",
+  "\u73B0\u5728",
+  "\u4ECA\u5929",
+  "\u6628\u5929",
+  "\u660E\u5929",
+  "\u7136\u540E",
+  "\u8FD8\u662F",
+  "\u5982\u679C",
+  "\u8FD9\u4E9B",
+  "\u90A3\u4E9B",
+  "\u6216\u8005",
+  "\u4EE5\u53CA",
+  "\u901A\u8FC7",
+  "\u8FDB\u884C",
+  "\u4F7F\u7528",
+  "\u652F\u6301",
+  "\u68C0\u67E5",
+  "\u95EE\u9898",
+  "\u76F8\u5173",
+  "\u5185\u5BB9",
+  "\u4FE1\u606F",
+  "\u6570\u636E",
+  "\u6587\u4EF6",
+  "\u76EE\u5F55",
+  "\u5DE5\u4F5C",
+  "\u9879\u76EE",
+  "\u6D4B\u8BD5",
+  "\u786E\u8BA4",
+  "\u5B8C\u6210",
+  "\u5904\u7406",
+  "\u5F00\u59CB",
+  "\u7EE7\u7EED",
+  "\u5E2E\u5FD9",
+  "\u5E2E\u6211",
+  "\u770B\u770B",
+  "\u4E00\u4E0B"
+]);
+function indexFile(config2) {
+  return join9(config2.dataDir, "sessions-index.json");
+}
+async function loadSessionIndex(config2) {
+  try {
+    const parsed = JSON.parse(await readFile6(indexFile(config2), "utf8"));
+    if (parsed && Array.isArray(parsed.sessions)) return parsed;
+  } catch {
+  }
+  return { version: 1, builtAt: "", total: 0, sessions: [] };
+}
+async function saveSessionIndex(config2, index) {
+  await mkdir7(dirname6(indexFile(config2)), { recursive: true });
+  await writeFile7(indexFile(config2), JSON.stringify(index, null, 2) + "\n", "utf8");
+  return index;
+}
+function sessionKey(source, file2) {
+  return createHash3("sha1").update(String(source) + "|" + String(file2)).digest("hex").slice(0, 16);
+}
+async function buildSessionIndex(config2, { force = false, windowDays = 120, home = homedir4(), dshHome } = {}) {
+  const { all, errors } = await collectAllSessions(config2, { force, windowDays, home, dshHome });
+  const previous = await loadSessionIndex(config2);
+  const meta3 = new Map(previous.sessions.map((item) => [item.key, { marks: item.marks || [], group: item.group || "" }]));
+  const sessions = all.map((session) => {
+    const dates = Object.keys(session.dates || {}).sort();
+    if (!dates.length) return null;
+    const texts = [];
+    let size = 0;
+    for (const date5 of dates.slice(0, 3)) {
+      for (const text of session.dates[date5]?.texts || []) {
+        texts.push(text);
+        size += text.length;
+        if (size > 400) break;
+      }
+      if (size > 400) break;
+    }
+    const metaEntry = meta3.get(sessionKey(session.source, session.file));
+    return {
+      key: sessionKey(session.source, session.file),
+      source: session.source,
+      label: session.label || session.source,
+      title: String(session.title || "(\u65E0\u6807\u9898)").slice(0, 140),
+      cwd: String(session.cwd || "").slice(0, 200),
+      project: session.cwd ? String(session.cwd).split(/[\\/]/).filter(Boolean).pop() || "" : "",
+      file: session.file,
+      first: dates[0],
+      last: dates[dates.length - 1],
+      datesCount: dates.length,
+      turns: Object.values(session.dates || {}).reduce((sum, day) => sum + (day.turns || 0), 0),
+      preview: texts.join(" ").slice(0, 400),
+      marks: metaEntry?.marks || [],
+      group: metaEntry?.group || ""
+    };
+  }).filter(Boolean).sort((a, b) => String(b.last).localeCompare(String(a.last))).slice(0, MAX_SESSIONS);
+  const index = { version: 1, builtAt: (/* @__PURE__ */ new Date()).toISOString(), total: sessions.length, sessions };
+  await saveSessionIndex(config2, index);
+  return { builtAt: index.builtAt, total: index.total, errors };
+}
+function isWorkRelated(session, workKeywords = [], workDirs = []) {
+  const cwd = String(session.cwd || "");
+  if (workDirs.some((dir) => cwd.toLowerCase().startsWith(String(dir).toLowerCase()))) return true;
+  const keywords = (Array.isArray(workKeywords) ? workKeywords : []).map((item) => String(item).toLowerCase()).filter(Boolean);
+  if (!keywords.length) return false;
+  const haystack = (session.title + " " + session.preview + " " + cwd).toLowerCase();
+  return keywords.some((keyword) => haystack.includes(keyword));
+}
+async function querySessions(config2, filter = {}) {
+  const index = await loadSessionIndex(config2);
+  const q = String(filter.q || "").trim().toLowerCase();
+  const project = String(filter.project || filter.cwd || "").trim().toLowerCase();
+  const source = String(filter.source || "").trim();
+  const start = String(filter.start || "").slice(0, 10);
+  const end = String(filter.end || "").slice(0, 10);
+  const minTurns = Number(filter.minTurns) || 0;
+  const mark = String(filter.mark || "").trim();
+  const group = String(filter.group || "").trim();
+  let list = index.sessions;
+  if (q) list = list.filter((s) => (s.title + " " + s.preview).toLowerCase().includes(q));
+  if (project) list = list.filter((s) => (s.cwd + " " + s.project).toLowerCase().includes(project));
+  if (source) list = list.filter((s) => s.source === source);
+  if (start) list = list.filter((s) => s.last >= start);
+  if (end) list = list.filter((s) => s.first <= end);
+  if (minTurns) list = list.filter((s) => s.turns >= minTurns);
+  if (mark) list = list.filter((s) => (s.marks || []).includes(mark));
+  if (group) list = list.filter((s) => s.group === group);
+  if (filter.workOnly) {
+    const workKeywords = Array.isArray(filter.workKeywords) ? filter.workKeywords : [];
+    const workDirs = scanRootsOf(config2);
+    list = list.filter((s) => isWorkRelated(s, workKeywords, workDirs));
+  }
+  const matched = list.length;
+  const page = list.slice(0, 200);
+  return {
+    total: index.total,
+    builtAt: index.builtAt,
+    matched,
+    sessions: page,
+    keywords: analyzeSessionKeywords(list),
+    groups: groupSessions(page, filter.groupBy || "")
+  };
+}
+function groupSessions(sessions, by) {
+  const map2 = {};
+  for (const session of sessions) {
+    let keys = [];
+    if (by === "project") keys = [session.project || "(\u65E0\u9879\u76EE)"];
+    else if (by === "source") keys = [session.label];
+    else if (by === "date") keys = [session.last];
+    else if (by === "mark") keys = (session.marks || []).length ? session.marks : ["(\u672A\u6807\u8BB0)"];
+    else if (by === "group") keys = [session.group || "(\u672A\u5206\u7EC4)"];
+    else continue;
+    for (const key of keys) {
+      map2[key] = map2[key] || [];
+      map2[key].push(session.key);
+    }
+  }
+  return map2;
+}
+function analyzeSessionKeywords(sessions, { top = 15 } = {}) {
+  const counts = /* @__PURE__ */ new Map();
+  const bump = (word) => counts.set(word, (counts.get(word) || 0) + 1);
+  for (const session of sessions.slice(0, 500)) {
+    const haystack = String(session.title + " " + (session.preview || ""));
+    for (const word of haystack.match(/[a-zA-Z][a-zA-Z0-9_.-]{3,}/g) || []) {
+      const key = word.toLowerCase();
+      if (!STOPWORDS.has(key)) bump(key);
+    }
+    for (const run of haystack.match(/[一-龥]{2,}/g) || []) {
+      for (let n = 2; n <= 4; n++) {
+        for (let i = 0; i + n <= run.length; i++) {
+          const gram = run.slice(i, i + n);
+          if (!STOPWORDS.has(gram)) bump(gram);
+        }
+      }
+    }
+  }
+  return [...counts.entries()].filter(([word, count]) => count >= 2 && word.length >= 2).sort((a, b) => b[1] - a[1] || b[0].length - a[0].length).slice(0, top).map(([word, count]) => ({ word, count }));
+}
+async function markSessions(config2, keys, mark, { remove = false } = {}) {
+  const wanted = new Set((Array.isArray(keys) ? keys : [keys]).filter(Boolean));
+  if (!wanted.size) throw new Error("\u6807\u8BB0\u9700\u8981\u81F3\u5C11\u4E00\u4E2A\u4F1A\u8BDD key");
+  const label = String(mark || "").trim().slice(0, 16);
+  if (!label) throw new Error("\u6807\u8BB0\u5185\u5BB9\u4E0D\u80FD\u4E3A\u7A7A");
+  const index = await loadSessionIndex(config2);
+  let touched = 0;
+  for (const session of index.sessions) {
+    if (!wanted.has(session.key)) continue;
+    const marks = new Set(session.marks || []);
+    if (remove) marks.delete(label);
+    else marks.add(label);
+    session.marks = [...marks].slice(0, 6);
+    touched += 1;
+  }
+  await saveSessionIndex(config2, index);
+  return { touched, mark: label };
+}
+async function setSessionGroup(config2, keys, group) {
+  const wanted = new Set((Array.isArray(keys) ? keys : [keys]).filter(Boolean));
+  if (!wanted.size) throw new Error("\u5206\u7EC4\u9700\u8981\u81F3\u5C11\u4E00\u4E2A\u4F1A\u8BDD key");
+  const label = String(group || "").trim().slice(0, 24);
+  const index = await loadSessionIndex(config2);
+  let touched = 0;
+  for (const session of index.sessions) {
+    if (!wanted.has(session.key)) continue;
+    session.group = label;
+    touched += 1;
+  }
+  await saveSessionIndex(config2, index);
+  return { touched, group: label };
+}
+
 // lib/scheduler.mjs
 init_config();
 init_store();
@@ -38598,7 +38885,7 @@ async function runTask(config2, task) {
   if (task.kind === "collect-sessions") {
     const { scanSessions: scanSessions2 } = await Promise.resolve().then(() => (init_sessions(), sessions_exports));
     const { appendEntries: appendEntries2 } = await Promise.resolve().then(() => (init_entries(), entries_exports));
-    const { basename: basename5 } = await import("node:path");
+    const { basename: basename6 } = await import("node:path");
     const result = await scanSessions2(config2, localDate());
     const sessions = result?.sessions || [];
     await appendEntries2(
@@ -38609,7 +38896,7 @@ async function runTask(config2, task) {
         date: localDate(),
         time: String(session.timeRange || "").split("\u2013")[0].trim(),
         title: session.title,
-        project: session.cwd ? basename5(session.cwd) : "",
+        project: session.cwd ? basename6(session.cwd) : "",
         tags: session.label ? [session.label] : [],
         ref: session.file,
         nativeId: (session.file || session.title) + "|" + (session.first || "")
@@ -38766,7 +39053,7 @@ init_watch();
 // lib/wizard.mjs
 import { statSync } from "node:fs";
 import { readdir as readdir5 } from "node:fs/promises";
-import { join as join10 } from "node:path";
+import { join as join11 } from "node:path";
 var TYPE_MATCHERS = {
   zcode: (id) => id.startsWith("zcode:"),
   dsh: (id) => id.startsWith("dsh:"),
@@ -38792,7 +39079,7 @@ async function countFiles(root, depth = 0, cap = 2e3) {
     return 0;
   }
   for (const entry of entries) {
-    const full = join10(root, entry.name);
+    const full = join11(root, entry.name);
     if (entry.isDirectory()) {
       if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
       count += await countFiles(full, depth + 1, cap - count);
@@ -39238,6 +39525,24 @@ async function aiAction(args = {}) {
 async function sessionAction(config2, args = {}) {
   const action = args.action || "list";
   if (action === "sources") return { sources: await listSessionSources(config2) };
+  if (action === "index_status") {
+    const index = await loadSessionIndex(config2);
+    return { builtAt: index.builtAt, total: index.total };
+  }
+  if (action === "sync_all") {
+    return buildSessionIndex(config2, {
+      force: Boolean(args.force),
+      windowDays: Number(args.windowDays) || 120,
+      home: args.home || void 0,
+      dshHome: args.dshHome || void 0
+    });
+  }
+  if (action === "query") {
+    return querySessions(config2, args);
+  }
+  if (action === "mark") return markSessions(config2, args.keys, args.mark);
+  if (action === "unmark") return markSessions(config2, args.keys, args.mark, { remove: true });
+  if (action === "group") return setSessionGroup(config2, args.keys, args.group);
   const dateString = assertDate(args.date || localDate());
   return scanSessions(config2, dateString, { force: action === "refresh" });
 }
@@ -39330,7 +39635,7 @@ async function dispatch(op, args = {}) {
 }
 
 // src/server.mjs
-var HERE = dirname7(fileURLToPath(import.meta.url));
+var HERE = dirname8(fileURLToPath(import.meta.url));
 var PANEL_URI = `ui://${PLUGIN_NAME}/panel.html`;
 var SCRIPT_URI = `ui://${PLUGIN_NAME}/panel.js`;
 var STYLE_URI = `ui://${PLUGIN_NAME}/panel.css`;
@@ -39460,9 +39765,23 @@ tool(
   "worklog_sessions",
   {
     title: "\u672C\u673A AI \u4F1A\u8BDD\u6C47\u603B",
-    description: "\u8BFB\u53D6\u672C\u673A AI \u5DE5\u5177\u4F1A\u8BDD\u8BB0\u5F55\u5E76\u6309\u5929\u6C47\u603B\uFF1AClaude Code\u3001Codex\u3001DeepSeek Harness\u3001WorkBuddy\u3001ZCode\u3001OpenCode\u3001Gemini CLI\u3001config.sessionRoots \u81EA\u5B9A\u4E49\u76EE\u5F55\u3002action=list \u8FD4\u56DE\u67D0\u5929\u7684\u4F1A\u8BDD\uFF08\u6765\u6E90/\u6807\u9898/\u8F6E\u6570/\u65F6\u95F4/\u9879\u76EE\uFF09\uFF0Csources \u5217\u51FA\u4F1A\u8BDD\u6E90\u8DEF\u5F84\u4E0E\u5B58\u5728\u6027\uFF0Crefresh \u5F3A\u5236\u91CD\u626B\uFF08\u5FFD\u7565\u7F13\u5B58\uFF09\u3002\u53EA\u8BFB\u672C\u673A\u6587\u4EF6\uFF0C\u6458\u5F55\u7F13\u5B58\u5728\u63D2\u4EF6\u6570\u636E\u76EE\u5F55\u3002",
+    description: "\u8BFB\u53D6\u672C\u673A AI \u5DE5\u5177\u4F1A\u8BDD\uFF1Aaction=sync_all \u4E00\u952E\u5168\u91CF\u540C\u6B65\u6240\u6709\u5DE5\u5177\u7684\u5168\u90E8\u5386\u53F2\u4F1A\u8BDD\u5230\u6301\u4E45\u7D22\u5F15\uFF08force \u5FFD\u7565\u7F13\u5B58\u3001windowDays \u9650\u5236 sqlite \u6E90\u7A97\u53E3\uFF09\uFF1Baction=query \u6309\u6761\u4EF6\u7B5B\u9009 {q \u5173\u952E\u8BCD, project/cwd, source, start/end \u65E5\u671F, minTurns, mark, group, workOnly \u4EC5\u5DE5\u4F5C\u76F8\u5173(\u6309\u626B\u63CF\u76EE\u5F55\u4E0E workKeywords), workKeywords[], groupBy=project|source|date|mark|group}\uFF0C\u8FD4\u56DE\u547D\u4E2D\u4F1A\u8BDD+\u5173\u952E\u8BCD\u5206\u6790(keywords)+\u5206\u7EC4(groups)\uFF1Baction=mark/unmark {keys, mark} \u6253/\u53BB\u6807\u8BB0\uFF1Baction=group {keys, group} \u8BBE\u81EA\u5B9A\u4E49\u5206\u7EC4\uFF1Bindex_status \u67E5\u7D22\u5F15\u72B6\u6001\uFF1Blist \u6309\u5929\u89C6\u56FE\uFF1Bsources \u5217\u6765\u6E90\uFF1Brefresh \u5F3A\u5236\u91CD\u626B\u3002",
     inputSchema: external_exports.object({
-      action: external_exports.enum(["list", "sources", "refresh"]).optional(),
+      action: external_exports.enum(["list", "sources", "refresh", "sync_all", "query", "mark", "unmark", "group", "index_status"]).optional(),
+      q: external_exports.string().optional(),
+      project: external_exports.string().optional(),
+      source: external_exports.string().optional(),
+      start: external_exports.string().optional(),
+      end: external_exports.string().optional(),
+      minTurns: external_exports.number().optional(),
+      mark: external_exports.string().optional(),
+      group: external_exports.string().optional(),
+      groupBy: external_exports.string().optional(),
+      workOnly: external_exports.boolean().optional(),
+      workKeywords: external_exports.array(external_exports.string()).optional(),
+      keys: external_exports.array(external_exports.string()).optional(),
+      force: external_exports.boolean().optional(),
+      windowDays: external_exports.number().optional(),
       date: external_exports.string().optional().describe("YYYY-MM-DD\uFF0C\u9ED8\u8BA4\u4ECA\u5929")
     })
   },
@@ -39697,7 +40016,7 @@ server.registerTool(
   }
 );
 async function asset(name) {
-  return readFile7(join11(HERE, name), "utf8");
+  return readFile8(join12(HERE, name), "utf8");
 }
 var panelHtmlPromise;
 function panelDocument() {

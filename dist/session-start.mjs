@@ -316,7 +316,7 @@ var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.9.0";
+    PLUGIN_VERSION = "0.10.0";
   }
 });
 
@@ -502,6 +502,7 @@ var init_store = __esm({
 var sessions_exports = {};
 __export(sessions_exports, {
   cleanUserText: () => cleanUserText,
+  collectAllSessions: () => collectAllSessions,
   dayBounds: () => dayBounds,
   listSessionSources: () => listSessionSources,
   parseSessionLines: () => parseSessionLines,
@@ -986,9 +987,9 @@ function sessionForDay(session, dateString) {
     file: session.file
   };
 }
-async function scanSessions(config, dateString, { force = false, home = homedir2(), dshHome } = {}) {
+async function collectAllSessions(config, { force = false, home = homedir2(), dshHome, windowDays = 120, endDate = localDate() } = {}) {
   if (config.sources?.sessions === false) {
-    return { date: dateString, sessions: [], totals: { sessions: 0, turns: 0 }, errors: [] };
+    return { all: [], errors: [] };
   }
   const resolvedDshHome = dshHome || process.env.DSH_HOME || join3(home, ".dsh");
   const cache = force ? { version: CACHE_VERSION, files: {} } : await loadCache(config);
@@ -1065,15 +1066,38 @@ async function scanSessions(config, dateString, { force = false, home = homedir2
       errors.push({ source: "custom", root, error: String(error?.message || error) });
     }
   }
-  try {
-    all.push(...await scanZcode(config, dateString, home));
-  } catch (error) {
-    errors.push({ source: "zcode", error: String(error?.message || error) });
+  const windowDates = [];
+  for (let i = 0; i < windowDays; i++) {
+    const cursor = new Date(endDate);
+    cursor.setDate(cursor.getDate() - i);
+    windowDates.push(localDate(cursor));
   }
-  try {
-    all.push(...await scanOpenCode(config, dateString, home));
-  } catch (error) {
-    errors.push({ source: "opencode", error: String(error?.message || error) });
+  const windowed = [];
+  for (const date of windowDates) {
+    try {
+      windowed.push(...(await scanZcode(config, date, home)).map((session) => ({ ...session, __day: date })));
+    } catch (error) {
+      errors.push({ source: "zcode", error: String(error?.message || error) });
+    }
+    try {
+      windowed.push(...(await scanOpenCode(config, date, home)).map((session) => ({ ...session, __day: date })));
+    } catch (error) {
+      errors.push({ source: "opencode", error: String(error?.message || error) });
+    }
+  }
+  const merged = /* @__PURE__ */ new Map();
+  for (const session of windowed) {
+    const key = session.source + "|" + session.file;
+    const existing = merged.get(key);
+    if (existing) {
+      for (const [day, value] of Object.entries(session.dates || {})) existing.dates[day] = value;
+    } else {
+      merged.set(key, session);
+    }
+  }
+  for (const session of merged.values()) {
+    delete session.__day;
+    all.push(session);
   }
   for (const key of Object.keys(cache.files)) {
     if (!seen.has(key)) delete cache.files[key];
@@ -1082,6 +1106,13 @@ async function scanSessions(config, dateString, { force = false, home = homedir2
     await saveCache(config, cache);
   } catch {
   }
+  return { all, errors };
+}
+async function scanSessions(config, dateString, opts = {}) {
+  if (config.sources?.sessions === false) {
+    return { date: dateString, sessions: [], totals: { sessions: 0, turns: 0 }, errors: [] };
+  }
+  const { all, errors } = await collectAllSessions(config, { ...opts, windowDays: 1 });
   const sessions = all.map((session) => sessionForDay(session, dateString)).filter(Boolean).sort((a, b) => a.first - b.first || a.label.localeCompare(b.label));
   const turns = sessions.reduce((sum, session) => sum + session.turns, 0);
   return { date: dateString, sessions, totals: { sessions: sessions.length, turns }, errors };
@@ -2509,6 +2540,10 @@ init_entries();
 init_connectors();
 
 // src/api.mjs
+init_sessions();
+
+// lib/session-manager.mjs
+init_config();
 init_sessions();
 
 // lib/calendar.mjs

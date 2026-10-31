@@ -102,6 +102,13 @@ const state = {
   graphData: null,
   graphEntity: '',
   graphLoading: false,
+  sessIndex: null,
+  sessFilters: { q: '', project: '', source: '', start: '', end: '', minTurns: '', workOnly: false, workKeywords: '' },
+  sessGroupBy: '',
+  sessResult: null,
+  sessChecked: [],
+  sessMark: '',
+  sessGroupInput: '',
   reports: [],
   backups: [],
   config: null,
@@ -1712,6 +1719,7 @@ function sessionsTab() {
     'div',
     null,
     noticeNode(),
+    sessionsV2Block(),
     h(
       'div',
       { className: 'wl-date-row' },
@@ -3323,6 +3331,186 @@ function graphEntityView(data) {
           ),
         )
       : h('div', { className: 'wl-empty' }, '该实体暂无关系'),
+  )
+}
+
+async function loadSessIndex() {
+  if (state.sessIndex) return
+  try {
+    state.sessIndex = await call('sessions', { action: 'index_status' })
+  } catch {
+    state.sessIndex = { builtAt: '', total: 0 }
+  }
+  render()
+}
+
+function sessFilterValue(key, value) {
+  state.sessFilters[key] = value
+}
+
+function sessToggleKey(key) {
+  const set = new Set(state.sessChecked)
+  if (set.has(key)) set.delete(key)
+  else set.add(key)
+  state.sessChecked = [...set]
+  render()
+}
+
+function sessAllKeys() {
+  const page = state.sessResult?.sessions || []
+  const set = new Set(state.sessChecked)
+  if (set.size === page.length && page.length) state.sessChecked = []
+  else state.sessChecked = page.map((item) => item.key)
+  render()
+}
+
+async function runSessQuery() {
+  await act('sess-query', async () => {
+    const f = state.sessFilters
+    state.sessResult = await call('sessions', {
+      action: 'query',
+      q: f.q, project: f.project, source: f.source, start: f.start, end: f.end,
+      minTurns: Number(f.minTurns) || 0,
+      workOnly: Boolean(f.workOnly),
+      workKeywords: String(f.workKeywords || '').split(/[,，]/).map((item) => item.trim()).filter(Boolean),
+      groupBy: state.sessGroupBy,
+    })
+    state.sessChecked = []
+  })
+}
+
+async function syncAllSessions(force) {
+  await act('sess-sync', async () => {
+    const result = await call('sessions', { action: 'sync_all', force })
+    state.sessIndex = { builtAt: result.builtAt, total: result.total }
+    setNotice('ok', '全量同步完成：' + result.total + ' 个会话' + (result.errors?.length ? '（' + result.errors.length + ' 个来源报错）' : ''))
+  })
+}
+
+function sessRow(session) {
+  const checked = state.sessChecked.includes(session.key)
+  return h(
+    'div',
+    { className: 'wl-item', key: session.key },
+    h('input', { className: 'wl-check', type: 'checkbox', checked, onChange: () => sessToggleKey(session.key) }),
+    h(
+      'div',
+      { className: 'grow' },
+      h('div', { className: 'wl-item-title' }, session.title),
+      h(
+        'div',
+        { className: 'wl-item-meta' },
+        h('span', { className: 'wl-tag' }, session.label),
+        session.group ? h('span', { className: 'wl-tag mid' }, '@' + session.group) : null,
+        (session.marks || []).map((mark) => h('span', { className: 'wl-carry' }, '#' + mark)),
+        session.project ? h('span', null, session.project) : null,
+        h('span', null, session.last + (session.datesCount > 1 ? '（' + session.datesCount + ' 天）' : '')),
+        h('span', null, session.turns + ' 轮'),
+      ),
+    ),
+  )
+}
+
+function sessionsV2Block() {
+  loadSessIndex()
+  const f = state.sessFilters
+  const result = state.sessResult
+  const checkedCount = state.sessChecked.length
+  const groupOptions = [['', '不分组'], ['project', '按项目'], ['source', '按来源'], ['date', '按日期'], ['mark', '按标记'], ['group', '按自定义组']]
+  const groups = result?.groups || {}
+  const groupEntries = Object.entries(groups)
+  const groupedRender = state.sessGroupBy && groupEntries.length
+    ? groupEntries.sort((a, b) => a[0].localeCompare(b[0])).map(([groupName, keys]) =>
+        h(
+          'div',
+          { className: 'wl-section', key: groupName },
+          h('div', { className: 'wl-section-title' }, groupName + '（' + keys.length + '）'),
+          keys
+            .map((key) => (result.sessions || []).find((item) => item.key === key))
+            .filter(Boolean)
+            .map(sessRow),
+        ),
+      )
+    : null
+  return h(
+    'div',
+    { className: 'wl-card wide' },
+    h(
+      'div',
+      { className: 'wl-row' },
+      h('button', { className: 'wl-btn primary', disabled: state.busy === 'sess-sync', onClick: () => syncAllSessions(false) }, '同步全部会话'),
+      h('button', { className: 'wl-btn', disabled: state.busy === 'sess-sync', onClick: () => syncAllSessions(true) }, '强制重扫'),
+      h('span', { className: 'wl-hint' },
+        state.sessIndex?.total
+          ? '索引 ' + state.sessIndex.total + ' 条 · ' + String(state.sessIndex.builtAt).slice(5, 16).replace('T', ' ')
+          : '还没有索引，点「同步全部会话」'),
+    ),
+    h(
+      'div',
+      { className: 'wl-row', style: { marginTop: '6px' } },
+      h('input', { className: 'wl-input', placeholder: '关键词', value: f.q, onInput: (e) => sessFilterValue('q', e.target.value), style: { width: '120px' } }),
+      h('input', { className: 'wl-input', placeholder: '项目/目录', value: f.project, onInput: (e) => sessFilterValue('project', e.target.value), style: { width: '120px' } }),
+      h('input', { className: 'wl-input', type: 'date', value: f.start, onInput: (e) => sessFilterValue('start', e.target.value), style: { width: '128px' } }),
+      h('input', { className: 'wl-input', type: 'date', value: f.end, onInput: (e) => sessFilterValue('end', e.target.value), style: { width: '128px' } }),
+    ),
+    h(
+      'div',
+      { className: 'wl-row', style: { marginTop: '6px' } },
+      h('input', { className: 'wl-input', type: 'number', placeholder: '最少轮次', value: f.minTurns, onInput: (e) => sessFilterValue('minTurns', e.target.value), style: { width: '80px' } }),
+      h('input', { className: 'wl-input', placeholder: '工作关键词(逗号)', value: f.workKeywords, onInput: (e) => sessFilterValue('workKeywords', e.target.value), style: { width: '150px' } }),
+      h('label', { className: 'wl-hint' },
+        h('input', { className: 'wl-check', type: 'checkbox', checked: Boolean(f.workOnly), onChange: (e) => { sessFilterValue('workOnly', e.target.checked); render() } }),
+        ' 仅工作相关'),
+      h('button', { className: 'wl-btn primary', disabled: state.busy === 'sess-query', onClick: runSessQuery }, '查询'),
+      h('button', { className: 'wl-btn', onClick: () => { state.sessFilters = { q: '', project: '', source: '', start: '', end: '', minTurns: '', workOnly: false, workKeywords: '' }; state.sessResult = null; state.sessChecked = []; render() } }, '重置'),
+    ),
+    result && result.keywords?.length
+      ? h('div', { className: 'wl-row', style: { marginTop: '6px' } },
+          h('span', { className: 'wl-hint' }, '关键词：'),
+          result.keywords.map((item) =>
+            h('button', { className: 'wl-chip', key: item.word, onClick: () => { sessFilterValue('q', item.word); runSessQuery() } },
+              item.word + ' ' + item.count)))
+      : null,
+    result
+      ? h('div', { className: 'wl-hint', style: { marginTop: '6px' } },
+          '命中 ' + result.matched + ' / 索引 ' + result.total + ' 条' + (result.matched > 200 ? '（显示前 200）' : ''))
+      : null,
+    result
+      ? h(
+          'div',
+          { className: 'wl-row', style: { marginTop: '4px' } },
+          h(
+            'select',
+            { className: 'wl-select', style: { width: '110px' }, value: state.sessGroupBy, onChange: (e) => { state.sessGroupBy = e.target.value; runSessQuery() } },
+            groupOptions.map(([value, label]) => h('option', { value, selected: state.sessGroupBy === value }, label)),
+          ),
+          h('button', { className: 'wl-btn tiny', onClick: sessAllKeys }, checkedCount === (result.sessions || []).length && checkedCount ? '取消全选' : '全选本页'),
+          h('input', { className: 'wl-input', placeholder: '标记名', value: state.sessMark, onInput: (e) => { state.sessMark = e.target.value }, style: { width: '90px' } }),
+          h('button', { className: 'wl-btn tiny', disabled: !checkedCount || state.busy === 'sess-mark', onClick: () => act('sess-mark', async () => {
+            await call('sessions', { action: 'mark', keys: state.sessChecked, mark: state.sessMark })
+            setNotice('ok', '已标记 ' + state.sessChecked.length + ' 条')
+            state.sessResult = null
+          }) }, '标记'),
+          h('button', { className: 'wl-btn tiny', disabled: !checkedCount || state.busy === 'sess-mark', onClick: () => act('sess-mark', async () => {
+            await call('sessions', { action: 'unmark', keys: state.sessChecked, mark: state.sessMark })
+            setNotice('ok', '已取消标记')
+            state.sessResult = null
+          }) }, '去标记'),
+          h('input', { className: 'wl-input', placeholder: '自定义组名', value: state.sessGroupInput, onInput: (e) => { state.sessGroupInput = e.target.value }, style: { width: '100px' } }),
+          h('button', { className: 'wl-btn tiny', disabled: !checkedCount || state.busy === 'sess-group', onClick: () => act('sess-group', async () => {
+            await call('sessions', { action: 'group', keys: state.sessChecked, group: state.sessGroupInput })
+            setNotice('ok', '已设组：' + (state.sessGroupInput || '(清除)'))
+            state.sessResult = null
+          }) }, '设组'),
+        )
+      : null,
+    result
+      ? groupedRender || h(
+          'div',
+          { className: 'wl-list', style: { marginTop: '4px' } },
+          (result.sessions || []).map(sessRow),
+        )
+      : null,
   )
 }
 

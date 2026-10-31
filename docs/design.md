@@ -123,6 +123,7 @@
 ## 6. 变更记录
 
 - v0.1（2026-10-31）：首版。八个子系统设计与 R1-R6 工具面规划，与 REQ v0.1 对齐。
+- v0.8（2026-10-31）：R7 会话管理 v2 回填（0.10.0）。新增 lib/session-manager.mjs（索引/查询/分组/关键词/标记）；sessions.mjs 抽出 collectAllSessions（sqlite 源按 windowDays 窗口扫并按 source+file 合并跨天会话，scanSessions 强制窗口=1 隔离成本）。索引键=sha1(source|file)，重建时合并用户 marks/group。
 - v0.7（2026-10-31）：R6 实现回填（0.9.0）。图抽取规则实现：git entry tags[0]=作者→person，session tags[0]=工具名→tool，connector source→source，tags[1:]/专属标签→topic；关系 提交了/用于/提供/出现于；总览返回 top100 节点供面板 chips。v0.x 路线图至此收官，1.x 候选：AI 主题抽取增强、对外回写（E2）、力导向可视化、图谱时间回放。
 - v0.6（2026-10-31）：R5 实现回填（0.8.0）。权重公式定为 (accepted+1)/(total+2)*1.5，下限 0.2；外部临期窗口 = 今天起 3 天；no-log-project 通过解析日文件 "### 项目名" 判断覆盖。面板概览卡片懒加载（当日缓存）。
 - v0.5（2026-10-31）：R4 实现回填（0.7.0）。设计落地差异：hermes.mjs 暂以 generic.mjs 承接（待接口信息后替换专用适配器）；连接器状态持久化到 config.connectors[]；同步去重靠条目指纹。飞书 feedMessages 默认关（需真实凭据后手动开）。

@@ -45,6 +45,7 @@ import { askArchive, aiComplete, generateReport, listAiModels, summarizeAiUsage,
 import { listTemplates, render as renderTpl, resetTemplate, saveTemplate } from '../lib/templates.mjs'
 import { detectAiCandidates, findAiCandidate, publicCandidate } from '../lib/ai-detect.mjs'
 import { listSessionSources, parseSessionLines, scanSessions } from '../lib/sessions.mjs'
+import { buildSessionIndex, loadSessionIndex, markSessions, querySessions, setSessionGroup } from '../lib/session-manager.mjs'
 import { getHistory, getTasks, runDueTasks, updateTask } from '../lib/scheduler.mjs'
 import { calendarDay, calendarMonth } from '../lib/calendar.mjs'
 import { CONNECTOR_TYPES, adapterFor, listConnectors, normalizeConnector, publicConnectorList, syncConnectors } from '../lib/connectors.mjs'
@@ -488,6 +489,24 @@ export async function aiAction(args = {}) {
 export async function sessionAction(config, args = {}) {
   const action = args.action || 'list'
   if (action === 'sources') return { sources: await listSessionSources(config) }
+  if (action === 'index_status') {
+    const index = await loadSessionIndex(config)
+    return { builtAt: index.builtAt, total: index.total }
+  }
+  if (action === 'sync_all') {
+    return buildSessionIndex(config, {
+      force: Boolean(args.force),
+      windowDays: Number(args.windowDays) || 120,
+      home: args.home || undefined,
+      dshHome: args.dshHome || undefined,
+    })
+  }
+  if (action === 'query') {
+    return querySessions(config, args)
+  }
+  if (action === 'mark') return markSessions(config, args.keys, args.mark)
+  if (action === 'unmark') return markSessions(config, args.keys, args.mark, { remove: true })
+  if (action === 'group') return setSessionGroup(config, args.keys, args.group)
   const dateString = assertDate(args.date || localDate())
   return scanSessions(config, dateString, { force: action === 'refresh' })
 }
