@@ -270,14 +270,23 @@ function tabButton(key, label) {
   )
 }
 
-function card(label, value, sub, wide) {
+function card(label, value, sub, wide, onClick) {
   return h(
     'div',
-    { className: `wl-card${wide ? ' wide' : ''}` },
+    {
+      className: `wl-card${wide ? ' wide' : ''}${onClick ? ' clickable' : ''}`,
+      onClick,
+      ...(onClick ? { title: '点击查看详情', style: { cursor: 'pointer' } } : {}),
+    },
     h('div', { className: 'wl-k' }, label),
     h('div', { className: `wl-v${String(value).length > 16 ? ' small' : ''}` }, value),
     sub ? h('div', { className: 'wl-hint' }, sub) : null,
   )
+}
+
+function gotoTab(tab) {
+  state.tab = tab
+  render()
 }
 
 function priorityTag(pri) {
@@ -306,15 +315,17 @@ function overviewTab() {
     h(
       'div',
       { className: 'wl-grid' },
-      card('今天', status.today?.archived ? '已归档' : '未归档', status.today?.date),
-      card('日志总数', `${status.days?.count || 0} 天`, `最近 ${status.days?.latest?.[0]?.date || '—'}`),
+      card('今天', status.today?.archived ? '已归档' : '未归档', status.today?.date + ' · 点看日程', false, () => gotoTab('schedule')),
+      card('日志总数', `${status.days?.count || 0} 天`, `最近 ${status.days?.latest?.[0]?.date || '—'} · 点去浏览`, false, () => gotoTab('logs')),
       card(
         '待办',
         `${status.todos?.open || 0} 进行中`,
-        status.todos?.overdue ? `${status.todos.overdue} 条已逾期` : `共 ${status.todos?.count || 0} 条`,
+        (status.todos?.overdue ? `${status.todos.overdue} 条已逾期 · ` : `共 ${status.todos?.count || 0} 条 · `) + '点去日程',
+        false,
+        () => gotoTab('schedule'),
       ),
       card('项目', `${projects.length} 个`, `${status.backups?.count || 0} 份备份`),
-      card('AI 会话', `${status.sessions?.count || 0} 场`, `${status.sessions?.turns || 0} 轮`),
+      card('AI 会话', `${status.sessions?.count || 0} 场`, `${status.sessions?.turns || 0} 轮 · 点看今日`, false, () => { gotoTab('sessions'); state.sessFilters.start = state.sessFilters.end = status.today?.date || today(); state.sessResult = null; runSessQuery() }),
     ),
     h(
       'div',
@@ -409,7 +420,16 @@ function overviewTab() {
           ),
         )
       : h('div', { className: 'wl-empty' }, '还没有从归档中解析到项目。'),
-    h('div', { className: 'wl-label' }, '今天的 AI 会话'),
+    h(
+      'div',
+      { className: 'wl-label' },
+      '今天的 AI 会话',
+      h(
+        'button',
+        { className: 'wl-btn tiny', style: { marginLeft: 'auto' }, onClick: () => { gotoTab('sessions'); state.sessFilters.start = state.sessFilters.end = today(); state.sessResult = null; runSessQuery() } },
+        '全部会话',
+      ),
+    ),
     status.sessions?.items?.length
       ? h(
           'div',
@@ -3235,7 +3255,24 @@ function recoCard() {
         h(
           'div',
           { className: 'grow' },
-          h('div', { className: 'wl-item-title' }, item.title),
+          h(
+            'button',
+            {
+              className: 'wl-click wl-item-title',
+              title: '点跳到对应板块',
+              onClick: () => {
+                if (item.kind === 'overdue' || item.kind === 'stale') gotoTab('schedule')
+                else if (item.refs?.date || item.date) {
+                  gotoTab('schedule')
+                  const d = item.refs?.date || item.date
+                  state.calMonth = d.slice(0, 7)
+                  state.calData = null
+                  state.calDay = null
+                } else gotoTab('schedule')
+              },
+            },
+            item.title,
+          ),
           item.detail ? h('div', { className: 'wl-item-meta' }, item.detail) : null,
         ),
         h('span', { className: 'wl-hint' }, String(item.final || item.score)),
@@ -3400,8 +3437,15 @@ function graphEntityView(data) {
             'div',
             { className: 'wl-row', key: relation.kind + relation.other },
             h('span', { className: 'wl-tag' }, relation.kind),
-            h('span', { className: 'grow wl-hint' },
-              (relation.direction === 'out' ? '→ ' : '← ') + relation.other + '（' + relation.otherType + '）'),
+            h(
+              'button',
+              {
+                className: 'wl-chip grow',
+                title: '跳到该实体',
+                onClick: () => loadGraphView(relation.other),
+              },
+              (relation.direction === 'out' ? '→ ' : '← ') + relation.other + '（' + relation.otherType + '）',
+            ),
             h('span', { className: 'wl-hint' }, String(relation.count) + ' 次'),
           ),
         )
@@ -3465,6 +3509,14 @@ async function syncAllSessions(force) {
 
 function sessRow(session) {
   const checked = state.sessChecked.includes(session.key)
+  const expanded = (state.sessExpanded || []).includes(session.key)
+  const toggleExpand = () => {
+    const set = new Set(state.sessExpanded || [])
+    if (set.has(session.key)) set.delete(session.key)
+    else set.add(session.key)
+    state.sessExpanded = [...set]
+    render()
+  }
   return h(
     'div',
     { className: 'wl-item', key: session.key },
@@ -3472,7 +3524,11 @@ function sessRow(session) {
     h(
       'div',
       { className: 'grow' },
-      h('div', { className: 'wl-item-title' }, session.title),
+      h(
+        'button',
+        { className: 'wl-click wl-item-title', onClick: toggleExpand, title: '点击展开/收起详情' },
+        (expanded ? '▾ ' : '▸ ') + session.title,
+      ),
       h(
         'div',
         { className: 'wl-item-meta' },
@@ -3483,6 +3539,16 @@ function sessRow(session) {
         h('span', null, session.last + (session.datesCount > 1 ? '（' + session.datesCount + ' 天）' : '')),
         h('span', null, session.turns + ' 轮'),
       ),
+      expanded
+        ? h(
+            'div',
+            { className: 'wl-hint', style: { marginTop: '4px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' } },
+            (session.preview || '（无摘录，点「按日扫描」可看当天详情）') +
+              '\n目录：' + (session.cwd || '—') +
+              '\n文件：' + (session.file || '—') +
+              '\n日期：' + session.first + ' ~ ' + session.last,
+          )
+        : null,
     ),
   )
 }
