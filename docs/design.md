@@ -26,8 +26,8 @@
 | `lib/scheduler.mjs` | 调度任务表 + 到期判断 + 补偿执行入口 | R1 ✅ |
 | `lib/wizard.mjs` | AI 工具配置向导的服务端逻辑（按类型探测指定位置） | R1 ✅ |
 | `lib/watch.mjs` | watchDirs 指纹增量扫描（mtime+size，上限 5000 文件/目录） | R1 ✅ |
-| `lib/entries.mjs` | 统一条目：追加/去重/按日查询/来源统计 | R2 |
-| `lib/calendar.mjs` | 日历聚合（复用 days/entries/todos/reports） | R2 |
+| `lib/entries.mjs` | 统一条目：追加/去重/按日查询/来源统计 | R2 ✅ |
+| `lib/calendar.mjs` | 日历聚合（复用 days/entries/todos/reports） | R2 ✅ |
 | `lib/templates.mjs` | 模板文件管理 + 变量渲染 + 场景默认 | R3 |
 | `lib/adapters/` 目录 | feishu.mjs / zentao.mjs / hermes.mjs / generic.mjs + 共用 fetcher | R4 |
 | `lib/recommend.mjs` | 规则打分推荐 | R5 |
@@ -99,7 +99,7 @@
 | --- | --- | --- |
 | `worklog_collect` | diagnostics/run/set/scan_watch/scan_sessions | R1 ✅（工具数 13→15） |
 | `worklog_wizard` | types/probe（apply 复用 worklog_ai apply） | R1 ✅ |
-| `worklog_calendar` | month/day | R2 |
+| `worklog_calendar` | month/day | R2 ✅（工具数 15→16） |
 | `worklog_templates` | list/get/save/render-test | R3 |
 | `worklog_connectors` | list/test/sync | R4 |
 | `worklog_recommend` | get/feedback | R5 |
@@ -123,4 +123,5 @@
 ## 6. 变更记录
 
 - v0.1（2026-10-31）：首版。八个子系统设计与 R1-R6 工具面规划，与 REQ v0.1 对齐。
+- v0.3（2026-10-31）：R2 实现回填（0.5.0）。设计复审修正一处：collect-sessions 调度任务在扫描时同步 appendEntries（定时采集即时产出条目，不等归档）。panel-sim 增加日历页签覆盖。
 - v0.2（2026-10-31）：R1 实现回填（0.4.0）。新增 lib/watch.mjs 计划外模块；scheduler 增 collect-watch 任务；工具数 15。R2 前待补充：entries.json 字段定稿、日历页签信息架构图。

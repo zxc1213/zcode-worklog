@@ -48,6 +48,7 @@ zcode plugins install zcode-worklog@zcode-worklog
 | 页签 | 内容 |
 |---|---|
 | 概览 | 今天是否归档、日志/待办/项目/备份/AI 会话统计、今天的 AI 会话列表、最近运行、一键归档今天 |
+| 日历 | 月视图交互查看每天活动（归档/条目按来源/待办完成/会话/日报标记），点日期看当天详情（会话列表、完成待办、采集条目），可跳转打开日志 |
 | 日志 | 读取/编辑/保存某天 Markdown、搜索归档、重新归档、生成日报 |
 | 待办 | 添加、行内编辑、完成、重开、删除、清空已完成；子任务 checklist 与标签（编辑表单内管理）；智能排序（逾期 > 优先级 > 到期日）、优先级/标签筛选、统计条；AI 填单/批量解析/今日 3 件要事（需 AI 配置）；`!高`、`#标签`、`@2026-10-30`、`repeat=daily` 快捷语法 |
 | 汇报 | 日报、周报、月报、季报、绩效素材、项目档案；可选 AI 润色；查看已生成报告 |
@@ -139,7 +140,7 @@ zcode plugins install zcode-worklog@zcode-worklog
 
 ## Agent 工具
 
-`worklog_status`、`worklog_day`、`worklog_search`、`worklog_todos`、`worklog_archive`、`worklog_sessions`、`worklog_report`、`worklog_ask`、`worklog_projects`、`worklog_usage`、`worklog_backup`、`worklog_config`、`worklog_open`、`worklog_collect`（采集调度与诊断）、`worklog_wizard`（AI 工具配置向导）。
+`worklog_status`、`worklog_day`、`worklog_search`、`worklog_todos`、`worklog_archive`、`worklog_sessions`、`worklog_report`、`worklog_ask`、`worklog_projects`、`worklog_usage`、`worklog_backup`、`worklog_config`、`worklog_open`、`worklog_collect`（采集调度与诊断）、`worklog_wizard`（AI 工具配置向导）、`worklog_calendar`（日历聚合）。
 
 工具名在会话里通常带 `mcp__plugin_zcode-worklog_worklog__` 前缀。
 

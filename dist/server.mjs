@@ -275,7 +275,7 @@ var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.4.0";
+    PLUGIN_VERSION = "0.5.0";
   }
 });
 
@@ -959,6 +959,124 @@ var init_sessions = __esm({
   }
 });
 
+// lib/entries.mjs
+var entries_exports = {};
+__export(entries_exports, {
+  appendEntries: () => appendEntries,
+  entriesBucketByDate: () => entriesBucketByDate,
+  entriesDaySection: () => entriesDaySection,
+  entriesForDate: () => entriesForDate,
+  entriesRange: () => entriesRange,
+  loadEntries: () => loadEntries,
+  makeFingerprint: () => makeFingerprint
+});
+import { createHash } from "node:crypto";
+import { mkdir as mkdir3, readFile as readFile3, writeFile as writeFile3 } from "node:fs/promises";
+import { basename as basename2, dirname as dirname3, join as join4 } from "node:path";
+function entriesFile(config2) {
+  return join4(config2.dataDir, "entries.json");
+}
+function makeFingerprint(source, nativeId) {
+  return createHash("sha1").update(String(source) + "|" + String(nativeId)).digest("hex").slice(0, 16);
+}
+function normalizeEntry(input2 = {}) {
+  const title = String(input2.title || "").trim();
+  if (!title) return null;
+  const source = SOURCES.includes(input2.source) ? input2.source : "manual";
+  const date5 = /^\d{4}-\d{2}-\d{2}$/.test(String(input2.date || "")) ? input2.date : localDate();
+  const time3 = /^\d{1,2}:\d{2}$/.test(String(input2.time || "")) ? input2.time : "";
+  const fp = String(input2.fp || "") || makeFingerprint(source, nativeKey(input2) || title + "|" + date5 + "|" + time3);
+  return {
+    id: String(input2.id || "").trim() || fp,
+    fp,
+    source,
+    type: String(input2.type || source),
+    date: date5,
+    time: time3,
+    title: title.slice(0, MAX_TITLE),
+    detail: String(input2.detail || "").slice(0, MAX_DETAIL),
+    project: String(input2.project || "").slice(0, 80),
+    tags: Array.isArray(input2.tags) ? input2.tags.map((tag) => String(tag).slice(0, 40)).filter(Boolean).slice(0, 6) : [],
+    ref: String(input2.ref || "").slice(0, 300)
+  };
+}
+function nativeKey(input2) {
+  return String(input2.nativeId || input2.ref || "");
+}
+async function loadEntries(config2) {
+  let parsed = [];
+  try {
+    const raw = JSON.parse(await readFile3(entriesFile(config2), "utf8"));
+    if (Array.isArray(raw)) parsed = raw;
+  } catch {
+    parsed = [];
+  }
+  return parsed.map(normalizeEntry).filter(Boolean);
+}
+async function appendEntries(config2, list = []) {
+  const entries = await loadEntries(config2);
+  const seen = new Set(entries.map((entry) => entry.fp));
+  let added = 0;
+  for (const item of Array.isArray(list) ? list : []) {
+    const entry = normalizeEntry(item);
+    if (!entry) continue;
+    if (seen.has(entry.fp)) continue;
+    seen.add(entry.fp);
+    entries.push(entry);
+    added += 1;
+  }
+  let trimmed = 0;
+  if (entries.length > MAX_ENTRIES) {
+    trimmed = entries.length - MAX_ENTRIES;
+    entries.splice(0, trimmed);
+  }
+  if (added || trimmed) {
+    await mkdir3(dirname3(entriesFile(config2)), { recursive: true });
+    await writeFile3(entriesFile(config2), JSON.stringify(entries, null, 2) + "\n", "utf8");
+  }
+  return { added, trimmed };
+}
+async function entriesForDate(config2, dateString) {
+  return (await loadEntries(config2)).filter((entry) => entry.date === dateString);
+}
+async function entriesRange(config2, start, end) {
+  return (await loadEntries(config2)).filter((entry) => entry.date >= start && entry.date <= end);
+}
+async function entriesBucketByDate(config2, monthPrefix2 = "") {
+  const buckets = {};
+  for (const entry of await loadEntries(config2)) {
+    if (monthPrefix2 && !entry.date.startsWith(monthPrefix2)) continue;
+    const bucket = buckets[entry.date] || (buckets[entry.date] = { count: 0, bySource: {} });
+    bucket.count += 1;
+    bucket.bySource[entry.source] = (bucket.bySource[entry.source] || 0) + 1;
+  }
+  return buckets;
+}
+async function entriesDaySection(config2, dateString) {
+  const entries = await entriesForDate(config2, dateString);
+  if (!entries.length) return [];
+  const bySource = {};
+  for (const entry of entries) bySource[entry.source] = (bySource[entry.source] || 0) + 1;
+  const lines = ["- \u91C7\u96C6\u6761\u76EE " + entries.length + " \u6761\uFF1A" + Object.entries(bySource).map(([source, count]) => source + " " + count).join("\u3001")];
+  const sample = entries.slice(0, 8).map((entry) => {
+    const prefix = entry.project ? "[" + entry.project + "] " : "";
+    return prefix + entry.title;
+  });
+  if (entries.length > 8) sample.push("\u7B49 " + entries.length + " \u6761");
+  lines.push("- " + sample.join("\u3001"));
+  return lines;
+}
+var MAX_DETAIL, MAX_TITLE, MAX_ENTRIES, SOURCES;
+var init_entries = __esm({
+  "lib/entries.mjs"() {
+    init_config();
+    MAX_DETAIL = 400;
+    MAX_TITLE = 160;
+    MAX_ENTRIES = 2e4;
+    SOURCES = ["git", "docs", "sessions", "watch", "feishu", "zentao", "hermes", "manual"];
+  }
+});
+
 // lib/watch.mjs
 var watch_exports = {};
 __export(watch_exports, {
@@ -967,21 +1085,21 @@ __export(watch_exports, {
   scanWatchDirs: () => scanWatchDirs
 });
 import { existsSync as existsSync5 } from "node:fs";
-import { readdir as readdir4, readFile as readFile3, stat as stat4, writeFile as writeFile4 } from "node:fs/promises";
-import { join as join6 } from "node:path";
+import { readdir as readdir4, readFile as readFile4, stat as stat4, writeFile as writeFile5 } from "node:fs/promises";
+import { basename as basename4, dirname as dirname5, join as join7 } from "node:path";
 function watchCacheFile(config2) {
-  return join6(config2.dataDir, "watch-cache.json");
+  return join7(config2.dataDir, "watch-cache.json");
 }
 async function loadWatchCache(config2) {
   try {
-    const parsed = JSON.parse(await readFile3(watchCacheFile(config2), "utf8"));
+    const parsed = JSON.parse(await readFile4(watchCacheFile(config2), "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
   }
 }
 async function saveWatchCache(config2, cache) {
-  await writeFile4(watchCacheFile(config2), JSON.stringify(cache, null, 2) + "\n", "utf8");
+  await writeFile5(watchCacheFile(config2), JSON.stringify(cache, null, 2) + "\n", "utf8");
 }
 function normalizeWatchDirs2(input2) {
   const list = Array.isArray(input2) ? input2 : [];
@@ -1005,7 +1123,7 @@ async function walk2(dir, depth, visit2) {
     return;
   }
   for (const entry of entries) {
-    const full = join6(dir, entry.name);
+    const full = join7(dir, entry.name);
     if (entry.isDirectory()) {
       if (SKIP_DIRS2.has(entry.name)) continue;
       await walk2(full, depth + 1, visit2);
@@ -1020,6 +1138,7 @@ async function scanWatchDirs(config2) {
   const cache = await loadWatchCache(config2);
   const nextCache = {};
   const results = [];
+  const changedFiles = [];
   for (const dir of dirs) {
     const fingerprints = {};
     let total = 0;
@@ -1034,7 +1153,10 @@ async function scanWatchDirs(config2) {
         const fp = info.mtimeMs + ":" + info.size;
         fingerprints[file2] = fp;
         const previous = cache[dir.path]?.[file2];
-        if (previous !== fp) changed += 1;
+        if (previous !== fp) {
+          changed += 1;
+          if (cache[dir.path]) changedFiles.push({ file: file2, kind: dir.kind, label: dir.label, fp });
+        }
       } catch {
       }
     };
@@ -1049,12 +1171,31 @@ async function scanWatchDirs(config2) {
     nextCache[dir.path] = fingerprints;
     results.push({ path: dir.path, kind: dir.kind, label: dir.label, total, changed, truncated, error: error62 });
   }
+  if (changedFiles.length) {
+    const now = /* @__PURE__ */ new Date();
+    await appendEntries(
+      config2,
+      changedFiles.slice(0, 200).map((item) => ({
+        source: "watch",
+        type: "watch",
+        date: localDate(now),
+        time: localTime(now),
+        title: "\u6587\u4EF6\u53D8\u5316 " + basename4(item.file),
+        project: basename4(dirname5(item.file)),
+        tags: [item.kind],
+        ref: item.file,
+        nativeId: item.file + "|" + (item.fp || "")
+      }))
+    );
+  }
   await saveWatchCache(config2, nextCache);
   return { results, scannedAt: (/* @__PURE__ */ new Date()).toISOString() };
 }
 var SKIP_DIRS2, MAX_FILES_PER_DIR, MAX_DEPTH;
 var init_watch = __esm({
   "lib/watch.mjs"() {
+    init_config();
+    init_entries();
     SKIP_DIRS2 = /* @__PURE__ */ new Set([
       ".git",
       "node_modules",
@@ -1083,8 +1224,8 @@ var init_watch = __esm({
 });
 
 // src/server.mjs
-import { readFile as readFile4 } from "node:fs/promises";
-import { dirname as dirname4, join as join8 } from "node:path";
+import { readFile as readFile5 } from "node:fs/promises";
+import { dirname as dirname6, join as join9 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // node_modules/@modelcontextprotocol/server/dist/chunk-vYduTEsO.mjs
@@ -35581,8 +35722,8 @@ init_config();
 init_sessions();
 import { execFile } from "node:child_process";
 import { existsSync as existsSync4 } from "node:fs";
-import { mkdir as mkdir3, readdir as readdir3, stat as stat3, writeFile as writeFile3 } from "node:fs/promises";
-import { basename as basename2, dirname as dirname3, extname, join as join4, relative as relative2, resolve as resolve2 } from "node:path";
+import { mkdir as mkdir4, readdir as readdir3, stat as stat3, writeFile as writeFile4 } from "node:fs/promises";
+import { basename as basename3, dirname as dirname4, extname, join as join5, relative as relative2, resolve as resolve2 } from "node:path";
 import { promisify } from "node:util";
 
 // lib/store.mjs
@@ -36147,6 +36288,7 @@ async function deleteBackup(config2, name) {
 }
 
 // lib/archive.mjs
+init_entries();
 var execFileAsync = promisify(execFile);
 var SKIP_DIRS = /* @__PURE__ */ new Set([
   ".git",
@@ -36198,7 +36340,7 @@ async function walk(root, maxDepth, visitDir, visitFile) {
     }
     await visitDir?.(dir, depth);
     for (const entry of entries) {
-      const full = join4(dir, entry.name);
+      const full = join5(dir, entry.name);
       if (entry.isDirectory()) {
         if (depth < maxDepth && !isSkippedDir(entry.name)) queue.push({ dir: full, depth: depth + 1 });
       } else if (entry.isFile()) {
@@ -36221,7 +36363,7 @@ async function findGitRepos(roots = []) {
   const repos = [];
   for (const root of roots) {
     await walk(root, 3, async (dir) => {
-      if (existsSync4(join4(dir, ".git"))) repos.push(dir);
+      if (existsSync4(join5(dir, ".git"))) repos.push(dir);
     });
   }
   return [...new Set(repos)];
@@ -36248,7 +36390,7 @@ async function scanGit(roots, dateString, author = "") {
       });
       if (commits.length) {
         out.push({
-          name: basename2(repo),
+          name: basename3(repo),
           path: repo,
           author: currentAuthor,
           commits
@@ -36329,7 +36471,7 @@ async function todoDaySection(config2, dateString, carried = null) {
   }
   return lines;
 }
-function buildDayMarkdown(dateString, gitResult, docResult, note = "", sessionResult = null, todoSection = []) {
+function buildDayMarkdown(dateString, gitResult, docResult, note = "", sessionResult = null, todoSection = [], entriesSection = []) {
   const repos = gitResult.repos || [];
   const docs = docResult.files || [];
   const sessions = sessionResult?.sessions || [];
@@ -36362,7 +36504,7 @@ function buildDayMarkdown(dateString, gitResult, docResult, note = "", sessionRe
   if (docs.length) {
     lines.push("## \u6587\u6863\u53D8\u66F4", "");
     for (const doc of docs) {
-      lines.push(`- \`${doc.relative || basename2(doc.path)}\` \xB7 ${doc.time} \xB7 ${sizeText(doc.size)}`);
+      lines.push(`- \`${doc.relative || basename3(doc.path)}\` \xB7 ${doc.time} \xB7 ${sizeText(doc.size)}`);
     }
     lines.push("");
   } else {
@@ -36370,6 +36512,7 @@ function buildDayMarkdown(dateString, gitResult, docResult, note = "", sessionRe
   }
   if (sessionResult) lines.push(...sessionMarkdownSection(sessionResult));
   if (todoSection?.length) lines.push("## \u5F85\u529E", "", ...todoSection, "");
+  if (entriesSection?.length) lines.push("## \u91C7\u96C6\u6761\u76EE", "", ...entriesSection, "");
   lines.push("## \u5907\u6CE8", "", note.trim() || "\uFF08\u53EF\u5728\u6B64\u8865\u5145\u4ECA\u5929\u7684\u5DE5\u4F5C\u8BF4\u660E\uFF09", "");
   return lines.join("\n");
 }
@@ -36390,9 +36533,51 @@ async function archiveDay(config2, dateString, { force = false, note = "" } = {}
     }))
   ]);
   const todoSection = await todoDaySection(config2, dateString, carryResult);
-  const text = buildDayMarkdown(dateString, gitResult, docResult, note, sessionResult, todoSection);
-  await mkdir3(dirname3(target), { recursive: true });
-  await writeFile3(target, text, "utf8");
+  const entriesInput = [];
+  for (const repo of gitResult.repos) {
+    for (const commit of repo.commits) {
+      entriesInput.push({
+        source: "git",
+        type: "commit",
+        date: dateString,
+        title: commit.subject,
+        project: repo.name,
+        tags: commit.author ? [commit.author] : [],
+        ref: commit.hash,
+        nativeId: repo.path + ":" + commit.hash
+      });
+    }
+  }
+  for (const doc of docResult.files) {
+    entriesInput.push({
+      source: "docs",
+      type: "doc",
+      date: dateString,
+      time: String(doc.time || "").slice(0, 5),
+      title: doc.relative || basename3(doc.path),
+      project: basename3(dirname4(doc.path)),
+      ref: doc.path,
+      nativeId: doc.path + "|" + (doc.time || "")
+    });
+  }
+  for (const session of sessionResult?.sessions || []) {
+    entriesInput.push({
+      source: "sessions",
+      type: "session",
+      date: dateString,
+      time: String(session.timeRange || "").split("\u2013")[0].trim(),
+      title: session.title,
+      project: session.cwd ? basename3(session.cwd) : "",
+      tags: session.label ? [session.label] : [],
+      ref: session.file,
+      nativeId: (session.file || session.title) + "|" + (session.first || "")
+    });
+  }
+  await appendEntries(config2, entriesInput);
+  const entriesSection = await entriesDaySection(config2, dateString);
+  const text = buildDayMarkdown(dateString, gitResult, docResult, note, sessionResult, todoSection, entriesSection);
+  await mkdir4(dirname4(target), { recursive: true });
+  await writeFile4(target, text, "utf8");
   return {
     date: dateString,
     path: target,
@@ -36872,7 +37057,7 @@ function summarizeAiUsage(entries = []) {
 // lib/ai-detect.mjs
 import { readdirSync, readFileSync as readFileSync2 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
-import { join as join5 } from "node:path";
+import { join as join6 } from "node:path";
 function readJson3(file2) {
   try {
     return JSON.parse(readFileSync2(file2, "utf8"));
@@ -36948,10 +37133,10 @@ function parseTomlLite(text) {
   return root;
 }
 function zcodeCandidates(home) {
-  const config2 = readJson3(join5(home, ".zcode", "v2", "config.json"));
+  const config2 = readJson3(join6(home, ".zcode", "v2", "config.json"));
   const providers = config2?.provider;
   if (!providers || typeof providers !== "object") return [];
-  const settings = readJson3(join5(home, ".zcode", "v2", "setting.json")) || {};
+  const settings = readJson3(join6(home, ".zcode", "v2", "setting.json")) || {};
   const selected = Object.values(settings.modelProviderFamilySelectedKeys || {}).map(String);
   const isSelected = (key) => selected.some((value) => value === key || value.endsWith(`:${key}`));
   const out = [];
@@ -37080,7 +37265,7 @@ function readDshSettings(dshHome) {
   };
   let profiles = [];
   try {
-    profiles = readdirSync(join5(dshHome, "profiles"), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+    profiles = readdirSync(join6(dshHome, "profiles"), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
   } catch {
     profiles = [];
   }
@@ -37093,7 +37278,7 @@ function readDshSettings(dshHome) {
   });
   for (const name of profiles) {
     for (const file2 of ["cordis.patch.yml", "cordis.yml"]) {
-      const text = readText(join5(dshHome, "profiles", name, file2));
+      const text = readText(join6(dshHome, "profiles", name, file2));
       if (!text) continue;
       const entries = pluginEntries(parseYamlLite(text));
       const llm = entries.find((entry) => entry?.id === "llm-pi-ai" && entry?.config?.providers);
@@ -37107,7 +37292,7 @@ function readDshSettings(dshHome) {
       };
     }
   }
-  const settingsText = readText(join5(dshHome, "settings.yaml")) || readText(join5(dshHome, "settings-legacy.yaml"));
+  const settingsText = readText(join6(dshHome, "settings.yaml")) || readText(join6(dshHome, "settings-legacy.yaml"));
   if (!settingsText) return empty;
   const settings = parseYamlLite(settingsText);
   const providers = settings["llm-pi-ai"]?.providers;
@@ -37121,11 +37306,11 @@ function readDshSettings(dshHome) {
   };
 }
 function dshCandidates(home, env) {
-  const dshHome = String(env.DSH_HOME || "").trim() || join5(home, ".dsh");
+  const dshHome = String(env.DSH_HOME || "").trim() || join6(home, ".dsh");
   const settings = readDshSettings(dshHome);
   const providers = settings.providers;
   if (!providers || typeof providers !== "object") return [];
-  const credentials = parseYamlLite(readText(join5(dshHome, ".credentials.yaml")) || "");
+  const credentials = parseYamlLite(readText(join6(dshHome, ".credentials.yaml")) || "");
   const refs = credentials.refs && typeof credentials.refs === "object" ? credentials.refs : {};
   const defaultProvider = settings.defaultProvider;
   const defaultModelId = settings.defaultModelId;
@@ -37186,7 +37371,7 @@ function dshCandidates(home, env) {
   return out;
 }
 function claudeCandidates(home) {
-  const settings = readJson3(join5(home, ".claude", "settings.json"));
+  const settings = readJson3(join6(home, ".claude", "settings.json"));
   const env = settings?.env;
   if (!env || typeof env !== "object") return [];
   const baseUrl = String(env.ANTHROPIC_BASE_URL || "").trim();
@@ -37211,10 +37396,10 @@ function claudeCandidates(home) {
   ];
 }
 function codexCandidates(home, env) {
-  const text = readText(join5(home, ".codex", "config.toml"));
+  const text = readText(join6(home, ".codex", "config.toml"));
   if (!text) return [];
   const toml = parseTomlLite(text);
-  const auth = readJson3(join5(home, ".codex", "auth.json")) || {};
+  const auth = readJson3(join6(home, ".codex", "auth.json")) || {};
   const providerId = String(toml.model_provider || "").trim();
   const providers = toml.model_providers && typeof toml.model_providers === "object" ? toml.model_providers : {};
   const provider = providerId && providers[providerId] || providers.openai || {};
@@ -37239,11 +37424,11 @@ function codexCandidates(home, env) {
   ];
 }
 function geminiCandidates(home, env) {
-  const dotenv = readText(join5(home, ".gemini", ".env")) || "";
+  const dotenv = readText(join6(home, ".gemini", ".env")) || "";
   const dotenvKey = /^\s*GEMINI_API_KEY\s*=\s*(.+)$/m.exec(dotenv)?.[1]?.trim().replace(/^["']|["']$/g, "");
   const apiKey = String(env.GEMINI_API_KEY || dotenvKey || "").trim();
   if (!apiKey) return [];
-  const settings = readJson3(join5(home, ".gemini", "settings.json")) || {};
+  const settings = readJson3(join6(home, ".gemini", "settings.json")) || {};
   return [
     makeCandidate({
       id: "gemini-cli",
@@ -37400,8 +37585,25 @@ function isTaskDue(task, now = /* @__PURE__ */ new Date()) {
 async function runTask(config2, task) {
   if (task.kind === "collect-sessions") {
     const { scanSessions: scanSessions2 } = await Promise.resolve().then(() => (init_sessions(), sessions_exports));
+    const { appendEntries: appendEntries2 } = await Promise.resolve().then(() => (init_entries(), entries_exports));
+    const { basename: basename5 } = await import("node:path");
     const result = await scanSessions2(config2, localDate());
-    return { sessions: result?.sessions?.length || 0 };
+    const sessions = result?.sessions || [];
+    await appendEntries2(
+      config2,
+      sessions.map((session) => ({
+        source: "sessions",
+        type: "session",
+        date: localDate(),
+        time: String(session.timeRange || "").split("\u2013")[0].trim(),
+        title: session.title,
+        project: session.cwd ? basename5(session.cwd) : "",
+        tags: session.label ? [session.label] : [],
+        ref: session.file,
+        nativeId: (session.file || session.title) + "|" + (session.first || "")
+      }))
+    );
+    return { sessions: sessions.length };
   }
   if (task.kind === "collect-watch") {
     const { scanWatchDirs: scanWatchDirs2 } = await Promise.resolve().then(() => (init_watch(), watch_exports));
@@ -37458,13 +37660,94 @@ async function getHistory(config2) {
   return Array.isArray(state.schedulerHistory) ? state.schedulerHistory.slice(0, 20) : [];
 }
 
+// lib/calendar.mjs
+init_entries();
+init_config();
+init_sessions();
+function monthPrefix(month) {
+  const text = String(month || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(text)) return localDate().slice(0, 7);
+  return text;
+}
+function daysInMonth(month) {
+  const [year, mon] = month.split("-").map(Number);
+  return new Date(year, mon, 0).getDate();
+}
+async function calendarMonth(config2, month) {
+  const key = monthPrefix(month);
+  const bucket = await entriesBucketByDate(config2, key);
+  const todos = await loadTodos(config2);
+  const doneDates = {};
+  for (const todo of todos) {
+    if (todo.status !== "done") continue;
+    const day = String(todo.done_at || "").slice(0, 10);
+    if (day) doneDates[day] = (doneDates[day] || 0) + 1;
+  }
+  const archived = /* @__PURE__ */ new Set();
+  for (const day of await listDays(config2)) {
+    if (day.date.startsWith(key)) archived.add(day.date);
+  }
+  const dailyReports = new Set(
+    (await listReports(config2)).map((report) => report.name).filter((name) => name.startsWith("daily-")).map((name) => name.slice(6, 16))
+  );
+  const days = {};
+  for (let i = 1; i <= daysInMonth(key); i++) {
+    const date5 = key + "-" + String(i).padStart(2, "0");
+    const counts = bucket[date5] || { count: 0, bySource: {} };
+    days[date5] = {
+      date: date5,
+      archived: archived.has(date5),
+      hasDailyReport: dailyReports.has(date5),
+      entryCount: counts.count,
+      bySource: counts.bySource,
+      todoDone: doneDates[date5] || 0,
+      sessionCount: counts.bySource.sessions || 0,
+      commitCount: counts.bySource.git || 0
+    };
+  }
+  return { month: key, today: localDate(), days };
+}
+async function calendarDay(config2, dateString) {
+  const day = await getDay(config2, dateString);
+  const sessions = day.exists ? parseSessionLines(day.text) : [];
+  const todosDone = (await loadTodos(config2)).filter((todo) => todo.status === "done" && String(todo.done_at || "").slice(0, 10) === dateString).map((todo) => ({ title: todo.title, doneAt: todo.done_at }));
+  const entries = await entriesForDate(config2, dateString);
+  const bySource = {};
+  for (const entry of entries) bySource[entry.source] = (bySource[entry.source] || 0) + 1;
+  const dailyReport = (await listReports(config2)).some((report) => report.name === "daily-" + dateString + ".md");
+  return {
+    date: dateString,
+    archived: day.exists,
+    path: day.path,
+    sessions: sessions.map((session) => ({
+      title: session.title,
+      label: session.label,
+      turns: session.turns,
+      timeRange: session.timeRange
+    })),
+    todosDone,
+    entries: {
+      count: entries.length,
+      bySource,
+      items: entries.slice(-20).reverse().map((entry) => ({
+        time: entry.time,
+        title: entry.title,
+        project: entry.project,
+        source: entry.source,
+        ref: entry.ref
+      }))
+    },
+    hasDailyReport: Boolean(dailyReport)
+  };
+}
+
 // src/api.mjs
 init_watch();
 
 // lib/wizard.mjs
 import { statSync } from "node:fs";
 import { readdir as readdir5 } from "node:fs/promises";
-import { join as join7 } from "node:path";
+import { join as join8 } from "node:path";
 var TYPE_MATCHERS = {
   zcode: (id) => id.startsWith("zcode:"),
   dsh: (id) => id.startsWith("dsh:"),
@@ -37490,7 +37773,7 @@ async function countFiles(root, depth = 0, cap = 2e3) {
     return 0;
   }
   for (const entry of entries) {
-    const full = join7(root, entry.name);
+    const full = join8(root, entry.name);
     if (entry.isDirectory()) {
       if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
       count += await countFiles(full, depth + 1, cap - count);
@@ -37745,6 +38028,14 @@ async function collectAction(config2, args = {}) {
   if (action === "set") return updateTask(config2, args);
   throw new Error(`\u672A\u77E5 action: ${action}`);
 }
+async function calendarAction(config2, args = {}) {
+  const action = args.action || "month";
+  if (action === "month") return calendarMonth(config2, args.month);
+  if (action === "day") {
+    return calendarDay(config2, assertDate(args.date || localDate()));
+  }
+  throw new Error(`\u672A\u77E5 action: ${action}`);
+}
 async function wizardAction(args = {}) {
   const action = args.action || "types";
   if (action === "types") return { types: WIZARD_TYPES };
@@ -37938,6 +38229,8 @@ async function dispatch(op, args = {}) {
       return collectAction(config2, args);
     case "wizard":
       return wizardAction(args);
+    case "calendar":
+      return calendarAction(config2, args);
     case "days":
       return listDays(config2);
     case "reports":
@@ -37948,7 +38241,7 @@ async function dispatch(op, args = {}) {
 }
 
 // src/server.mjs
-var HERE = dirname4(fileURLToPath(import.meta.url));
+var HERE = dirname6(fileURLToPath(import.meta.url));
 var PANEL_URI = `ui://${PLUGIN_NAME}/panel.html`;
 var SCRIPT_URI = `ui://${PLUGIN_NAME}/panel.js`;
 var STYLE_URI = `ui://${PLUGIN_NAME}/panel.css`;
@@ -38177,6 +38470,19 @@ tool(
   (args) => wizardAction(args)
 );
 tool(
+  "worklog_calendar",
+  {
+    title: "\u65E5\u5386\u805A\u5408",
+    description: 'WorkLog \u65E5\u5386\u89C6\u56FE\u6570\u636E\uFF1Aaction=month {month?:"YYYY-MM"} \u8FD4\u56DE\u5F53\u6708\u6BCF\u5929\u7684\u6D3B\u52A8\u805A\u5408\uFF08\u662F\u5426\u5F52\u6863/\u6761\u76EE\u6570\u6309\u6765\u6E90/\u5F85\u529E\u5B8C\u6210\u6570/\u4F1A\u8BDD\u6570/\u63D0\u4EA4\u6570/\u662F\u5426\u6709\u65E5\u62A5\uFF09\uFF1Baction=day {date} \u8FD4\u56DE\u67D0\u5929\u7684\u8BE6\u60C5\uFF08AI \u4F1A\u8BDD\u5217\u8868\u3001\u5B8C\u6210\u7684\u5F85\u529E\u3001\u91C7\u96C6\u6761\u76EE\u3001\u662F\u5426\u6709\u65E5\u62A5\uFF09\u3002\u4EA4\u4E92\u67E5\u770B\u91C7\u96C6\u4E0E\u603B\u7ED3\u65F6\u4F7F\u7528\u3002',
+    inputSchema: external_exports.object({
+      action: external_exports.enum(["month", "day"]).optional(),
+      month: external_exports.string().optional(),
+      date: external_exports.string().optional()
+    })
+  },
+  (args) => calendarAction(loadConfig(), args)
+);
+tool(
   "worklog_config",
   {
     title: "WorkLog \u914D\u7F6E",
@@ -38222,7 +38528,8 @@ server.registerTool(
         "config",
         "ai",
         "collect",
-        "wizard"
+        "wizard",
+        "calendar"
       ]),
       args: external_exports.record(external_exports.string(), external_exports.unknown()).optional()
     }),
@@ -38237,7 +38544,7 @@ server.registerTool(
   }
 );
 async function asset(name) {
-  return readFile4(join8(HERE, name), "utf8");
+  return readFile5(join9(HERE, name), "utf8");
 }
 var panelHtmlPromise;
 function panelDocument() {

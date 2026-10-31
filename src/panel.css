@@ -618,3 +618,87 @@ body {
   color: var(--wl-faint);
   text-decoration: line-through;
 }
+
+.wl-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.wl-cal-head {
+  font-size: 10px;
+  color: var(--wl-faint);
+  text-align: center;
+}
+
+.wl-cal-cell {
+  border: 1px solid var(--wl-border-soft);
+  border-radius: 6px;
+  background: transparent;
+  min-height: 44px;
+  padding: 3px 4px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  font: inherit;
+  color: var(--wl-text);
+}
+
+.wl-cal-cell.empty {
+  border: none;
+  cursor: default;
+}
+
+.wl-cal-cell.sel {
+  border-color: var(--wl-accent);
+  background: var(--wl-accent-soft);
+}
+
+.wl-cal-cell.today .wl-cal-num {
+  color: var(--wl-accent-text);
+  font-weight: 700;
+}
+
+.wl-cal-num {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.wl-cal-marks {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.wl-cal-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.wl-cal-dot.ok {
+  background: var(--wl-accent);
+}
+
+.wl-cal-dot.rep {
+  background: var(--wl-ok);
+}
+
+.wl-cal-badge {
+  font-size: 9px;
+  padding: 0 4px;
+  border-radius: 999px;
+  border: 1px solid var(--wl-border);
+  color: var(--wl-muted);
+  line-height: 1.5;
+}
+
+.wl-cal-badge.todo {
+  color: var(--wl-ok);
+  border-color: var(--wl-ok-soft);
+}

@@ -1,6 +1,6 @@
 {
   "name": "zcode-worklog",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Local work journal for ZCode: archive daily Git commits, document changes and local AI tool sessions, edit daily logs, manage todos, generate daily/weekly/monthly/quarterly reports, search the archive, and open a WorkLog side panel. Data stays on this machine.",
   "description_i18n": {
     "en": "Local work journal for ZCode: archive daily Git commits, document changes and local AI tool sessions, edit daily logs, manage todos, generate daily/weekly/monthly/quarterly reports, search the archive, and open a WorkLog side panel. Data stays on this machine.",

@@ -886,6 +886,124 @@ var init_sessions = __esm({
   }
 });
 
+// lib/entries.mjs
+var entries_exports = {};
+__export(entries_exports, {
+  appendEntries: () => appendEntries,
+  entriesBucketByDate: () => entriesBucketByDate,
+  entriesDaySection: () => entriesDaySection,
+  entriesForDate: () => entriesForDate,
+  entriesRange: () => entriesRange,
+  loadEntries: () => loadEntries,
+  makeFingerprint: () => makeFingerprint
+});
+import { createHash } from "node:crypto";
+import { mkdir as mkdir3, readFile as readFile3, writeFile as writeFile3 } from "node:fs/promises";
+import { basename as basename2, dirname as dirname3, join as join4 } from "node:path";
+function entriesFile(config) {
+  return join4(config.dataDir, "entries.json");
+}
+function makeFingerprint(source, nativeId) {
+  return createHash("sha1").update(String(source) + "|" + String(nativeId)).digest("hex").slice(0, 16);
+}
+function normalizeEntry(input = {}) {
+  const title = String(input.title || "").trim();
+  if (!title) return null;
+  const source = SOURCES.includes(input.source) ? input.source : "manual";
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(input.date || "")) ? input.date : localDate();
+  const time = /^\d{1,2}:\d{2}$/.test(String(input.time || "")) ? input.time : "";
+  const fp = String(input.fp || "") || makeFingerprint(source, nativeKey(input) || title + "|" + date + "|" + time);
+  return {
+    id: String(input.id || "").trim() || fp,
+    fp,
+    source,
+    type: String(input.type || source),
+    date,
+    time,
+    title: title.slice(0, MAX_TITLE),
+    detail: String(input.detail || "").slice(0, MAX_DETAIL),
+    project: String(input.project || "").slice(0, 80),
+    tags: Array.isArray(input.tags) ? input.tags.map((tag) => String(tag).slice(0, 40)).filter(Boolean).slice(0, 6) : [],
+    ref: String(input.ref || "").slice(0, 300)
+  };
+}
+function nativeKey(input) {
+  return String(input.nativeId || input.ref || "");
+}
+async function loadEntries(config) {
+  let parsed = [];
+  try {
+    const raw = JSON.parse(await readFile3(entriesFile(config), "utf8"));
+    if (Array.isArray(raw)) parsed = raw;
+  } catch {
+    parsed = [];
+  }
+  return parsed.map(normalizeEntry).filter(Boolean);
+}
+async function appendEntries(config, list = []) {
+  const entries = await loadEntries(config);
+  const seen = new Set(entries.map((entry) => entry.fp));
+  let added = 0;
+  for (const item of Array.isArray(list) ? list : []) {
+    const entry = normalizeEntry(item);
+    if (!entry) continue;
+    if (seen.has(entry.fp)) continue;
+    seen.add(entry.fp);
+    entries.push(entry);
+    added += 1;
+  }
+  let trimmed = 0;
+  if (entries.length > MAX_ENTRIES) {
+    trimmed = entries.length - MAX_ENTRIES;
+    entries.splice(0, trimmed);
+  }
+  if (added || trimmed) {
+    await mkdir3(dirname3(entriesFile(config)), { recursive: true });
+    await writeFile3(entriesFile(config), JSON.stringify(entries, null, 2) + "\n", "utf8");
+  }
+  return { added, trimmed };
+}
+async function entriesForDate(config, dateString) {
+  return (await loadEntries(config)).filter((entry) => entry.date === dateString);
+}
+async function entriesRange(config, start, end) {
+  return (await loadEntries(config)).filter((entry) => entry.date >= start && entry.date <= end);
+}
+async function entriesBucketByDate(config, monthPrefix = "") {
+  const buckets = {};
+  for (const entry of await loadEntries(config)) {
+    if (monthPrefix && !entry.date.startsWith(monthPrefix)) continue;
+    const bucket = buckets[entry.date] || (buckets[entry.date] = { count: 0, bySource: {} });
+    bucket.count += 1;
+    bucket.bySource[entry.source] = (bucket.bySource[entry.source] || 0) + 1;
+  }
+  return buckets;
+}
+async function entriesDaySection(config, dateString) {
+  const entries = await entriesForDate(config, dateString);
+  if (!entries.length) return [];
+  const bySource = {};
+  for (const entry of entries) bySource[entry.source] = (bySource[entry.source] || 0) + 1;
+  const lines = ["- \u91C7\u96C6\u6761\u76EE " + entries.length + " \u6761\uFF1A" + Object.entries(bySource).map(([source, count]) => source + " " + count).join("\u3001")];
+  const sample = entries.slice(0, 8).map((entry) => {
+    const prefix = entry.project ? "[" + entry.project + "] " : "";
+    return prefix + entry.title;
+  });
+  if (entries.length > 8) sample.push("\u7B49 " + entries.length + " \u6761");
+  lines.push("- " + sample.join("\u3001"));
+  return lines;
+}
+var MAX_DETAIL, MAX_TITLE, MAX_ENTRIES, SOURCES;
+var init_entries = __esm({
+  "lib/entries.mjs"() {
+    init_config();
+    MAX_DETAIL = 400;
+    MAX_TITLE = 160;
+    MAX_ENTRIES = 2e4;
+    SOURCES = ["git", "docs", "sessions", "watch", "feishu", "zentao", "hermes", "manual"];
+  }
+});
+
 // lib/watch.mjs
 var watch_exports = {};
 __export(watch_exports, {
@@ -894,21 +1012,21 @@ __export(watch_exports, {
   scanWatchDirs: () => scanWatchDirs
 });
 import { existsSync as existsSync3 } from "node:fs";
-import { readdir as readdir3, readFile as readFile3, stat as stat3, writeFile as writeFile3 } from "node:fs/promises";
-import { join as join4 } from "node:path";
+import { readdir as readdir3, readFile as readFile4, stat as stat3, writeFile as writeFile4 } from "node:fs/promises";
+import { basename as basename3, dirname as dirname4, join as join5 } from "node:path";
 function watchCacheFile(config) {
-  return join4(config.dataDir, "watch-cache.json");
+  return join5(config.dataDir, "watch-cache.json");
 }
 async function loadWatchCache(config) {
   try {
-    const parsed = JSON.parse(await readFile3(watchCacheFile(config), "utf8"));
+    const parsed = JSON.parse(await readFile4(watchCacheFile(config), "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
   }
 }
 async function saveWatchCache(config, cache) {
-  await writeFile3(watchCacheFile(config), JSON.stringify(cache, null, 2) + "\n", "utf8");
+  await writeFile4(watchCacheFile(config), JSON.stringify(cache, null, 2) + "\n", "utf8");
 }
 function normalizeWatchDirs2(input) {
   const list = Array.isArray(input) ? input : [];
@@ -932,7 +1050,7 @@ async function walk(dir, depth, visit) {
     return;
   }
   for (const entry of entries) {
-    const full = join4(dir, entry.name);
+    const full = join5(dir, entry.name);
     if (entry.isDirectory()) {
       if (SKIP_DIRS.has(entry.name)) continue;
       await walk(full, depth + 1, visit);
@@ -947,6 +1065,7 @@ async function scanWatchDirs(config) {
   const cache = await loadWatchCache(config);
   const nextCache = {};
   const results = [];
+  const changedFiles = [];
   for (const dir of dirs) {
     const fingerprints = {};
     let total = 0;
@@ -961,7 +1080,10 @@ async function scanWatchDirs(config) {
         const fp = info.mtimeMs + ":" + info.size;
         fingerprints[file] = fp;
         const previous = cache[dir.path]?.[file];
-        if (previous !== fp) changed += 1;
+        if (previous !== fp) {
+          changed += 1;
+          if (cache[dir.path]) changedFiles.push({ file, kind: dir.kind, label: dir.label, fp });
+        }
       } catch {
       }
     };
@@ -976,12 +1098,31 @@ async function scanWatchDirs(config) {
     nextCache[dir.path] = fingerprints;
     results.push({ path: dir.path, kind: dir.kind, label: dir.label, total, changed, truncated, error });
   }
+  if (changedFiles.length) {
+    const now = /* @__PURE__ */ new Date();
+    await appendEntries(
+      config,
+      changedFiles.slice(0, 200).map((item) => ({
+        source: "watch",
+        type: "watch",
+        date: localDate(now),
+        time: localTime(now),
+        title: "\u6587\u4EF6\u53D8\u5316 " + basename3(item.file),
+        project: basename3(dirname4(item.file)),
+        tags: [item.kind],
+        ref: item.file,
+        nativeId: item.file + "|" + (item.fp || "")
+      }))
+    );
+  }
   await saveWatchCache(config, nextCache);
   return { results, scannedAt: (/* @__PURE__ */ new Date()).toISOString() };
 }
 var SKIP_DIRS, MAX_FILES_PER_DIR, MAX_DEPTH;
 var init_watch = __esm({
   "lib/watch.mjs"() {
+    init_config();
+    init_entries();
     SKIP_DIRS = /* @__PURE__ */ new Set([
       ".git",
       "node_modules",
@@ -1242,8 +1383,25 @@ function isTaskDue(task, now = /* @__PURE__ */ new Date()) {
 async function runTask(config, task) {
   if (task.kind === "collect-sessions") {
     const { scanSessions: scanSessions2 } = await Promise.resolve().then(() => (init_sessions(), sessions_exports));
+    const { appendEntries: appendEntries2 } = await Promise.resolve().then(() => (init_entries(), entries_exports));
+    const { basename: basename5 } = await import("node:path");
     const result = await scanSessions2(config, localDate());
-    return { sessions: result?.sessions?.length || 0 };
+    const sessions = result?.sessions || [];
+    await appendEntries2(
+      config,
+      sessions.map((session) => ({
+        source: "sessions",
+        type: "session",
+        date: localDate(),
+        time: String(session.timeRange || "").split("\u2013")[0].trim(),
+        title: session.title,
+        project: session.cwd ? basename5(session.cwd) : "",
+        tags: session.label ? [session.label] : [],
+        ref: session.file,
+        nativeId: (session.file || session.title) + "|" + (session.first || "")
+      }))
+    );
+    return { sessions: sessions.length };
   }
   if (task.kind === "collect-watch") {
     const { scanWatchDirs: scanWatchDirs2 } = await Promise.resolve().then(() => (init_watch(), watch_exports));
@@ -1304,9 +1462,10 @@ init_config();
 init_sessions();
 import { execFile } from "node:child_process";
 import { existsSync as existsSync4 } from "node:fs";
-import { mkdir as mkdir3, readdir as readdir4, stat as stat4, writeFile as writeFile4 } from "node:fs/promises";
-import { basename as basename2, dirname as dirname3, extname, join as join5, relative as relative2, resolve as resolve2 } from "node:path";
+import { mkdir as mkdir4, readdir as readdir4, stat as stat4, writeFile as writeFile5 } from "node:fs/promises";
+import { basename as basename4, dirname as dirname5, extname, join as join6, relative as relative2, resolve as resolve2 } from "node:path";
 import { promisify } from "node:util";
+init_entries();
 var execFileAsync = promisify(execFile);
 var SKIP_DIRS2 = /* @__PURE__ */ new Set([
   ".git",
@@ -1358,7 +1517,7 @@ async function walk2(root, maxDepth, visitDir, visitFile) {
     }
     await visitDir?.(dir, depth);
     for (const entry of entries) {
-      const full = join5(dir, entry.name);
+      const full = join6(dir, entry.name);
       if (entry.isDirectory()) {
         if (depth < maxDepth && !isSkippedDir(entry.name)) queue.push({ dir: full, depth: depth + 1 });
       } else if (entry.isFile()) {
@@ -1381,7 +1540,7 @@ async function findGitRepos(roots = []) {
   const repos = [];
   for (const root of roots) {
     await walk2(root, 3, async (dir) => {
-      if (existsSync4(join5(dir, ".git"))) repos.push(dir);
+      if (existsSync4(join6(dir, ".git"))) repos.push(dir);
     });
   }
   return [...new Set(repos)];
@@ -1408,7 +1567,7 @@ async function scanGit(roots, dateString, author = "") {
       });
       if (commits.length) {
         out.push({
-          name: basename2(repo),
+          name: basename4(repo),
           path: repo,
           author: currentAuthor,
           commits
@@ -1489,7 +1648,7 @@ async function todoDaySection(config, dateString, carried = null) {
   }
   return lines;
 }
-function buildDayMarkdown(dateString, gitResult, docResult, note = "", sessionResult = null, todoSection = []) {
+function buildDayMarkdown(dateString, gitResult, docResult, note = "", sessionResult = null, todoSection = [], entriesSection = []) {
   const repos = gitResult.repos || [];
   const docs = docResult.files || [];
   const sessions = sessionResult?.sessions || [];
@@ -1522,7 +1681,7 @@ function buildDayMarkdown(dateString, gitResult, docResult, note = "", sessionRe
   if (docs.length) {
     lines.push("## \u6587\u6863\u53D8\u66F4", "");
     for (const doc of docs) {
-      lines.push(`- \`${doc.relative || basename2(doc.path)}\` \xB7 ${doc.time} \xB7 ${sizeText(doc.size)}`);
+      lines.push(`- \`${doc.relative || basename4(doc.path)}\` \xB7 ${doc.time} \xB7 ${sizeText(doc.size)}`);
     }
     lines.push("");
   } else {
@@ -1530,6 +1689,7 @@ function buildDayMarkdown(dateString, gitResult, docResult, note = "", sessionRe
   }
   if (sessionResult) lines.push(...sessionMarkdownSection(sessionResult));
   if (todoSection?.length) lines.push("## \u5F85\u529E", "", ...todoSection, "");
+  if (entriesSection?.length) lines.push("## \u91C7\u96C6\u6761\u76EE", "", ...entriesSection, "");
   lines.push("## \u5907\u6CE8", "", note.trim() || "\uFF08\u53EF\u5728\u6B64\u8865\u5145\u4ECA\u5929\u7684\u5DE5\u4F5C\u8BF4\u660E\uFF09", "");
   return lines.join("\n");
 }
@@ -1550,9 +1710,51 @@ async function archiveDay(config, dateString, { force = false, note = "" } = {})
     }))
   ]);
   const todoSection = await todoDaySection(config, dateString, carryResult);
-  const text = buildDayMarkdown(dateString, gitResult, docResult, note, sessionResult, todoSection);
-  await mkdir3(dirname3(target), { recursive: true });
-  await writeFile4(target, text, "utf8");
+  const entriesInput = [];
+  for (const repo of gitResult.repos) {
+    for (const commit of repo.commits) {
+      entriesInput.push({
+        source: "git",
+        type: "commit",
+        date: dateString,
+        title: commit.subject,
+        project: repo.name,
+        tags: commit.author ? [commit.author] : [],
+        ref: commit.hash,
+        nativeId: repo.path + ":" + commit.hash
+      });
+    }
+  }
+  for (const doc of docResult.files) {
+    entriesInput.push({
+      source: "docs",
+      type: "doc",
+      date: dateString,
+      time: String(doc.time || "").slice(0, 5),
+      title: doc.relative || basename4(doc.path),
+      project: basename4(dirname5(doc.path)),
+      ref: doc.path,
+      nativeId: doc.path + "|" + (doc.time || "")
+    });
+  }
+  for (const session of sessionResult?.sessions || []) {
+    entriesInput.push({
+      source: "sessions",
+      type: "session",
+      date: dateString,
+      time: String(session.timeRange || "").split("\u2013")[0].trim(),
+      title: session.title,
+      project: session.cwd ? basename4(session.cwd) : "",
+      tags: session.label ? [session.label] : [],
+      ref: session.file,
+      nativeId: (session.file || session.title) + "|" + (session.first || "")
+    });
+  }
+  await appendEntries(config, entriesInput);
+  const entriesSection = await entriesDaySection(config, dateString);
+  const text = buildDayMarkdown(dateString, gitResult, docResult, note, sessionResult, todoSection, entriesSection);
+  await mkdir4(dirname5(target), { recursive: true });
+  await writeFile5(target, text, "utf8");
   return {
     date: dateString,
     path: target,
@@ -1580,6 +1782,13 @@ init_sessions();
 
 // src/api.mjs
 init_sessions();
+
+// lib/calendar.mjs
+init_entries();
+init_config();
+init_sessions();
+
+// src/api.mjs
 init_watch();
 async function maybeAutoArchive(config = loadConfig()) {
   if (!config.autoArchive) return null;

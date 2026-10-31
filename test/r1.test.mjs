@@ -49,6 +49,7 @@ describe('r1 scheduler', () => {
     const first = await scheduler.runDueTasks(config)
     assert.ok(first.ran.some((item) => item.id === 'collect-watch' && item.status === 'ok'))
     assert.ok(first.ran.find((item) => item.id === 'collect-watch').changed !== undefined)
+    assert.ok(first.ran.find((item) => item.id === 'collect-sessions'), 'sessions task ran and produced entries')
 
     // immediately after a run it is no longer due
     const second = await scheduler.runDueTasks(config)

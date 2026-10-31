@@ -16,6 +16,7 @@ import { composePanelHtml } from '../lib/panel.mjs'
 import {
   archiveAction,
   backupAction,
+  calendarAction,
   collectAction,
   configAction,
   wizardAction,
@@ -291,6 +292,21 @@ tool(
 )
 
 tool(
+  'worklog_calendar',
+  {
+    title: '日历聚合',
+    description:
+      'WorkLog 日历视图数据：action=month {month?:"YYYY-MM"} 返回当月每天的活动聚合（是否归档/条目数按来源/待办完成数/会话数/提交数/是否有日报）；action=day {date} 返回某天的详情（AI 会话列表、完成的待办、采集条目、是否有日报）。交互查看采集与总结时使用。',
+    inputSchema: z.object({
+      action: z.enum(['month', 'day']).optional(),
+      month: z.string().optional(),
+      date: z.string().optional(),
+    }),
+  },
+  (args) => calendarAction(loadConfig(), args),
+)
+
+tool(
   'worklog_config',
   {
     title: 'WorkLog 配置',
@@ -342,6 +358,7 @@ server.registerTool(
         'ai',
         'collect',
         'wizard',
+        'calendar',
       ]),
       args: z.record(z.string(), z.unknown()).optional(),
     }),

@@ -32,6 +32,7 @@ function markMounted() {
 
 const TABS = [
   ['overview', '概览'],
+  ['calendar', '日历'],
   ['logs', '日志'],
   ['todos', '待办'],
   ['reports', '汇报'],
@@ -81,6 +82,11 @@ const state = {
   aiDraft: null,
   schedData: null,
   schedLoading: false,
+  calMonth: '',
+  calData: null,
+  calSelected: '',
+  calDay: null,
+  calDayLoading: false,
   wizardTypes: null,
   wizardDraft: { type: 'claude', location: '' },
   wizardProbe: null,
@@ -2486,6 +2492,202 @@ function wizardSection() {
   )
 }
 
+function calKey(d) {
+  const now = new Date()
+  const y = d ? Number(String(d).slice(0, 4)) : now.getFullYear()
+  const m = d ? Number(String(d).slice(5, 7)) : now.getMonth() + 1
+  return y + '-' + String(m).padStart(2, '0')
+}
+
+async function loadCalMonth(month) {
+  state.calMonth = month || state.calMonth || calKey()
+  state.calData = null
+  render()
+  try {
+    state.calData = await call('calendar', { action: 'month', month: state.calMonth })
+  } catch (error) {
+    setNotice('err', '日历加载失败：' + String(error?.message || error))
+  }
+  render()
+}
+
+async function selectCalDay(date) {
+  state.calSelected = date
+  state.calDayLoading = true
+  render()
+  try {
+    state.calDay = await call('calendar', { action: 'day', date })
+  } catch (error) {
+    setNotice('err', '当日详情加载失败：' + String(error?.message || error))
+  } finally {
+    state.calDayLoading = false
+  }
+  render()
+}
+
+function calCell(day, today) {
+  const marks = []
+  if (day.archived) marks.push(h('span', { className: 'wl-cal-dot ok' }, ''))
+  if (day.hasDailyReport) marks.push(h('span', { className: 'wl-cal-dot rep' }, ''))
+  if (day.entryCount) marks.push(h('span', { className: 'wl-cal-badge' }, String(day.entryCount)))
+  if (day.todoDone) marks.push(h('span', { className: 'wl-cal-badge todo' }, '✓' + day.todoDone))
+  return h(
+    'button',
+    {
+      className:
+        'wl-cal-cell' +
+        (state.calSelected === day.date ? ' sel' : '') +
+        (day.date === today ? ' today' : ''),
+      onClick: () => selectCalDay(day.date),
+    },
+    h('div', { className: 'wl-cal-num' }, String(Number(day.date.slice(8, 10)))),
+    h('div', { className: 'wl-cal-marks' }, marks),
+  )
+}
+
+function calGrid() {
+  const data = state.calData
+  if (!data) return h('div', { className: 'wl-hint' }, '加载中…')
+  const days = data.days || {}
+  const first = data.month + '-01'
+  const lead = (new Date(first).getDay() + 6) % 7
+  const cells = []
+  for (let i = 0; i < lead; i++) cells.push(h('span', { className: 'wl-cal-cell empty' }, ''))
+  const now = data.today
+  for (const date of Object.keys(days)) cells.push(calCell(days[date], now))
+  return h(
+    'div',
+    { className: 'wl-cal-grid' },
+    ['一', '二', '三', '四', '五', '六', '日'].map((label) => h('div', { className: 'wl-cal-head' }, label)),
+    cells,
+  )
+}
+
+function calDayDetail() {
+  const detail = state.calDay
+  if (state.calDayLoading) return h('div', { className: 'wl-hint' }, '加载中…')
+  if (!detail) return h('div', { className: 'wl-hint' }, '点日期查看当天详情。')
+  return h(
+    'div',
+    { className: 'wl-section' },
+    h(
+      'div',
+      { className: 'wl-row' },
+      h('div', { className: 'wl-section-title' }, detail.date + (detail.archived ? '' : '（未归档）')),
+      h(
+        'button',
+        {
+          className: 'wl-btn tiny',
+          onClick: () => {
+            state.tab = 'logs'
+            state.log.date = detail.date
+            state.log.loaded = false
+            render()
+          },
+        },
+        '打开日志',
+      ),
+    ),
+    detail.sessions.length
+      ? [
+          h('div', { className: 'wl-section-title' }, 'AI 会话 ' + detail.sessions.length + ' 场'),
+          detail.sessions.map((session) =>
+            h(
+              'div',
+              { className: 'wl-row', key: session.title + session.timeRange },
+              h('span', { className: 'wl-tag' }, session.label),
+              h('span', { className: 'grow wl-hint' }, session.title),
+              h('span', { className: 'wl-hint' }, (session.turns || 0) + ' 轮 ' + (session.timeRange || '')),
+            ),
+          ),
+        ]
+      : null,
+    detail.todosDone.length
+      ? [
+          h('div', { className: 'wl-section-title' }, '完成待办 ' + detail.todosDone.length + ' 条'),
+          detail.todosDone.map((todo) =>
+            h('div', { className: 'wl-row', key: todo.title }, '✓ ' + todo.title),
+          ),
+        ]
+      : null,
+    detail.entries.count
+      ? [
+          h('div', { className: 'wl-section-title' }, '采集条目 ' + detail.entries.count + ' 条'),
+          Object.entries(detail.entries.bySource)
+            .map(([source, count]) => h('span', { className: 'wl-tag', key: source }, source + ' ' + count)),
+          detail.entries.items.map((entry) =>
+            h(
+              'div',
+              { className: 'wl-row', key: entry.ref + entry.title },
+              h('span', { className: 'wl-hint' }, entry.time || ''),
+              h('span', { className: 'grow wl-hint', style: { wordBreak: 'break-all' } }, entry.title),
+            ),
+          ),
+        ]
+      : null,
+  )
+}
+
+function calendarTab() {
+  if (!state.calMonth) state.calMonth = calKey()
+  if (!state.calData && !state.calDataLoading) {
+    state.calDataLoading = true
+    call('calendar', { action: 'month', month: state.calMonth })
+      .then((data) => {
+        state.calData = data
+      })
+      .catch((error) => setNotice('err', '日历加载失败：' + String(error?.message || error)))
+      .finally(() => {
+        state.calDataLoading = false
+        render()
+      })
+  }
+  const data = state.calData
+  const today = data?.today || today()
+  return h(
+    'div',
+    null,
+    noticeNode(),
+    h(
+      'div',
+      { className: 'wl-card wide' },
+      h(
+        'div',
+        { className: 'wl-row' },
+        h(
+          'button',
+          {
+            className: 'wl-btn tiny',
+            disabled: state.calDataLoading,
+            onClick: () => loadCalMonth(calKey(String(Number(state.calMonth.slice(0, 4))) - 1 + state.calMonth.slice(4))),
+          },
+          '◀',
+        ),
+        h('div', { className: 'wl-section-title' }, state.calMonth),
+        h(
+          'button',
+          {
+            className: 'wl-btn tiny',
+            disabled: state.calDataLoading,
+            onClick: () => {
+              const y = Number(state.calMonth.slice(0, 4))
+              loadCalMonth(calKey(y + 1 + state.calMonth.slice(4)))
+            },
+          },
+          '▶',
+        ),
+        h(
+          'button',
+          { className: 'wl-btn tiny', onClick: () => loadCalMonth(calKey()) },
+          '今天',
+        ),
+      ),
+      calGrid(),
+    ),
+    h('div', { className: 'wl-card wide' }, calDayDetail()),
+  )
+}
+
 function render() {
   const root = document.getElementById('app')
   if (!root) return
@@ -2512,6 +2714,8 @@ function render() {
       { className: 'wl-body' },
       state.tab === 'overview'
         ? overviewTab()
+        : state.tab === 'calendar'
+          ? calendarTab()
         : state.tab === 'logs'
           ? logsTab()
           : state.tab === 'todos'

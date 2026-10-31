@@ -100,6 +100,10 @@ function respond(window, message) {
     let structured
     if (op === 'bootstrap') structured = bootstrap
     else if (op === 'day') structured = { date: args.date, exists: true, text: '# 测试日志\n' }
+    else if (op === 'calendar' && args.action === 'month')
+      structured = { month: '2026-10', today: '2026-10-31', days: { '2026-10-31': { date: '2026-10-31', archived: true, hasDailyReport: false, entryCount: 3, bySource: { git: 2, sessions: 1 }, todoDone: 1, sessionCount: 1, commitCount: 2 } } }
+    else if (op === 'calendar' && args.action === 'day')
+      structured = { date: args.date, archived: true, path: 'x', sessions: [{ title: '日历模拟会话', label: 'Claude', turns: 2, timeRange: '10:00' }], todosDone: [{ title: '测试待办', doneAt: '' }], entries: { count: 3, bySource: { git: 2, sessions: 1 }, items: [{ time: '10:00', title: 'feat: x', project: 'demo', source: 'git', ref: 'a1' }] }, hasDailyReport: false }
     else if (op === 'todos' && args.action === 'list') structured = { items: bootstrap.todos }
     else if (op === 'ai' && args.action === 'detect')
       structured = {
@@ -212,6 +216,17 @@ console.log('logs OK')
 await clickTab('待办')
 assert.ok(text().includes('测试待办'), 'todos tab lists todo')
 console.log('todos OK')
+
+await clickTab('日历')
+await new Promise((resolve) => setTimeout(resolve, 50))
+assert.ok(doc.querySelector('.wl-cal-grid'), 'calendar grid renders')
+const firstCell = doc.querySelector('.wl-cal-cell:not(.empty)')
+assert.ok(firstCell, 'calendar has day cells')
+firstCell.click()
+await new Promise((resolve) => setTimeout(resolve, 50))
+assert.ok(text().includes('采集条目 3 条'), 'day detail shows entries')
+assert.ok(text().includes('日历模拟会话'), 'day detail shows sessions')
+console.log('calendar OK')
 
 await clickTab('汇报')
 assert.ok(text().includes('周报'), 'reports tab renders')

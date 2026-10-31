@@ -45,8 +45,8 @@ Ray：单人使用，本机多 AI 工具（ZCode/DSH/Claude Code/Codex/Gemini…
 - **REQ-C5（P0，R1 已实现）采集调度器**：任务模型 {id, kind, enabled, intervalHours 或 dailyAt, lastRunAt}；执行载体=SessionStart hook 补偿式（会话启动时把到期任务跑掉）+ 面板手动；运行历史可查；单任务失败不影响其他任务。
 
 ### B 组织 Organize
-- **REQ-O1（P0）统一条目模型**：entry = {id, source, type, time, title, detail, project?, tags[], ref}；append-only + 指纹（source+nativeId）去重；现有 git/docs/sessions 归档同时产出条目；条目是日历/图谱/推荐的统一数据底座。
-- **REQ-O2（P0）日历视图**：面板新增「日历」页签：月视图（默认当月），每格显示当天活动密度（采集条目数/待办完成/是否有归档/报告）；点日期 → 当日详情（归档摘要、AI 会话列表、待办完成、外部条目、当天报告/总结）；可切换查看总结文本。
+- **REQ-O1（P0，R2 已实现）统一条目模型**：entry = {id, source, type, time, title, detail, project?, tags[], ref}；append-only + 指纹（source+nativeId）去重；现有 git/docs/sessions 归档同时产出条目；条目是日历/图谱/推荐的统一数据底座。
+- **REQ-O2（P0，R2 已实现）日历视图**：面板新增「日历」页签：月视图（默认当月），每格显示当天活动密度（采集条目数/待办完成/是否有归档/报告）；点日期 → 当日详情（归档摘要、AI 会话列表、待办完成、外部条目、当天报告/总结）；可切换查看总结文本。
 - **REQ-O3（P1）知识图谱**：实体（项目/人/AI 工具/主题标签/外部系统对象）与关系（提交了/参与了/提及/依赖）；规则抽取为主（git author、项目名、标签、会话归属），AI 抽取可选增强；数据存 data/graph.json；面板「图谱」页签可浏览实体详情与关系列表（v1 列表式 + 简单可视化，不追求力导向大图）；提供 worklog_graph 查询工具。
 
 ### C 提炼 Distill
@@ -94,4 +94,5 @@ Ray：单人使用，本机多 AI 工具（ZCode/DSH/Claude Code/Codex/Gemini…
 ## 8. 变更记录
 
 - v0.1（2026-10-31）：首版。九条基线映射完成，现状差距明确，路线图 R1-R6。
+- v0.3（2026-10-31）：R2 发布（0.5.0）。O1/O2 已实现：lib/entries.mjs（append-only+指纹去重+上限裁剪）、采集接线（归档 git/docs/sessions、watch 变化、调度会话扫描）、日报新增「## 采集条目」小节、lib/calendar.mjs 月/日聚合、面板「日历」页签（月视图+日详情）、worklog_calendar 工具（16 个工具）。设计复审调整：调度会话任务也直接产条目（不再等归档）。
 - v0.2（2026-10-31）：R1 发布（0.4.0）。C1/C2/C3(指纹)/C5 标记已实现；基线映射表"现状"列待 R2 统一条目后一并刷新。

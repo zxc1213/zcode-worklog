@@ -45,6 +45,7 @@ import { askArchive, aiComplete, generateReport, listAiModels, summarizeAiUsage 
 import { detectAiCandidates, findAiCandidate, publicCandidate } from '../lib/ai-detect.mjs'
 import { listSessionSources, parseSessionLines, scanSessions } from '../lib/sessions.mjs'
 import { getHistory, getTasks, runDueTasks, updateTask } from '../lib/scheduler.mjs'
+import { calendarDay, calendarMonth } from '../lib/calendar.mjs'
 import { scanWatchDirs } from '../lib/watch.mjs'
 import { probeAiTool, WIZARD_TYPES } from '../lib/wizard.mjs'
 
@@ -276,6 +277,15 @@ export async function collectAction(config, args = {}) {
   throw new Error(`未知 action: ${action}`)
 }
 
+export async function calendarAction(config, args = {}) {
+  const action = args.action || 'month'
+  if (action === 'month') return calendarMonth(config, args.month)
+  if (action === 'day') {
+    return calendarDay(config, assertDate(args.date || localDate()))
+  }
+  throw new Error(`未知 action: ${action}`)
+}
+
 export async function wizardAction(args = {}) {
   const action = args.action || 'types'
   if (action === 'types') return { types: WIZARD_TYPES }
@@ -491,6 +501,8 @@ export async function dispatch(op, args = {}) {
       return collectAction(config, args)
     case 'wizard':
       return wizardAction(args)
+    case 'calendar':
+      return calendarAction(config, args)
     case 'days':
       return listDays(config)
     case 'reports':
