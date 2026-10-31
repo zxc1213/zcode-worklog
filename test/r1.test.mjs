@@ -27,7 +27,10 @@ const config = loadConfig()
 describe('r1 scheduler', () => {
   it('defaults tasks, updates them, and persists patches', async () => {
     const tasks = await scheduler.getTasks(config)
-    assert.equal(tasks.length, 2)
+    assert.equal(tasks.length, scheduler.TASK_DEFS.length, 'task count follows TASK_DEFS')
+    assert.ok(tasks.find((task) => task.id === 'collect-sessions'))
+    assert.ok(tasks.find((task) => task.id === 'collect-watch'))
+    assert.ok(tasks.find((task) => task.id === 'connector-sync'))
     assert.equal(tasks[0].id, 'collect-sessions')
     assert.equal(tasks[0].enabled, false)
 
