@@ -136,7 +136,7 @@ describe('r2 calendar', () => {
     const month = TODAY.slice(0, 7)
     await store.saveTodos(config, [
       { id: 'cd1', title: '已完成', status: 'done', pri: '', due: '', repeat: '', created: TODAY + 'T01:00:00.000Z', updated: TODAY + 'T01:00:00.000Z', done_at: TODAY + 'T09:00:00.000Z' },
-      { id: 'co1', title: '未完成', status: 'open', pri: '', due: '', repeat: '', created: TODAY + 'T01:00:00.000Z', updated: TODAY + 'T01:00:00.000Z', done_at: '' },
+      { id: 'co1', title: '未完成', status: 'open', pri: '', due: TODAY, repeat: '', created: TODAY + 'T01:00:00.000Z', updated: TODAY + 'T01:00:00.000Z', done_at: '' },
     ])
     await store.saveDay(config, TODAY, '# 日志\n\n内容\n')
     const result = await api.calendarAction(config, { action: 'month', month })
@@ -153,6 +153,7 @@ describe('r2 calendar', () => {
     assert.equal(detail.date, TODAY)
     assert.equal(detail.archived, true)
     assert.ok(detail.todosDone.some((todo) => todo.title === '已完成'))
+    assert.ok(detail.todosDue.some((todo) => todo.title === '未完成'), 'open todos due that day listed')
     assert.ok(detail.entries.count >= 1)
     assert.ok(Array.isArray(detail.entries.items))
   })

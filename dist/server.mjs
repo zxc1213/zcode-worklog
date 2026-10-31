@@ -315,7 +315,7 @@ var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.12.0";
+    PLUGIN_VERSION = "0.14.0";
   }
 });
 
@@ -39000,10 +39000,14 @@ async function calendarMonth(config2, month) {
   const bucket = await entriesBucketByDate(config2, key);
   const todos = await loadTodos(config2);
   const doneDates = {};
+  const dueDates = {};
   for (const todo of todos) {
-    if (todo.status !== "done") continue;
-    const day = String(todo.done_at || "").slice(0, 10);
-    if (day) doneDates[day] = (doneDates[day] || 0) + 1;
+    if (todo.status === "done") {
+      const day = String(todo.done_at || "").slice(0, 10);
+      if (day) doneDates[day] = (doneDates[day] || 0) + 1;
+    } else if (todo.due) {
+      dueDates[todo.due] = (dueDates[todo.due] || 0) + 1;
+    }
   }
   const archived = /* @__PURE__ */ new Set();
   for (const day of await listDays(config2)) {
@@ -39023,6 +39027,7 @@ async function calendarMonth(config2, month) {
       entryCount: counts.count,
       bySource: counts.bySource,
       todoDone: doneDates[date5] || 0,
+      todoDue: dueDates[date5] || 0,
       sessionCount: counts.bySource.sessions || 0,
       commitCount: counts.bySource.git || 0
     };
@@ -39032,7 +39037,9 @@ async function calendarMonth(config2, month) {
 async function calendarDay(config2, dateString) {
   const day = await getDay(config2, dateString);
   const sessions = day.exists ? parseSessionLines(day.text) : [];
-  const todosDone = (await loadTodos(config2)).filter((todo) => todo.status === "done" && String(todo.done_at || "").slice(0, 10) === dateString).map((todo) => ({ title: todo.title, doneAt: todo.done_at }));
+  const allTodos = await loadTodos(config2);
+  const todosDue = allTodos.filter((todo) => todo.status !== "done" && todo.due === dateString).map((todo) => ({ id: todo.id, title: todo.title, pri: todo.pri, carries: todo.carries || 0 }));
+  const todosDone = allTodos.filter((todo) => todo.status === "done" && String(todo.done_at || "").slice(0, 10) === dateString).map((todo) => ({ title: todo.title, doneAt: todo.done_at }));
   const entries = await entriesForDate(config2, dateString);
   const bySource = {};
   for (const entry of entries) bySource[entry.source] = (bySource[entry.source] || 0) + 1;
@@ -39048,6 +39055,7 @@ async function calendarDay(config2, dateString) {
       timeRange: session.timeRange
     })),
     todosDone,
+    todosDue,
     entries: {
       count: entries.length,
       bySource,
