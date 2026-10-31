@@ -45,7 +45,7 @@ import { askArchive, aiComplete, generateReport, listAiModels, summarizeAiUsage,
 import { listTemplates, render as renderTpl, resetTemplate, saveTemplate } from '../lib/templates.mjs'
 import { detectAiCandidates, findAiCandidate, publicCandidate } from '../lib/ai-detect.mjs'
 import { listSessionSources, parseSessionLines, scanSessions } from '../lib/sessions.mjs'
-import { buildSessionIndex, loadSessionIndex, markSessions, querySessions, setSessionGroup } from '../lib/session-manager.mjs'
+import { buildSessionIndex, loadSessionIndex, markSessions, querySessions, sessionMonthCounts, setSessionGroup } from '../lib/session-manager.mjs'
 import { getHistory, getTasks, runDueTasks, updateTask } from '../lib/scheduler.mjs'
 import { calendarDay, calendarMonth } from '../lib/calendar.mjs'
 import { CONNECTOR_TYPES, adapterFor, listConnectors, normalizeConnector, publicConnectorList, syncConnectors } from '../lib/connectors.mjs'
@@ -489,6 +489,11 @@ export async function aiAction(args = {}) {
 export async function sessionAction(config, args = {}) {
   const action = args.action || 'list'
   if (action === 'sources') return { sources: await listSessionSources(config) }
+  if (action === 'month') {
+    const index = await loadSessionIndex(config)
+    const month = /^\d{4}-\d{2}$/.test(String(args.month || '')) ? args.month : localDate().slice(0, 7)
+    return { month, builtAt: index.builtAt, total: index.total, days: sessionMonthCounts(index.sessions, month) }
+  }
   if (action === 'index_status') {
     const index = await loadSessionIndex(config)
     return { builtAt: index.builtAt, total: index.total }

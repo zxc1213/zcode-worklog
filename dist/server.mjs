@@ -315,7 +315,7 @@ var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.10.1";
+    PLUGIN_VERSION = "0.11.0";
   }
 });
 
@@ -38799,6 +38799,23 @@ async function setSessionGroup(config2, keys, group) {
   await saveSessionIndex(config2, index);
   return { touched, group: label };
 }
+function sessionMonthCounts(sessions, month) {
+  const days = {};
+  const [year, mon] = String(month).split("-").map(Number);
+  const total = new Date(year, mon, 0).getDate();
+  for (let i = 1; i <= total; i++) {
+    const date5 = month + "-" + String(i).padStart(2, "0");
+    days[date5] = 0;
+  }
+  for (const session of sessions) {
+    const first = String(session.first || "");
+    const last = String(session.last || "");
+    for (const date5 of Object.keys(days)) {
+      if (first <= date5 && date5 <= last) days[date5] += 1;
+    }
+  }
+  return days;
+}
 
 // lib/scheduler.mjs
 init_config();
@@ -39525,6 +39542,11 @@ async function aiAction(args = {}) {
 async function sessionAction(config2, args = {}) {
   const action = args.action || "list";
   if (action === "sources") return { sources: await listSessionSources(config2) };
+  if (action === "month") {
+    const index = await loadSessionIndex(config2);
+    const month = /^\d{4}-\d{2}$/.test(String(args.month || "")) ? args.month : localDate().slice(0, 7);
+    return { month, builtAt: index.builtAt, total: index.total, days: sessionMonthCounts(index.sessions, month) };
+  }
   if (action === "index_status") {
     const index = await loadSessionIndex(config2);
     return { builtAt: index.builtAt, total: index.total };
@@ -39767,7 +39789,7 @@ tool(
     title: "\u672C\u673A AI \u4F1A\u8BDD\u6C47\u603B",
     description: "\u8BFB\u53D6\u672C\u673A AI \u5DE5\u5177\u4F1A\u8BDD\uFF1Aaction=sync_all \u4E00\u952E\u5168\u91CF\u540C\u6B65\u6240\u6709\u5DE5\u5177\u7684\u5168\u90E8\u5386\u53F2\u4F1A\u8BDD\u5230\u6301\u4E45\u7D22\u5F15\uFF08force \u5FFD\u7565\u7F13\u5B58\u3001windowDays \u9650\u5236 sqlite \u6E90\u7A97\u53E3\uFF09\uFF1Baction=query \u6309\u6761\u4EF6\u7B5B\u9009 {q \u5173\u952E\u8BCD, project/cwd, source, start/end \u65E5\u671F, minTurns, mark, group, workOnly \u4EC5\u5DE5\u4F5C\u76F8\u5173(\u6309\u626B\u63CF\u76EE\u5F55\u4E0E workKeywords), workKeywords[], groupBy=project|source|date|mark|group}\uFF0C\u8FD4\u56DE\u547D\u4E2D\u4F1A\u8BDD+\u5173\u952E\u8BCD\u5206\u6790(keywords)+\u5206\u7EC4(groups)\uFF1Baction=mark/unmark {keys, mark} \u6253/\u53BB\u6807\u8BB0\uFF1Baction=group {keys, group} \u8BBE\u81EA\u5B9A\u4E49\u5206\u7EC4\uFF1Bindex_status \u67E5\u7D22\u5F15\u72B6\u6001\uFF1Blist \u6309\u5929\u89C6\u56FE\uFF1Bsources \u5217\u6765\u6E90\uFF1Brefresh \u5F3A\u5236\u91CD\u626B\u3002",
     inputSchema: external_exports.object({
-      action: external_exports.enum(["list", "sources", "refresh", "sync_all", "query", "mark", "unmark", "group", "index_status"]).optional(),
+      action: external_exports.enum(["list", "sources", "refresh", "sync_all", "query", "mark", "unmark", "group", "index_status", "month"]).optional(),
       q: external_exports.string().optional(),
       project: external_exports.string().optional(),
       source: external_exports.string().optional(),
@@ -39782,6 +39804,7 @@ tool(
       keys: external_exports.array(external_exports.string()).optional(),
       force: external_exports.boolean().optional(),
       windowDays: external_exports.number().optional(),
+      month: external_exports.string().optional(),
       date: external_exports.string().optional().describe("YYYY-MM-DD\uFF0C\u9ED8\u8BA4\u4ECA\u5929")
     })
   },

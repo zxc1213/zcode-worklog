@@ -103,6 +103,10 @@ const state = {
   graphEntity: '',
   graphLoading: false,
   sessIndex: null,
+  sessCalMonth: '',
+  sessCalData: null,
+  sessCalLoading: false,
+  sessCalSelected: '',
   sessFilters: { q: '', project: '', source: '', start: '', end: '', minTurns: '', workOnly: false, workKeywords: '' },
   sessGroupBy: '',
   sessResult: null,
@@ -1712,6 +1716,7 @@ function sessionsTab() {
     'div',
     null,
     noticeNode(),
+    sessionsCalendarWrapper(),
     sessionsV2Block(),
     h(
       'div',
@@ -3355,6 +3360,7 @@ async function syncAllSessions(force) {
   await act('sess-sync', async () => {
     const result = await call('sessions', { action: 'sync_all', force })
     state.sessIndex = { builtAt: result.builtAt, total: result.total }
+    state.sessCalData = null
     setNotice('ok', '全量同步完成：' + result.total + ' 个会话' + (result.errors?.length ? '（' + result.errors.length + ' 个来源报错）' : ''))
   })
 }
@@ -3484,6 +3490,100 @@ function sessionsV2Block() {
         )
       : null,
   )
+}
+
+function sessCalKey(d) {
+  const now = new Date()
+  const y = d ? Number(String(d).slice(0, 4)) : now.getFullYear()
+  const m = d ? Number(String(d).slice(5, 7)) : now.getMonth() + 1
+  return y + '-' + String(m).padStart(2, '0')
+}
+
+async function loadSessCal() {
+  if (state.sessCalLoading) return
+  state.sessCalLoading = true
+  render()
+  try {
+    state.sessCalData = await call('sessions', { action: 'month', month: state.sessCalMonth })
+  } catch (error) {
+    setNotice('err', '会话月历加载失败：' + String(error?.message || error))
+  } finally {
+    state.sessCalLoading = false
+  }
+  render()
+}
+
+async function pickSessDay(date) {
+  state.sessFilters.start = date
+  state.sessFilters.end = date
+  state.sessGroupBy = ''
+  state.sessCalSelected = date
+  await runSessQuery()
+}
+
+function sessCalendarBlock() {
+  if (!state.sessCalMonth) state.sessCalMonth = sessCalKey()
+  if (!state.sessCalData && !state.sessCalLoading && state.sessIndex?.total) loadSessCal()
+  const data = state.sessCalData
+  const days = data?.days || {}
+  const dates = Object.keys(days)
+  const lead = dates.length ? (new Date(dates[0]).getDay() + 6) % 7 : 0
+  const todayText = today()
+  return h(
+    'div',
+    { className: 'wl-card wide' },
+    h(
+      'div',
+      { className: 'wl-row' },
+      h('div', { className: 'wl-section-title' }, '会话月历'),
+      h(
+        'button',
+        { className: 'wl-btn tiny', disabled: state.sessCalLoading, onClick: () => { state.sessCalMonth = sessCalKey(String(Number(state.sessCalMonth.slice(0, 4)) - 1) + state.sessCalMonth.slice(4)); loadSessCal() } },
+        '◀',
+      ),
+      h('span', { className: 'wl-hint' }, state.sessCalMonth),
+      h(
+        'button',
+        { className: 'wl-btn tiny', disabled: state.sessCalLoading, onClick: () => { state.sessCalMonth = sessCalKey(String(Number(state.sessCalMonth.slice(0, 4)) + 1) + state.sessCalMonth.slice(4)); loadSessCal() } },
+        '▶',
+      ),
+      h('button', { className: 'wl-btn tiny', onClick: () => { state.sessCalMonth = sessCalKey(); loadSessCal() } }, '今月'),
+    ),
+    state.sessIndex?.total
+      ? null
+      : h('div', { className: 'wl-hint' }, '还没有会话索引——先在下方点「同步全部会话」。'),
+    data
+      ? h(
+          'div',
+          { className: 'wl-cal-grid' },
+          ['一', '二', '三', '四', '五', '六', '日'].map((label) => h('div', { className: 'wl-cal-head' }, label)),
+          Array.from({ length: lead }, (_, i) => h('span', { className: 'wl-cal-cell empty', key: 'e' + i }, '')),
+          dates.map((date) =>
+            h(
+              'button',
+              {
+                className: 'wl-cal-cell' + (state.sessCalSelected === date ? ' sel' : '') + (date === todayText ? ' today' : ''),
+                key: date,
+                onClick: () => pickSessDay(date),
+              },
+              h('div', { className: 'wl-cal-num' }, String(Number(date.slice(8, 10)))),
+              h('div', { className: 'wl-cal-marks' },
+                days[date]
+                  ? h('span', { className: 'wl-cal-badge' }, '会话 ' + days[date])
+                  : null),
+            ),
+          ),
+        )
+      : h('div', { className: 'wl-hint' }, state.sessCalLoading ? '加载中…' : ''),
+    data
+      ? h('div', { className: 'wl-hint', style: { marginTop: '4px' } },
+          '点某一天：下方工作台会按该天筛选入库会话（含跨天会话），可直接打标记/设组。')
+      : null,
+  )
+}
+
+function sessionsCalendarWrapper() {
+  return h('div', null, sessCalendarBlock())
 }
 
 function render() {
