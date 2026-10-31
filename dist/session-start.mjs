@@ -316,7 +316,7 @@ var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.17.0";
+    PLUGIN_VERSION = "0.17.2";
   }
 });
 
@@ -1925,6 +1925,7 @@ init_store();
 // lib/scheduler.mjs
 init_config();
 init_store();
+import { join as join6 } from "node:path";
 var TASK_DEFS = [
   {
     id: "collect-sessions",
@@ -1988,9 +1989,10 @@ function isTaskDue(task, now = /* @__PURE__ */ new Date()) {
 async function runTask(config, task) {
   if (task.kind === "collect-sessions") {
     const { scanSessions: scanSessions2 } = await Promise.resolve().then(() => (init_sessions(), sessions_exports));
+    const scanOpts = process.env.WORKLOG_SESSION_HOME ? { home: process.env.WORKLOG_SESSION_HOME, dshHome: join6(process.env.WORKLOG_SESSION_HOME, ".dsh") } : {};
     const { appendEntries: appendEntries2 } = await Promise.resolve().then(() => (init_entries(), entries_exports));
     const { basename: basename5 } = await import("node:path");
-    const result = await scanSessions2(config, localDate());
+    const result = await scanSessions2(config, localDate(), scanOpts);
     const sessions = result?.sessions || [];
     await appendEntries2(
       config,
@@ -2075,18 +2077,18 @@ init_entries();
 import { execFile } from "node:child_process";
 import { existsSync as existsSync4 } from "node:fs";
 import { mkdir as mkdir5, readdir as readdir4, stat as stat4, writeFile as writeFile6 } from "node:fs/promises";
-import { basename as basename4, dirname as dirname6, extname, join as join7, relative as relative2, resolve as resolve2 } from "node:path";
+import { basename as basename4, dirname as dirname6, extname, join as join8, relative as relative2, resolve as resolve2 } from "node:path";
 import { promisify } from "node:util";
 
 // lib/graph.mjs
 init_store();
 init_entries();
 import { mkdir as mkdir4, readFile as readFile5, writeFile as writeFile5 } from "node:fs/promises";
-import { dirname as dirname5, join as join6 } from "node:path";
+import { dirname as dirname5, join as join7 } from "node:path";
 var MAX_NODES = 2e3;
 var MAX_EDGES = 5e3;
 function graphFile(config) {
-  return join6(config.dataDir, "graph.json");
+  return join7(config.dataDir, "graph.json");
 }
 async function saveGraph(config, graph) {
   await mkdir4(dirname5(graphFile(config)), { recursive: true });
@@ -2212,7 +2214,7 @@ async function walk3(root, maxDepth, visitDir, visitFile) {
     }
     await visitDir?.(dir, depth);
     for (const entry of entries) {
-      const full = join7(dir, entry.name);
+      const full = join8(dir, entry.name);
       if (entry.isDirectory()) {
         if (depth < maxDepth && !isSkippedDir(entry.name)) queue.push({ dir: full, depth: depth + 1 });
       } else if (entry.isFile()) {
@@ -2235,7 +2237,7 @@ async function findGitRepos(roots = []) {
   const repos = [];
   for (const root of roots) {
     await walk3(root, 3, async (dir) => {
-      if (existsSync4(join7(dir, ".git"))) repos.push(dir);
+      if (existsSync4(join8(dir, ".git"))) repos.push(dir);
     });
   }
   return [...new Set(repos)];

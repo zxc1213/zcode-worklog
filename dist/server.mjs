@@ -315,7 +315,7 @@ var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.17.0";
+    PLUGIN_VERSION = "0.17.2";
   }
 });
 
@@ -2342,7 +2342,7 @@ var init_watch = __esm({
 
 // src/server.mjs
 import { readFile as readFile8 } from "node:fs/promises";
-import { dirname as dirname8, join as join12 } from "node:path";
+import { dirname as dirname8, join as join13 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // node_modules/@modelcontextprotocol/server/dist/chunk-vYduTEsO.mjs
@@ -38830,6 +38830,7 @@ async function getSessionDetail(config2, key, { home = homedir4(), dshHome } = {
 // lib/scheduler.mjs
 init_config();
 init_store();
+import { join as join11 } from "node:path";
 var TASK_DEFS = [
   {
     id: "collect-sessions",
@@ -38911,9 +38912,10 @@ function isTaskDue(task, now = /* @__PURE__ */ new Date()) {
 async function runTask(config2, task) {
   if (task.kind === "collect-sessions") {
     const { scanSessions: scanSessions2 } = await Promise.resolve().then(() => (init_sessions(), sessions_exports));
+    const scanOpts = process.env.WORKLOG_SESSION_HOME ? { home: process.env.WORKLOG_SESSION_HOME, dshHome: join11(process.env.WORKLOG_SESSION_HOME, ".dsh") } : {};
     const { appendEntries: appendEntries2 } = await Promise.resolve().then(() => (init_entries(), entries_exports));
     const { basename: basename6 } = await import("node:path");
-    const result = await scanSessions2(config2, localDate());
+    const result = await scanSessions2(config2, localDate(), scanOpts);
     const sessions = result?.sessions || [];
     await appendEntries2(
       config2,
@@ -39088,7 +39090,7 @@ init_watch();
 // lib/wizard.mjs
 import { statSync } from "node:fs";
 import { readdir as readdir5 } from "node:fs/promises";
-import { join as join11 } from "node:path";
+import { join as join12 } from "node:path";
 var TYPE_MATCHERS = {
   zcode: (id) => id.startsWith("zcode:"),
   dsh: (id) => id.startsWith("dsh:"),
@@ -39114,7 +39116,7 @@ async function countFiles(root, depth = 0, cap = 2e3) {
     return 0;
   }
   for (const entry of entries) {
-    const full = join11(root, entry.name);
+    const full = join12(root, entry.name);
     if (entry.isDirectory()) {
       if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
       count += await countFiles(full, depth + 1, cap - count);
@@ -40060,7 +40062,7 @@ server.registerTool(
   }
 );
 async function asset(name) {
-  return readFile8(join12(HERE, name), "utf8");
+  return readFile8(join13(HERE, name), "utf8");
 }
 var panelHtmlPromise;
 function panelDocument() {

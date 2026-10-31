@@ -10,6 +10,7 @@ import { describe, it } from 'node:test'
 
 const home = mkdtempSync(join(tmpdir(), 'zcode-worklog-r1-'))
 process.env.WORKLOG_HOME = home
+process.env.WORKLOG_SESSION_HOME = home
 delete process.env.ZCODE_PLUGIN_DATA
 delete process.env.WORKLOG_SCAN_ROOTS
 delete process.env.WORKLOG_DOC_ROOTS
