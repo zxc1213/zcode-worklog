@@ -33,9 +33,8 @@ function markMounted() {
 const TABS = [
   ['overview', '概览'],
   ['calendar', '日历'],
-  ['logs', '日志'],
+  ['logs', '日志·汇报'],
   ['todos', '待办'],
-  ['reports', '汇报'],
   ['graph', '图谱'],
   ['sessions', '会话'],
   ['settings', '设置'],
@@ -107,6 +106,7 @@ const state = {
   sessCalData: null,
   sessCalLoading: false,
   sessCalSelected: '',
+  reportsOpen: false,
   logCalMonth: '',
   logCalData: null,
   logCalLoading: false,
@@ -558,7 +558,7 @@ function logsTab() {
               async () => {
                 const result = await call('report', { action: 'generate', kind: 'daily', date: log.date })
                 state.reportText = result.text || ''
-                state.tab = 'reports'
+                state.reportsOpen = true
                 setNotice('ok', `日报已生成：${result.name}`)
               },
               { refresh: false },
@@ -622,6 +622,7 @@ function logsTab() {
           ),
         )
       : null,
+    reportsFold(),
     h('div', { className: 'wl-label' }, '全部日志'),
     state.days.length
       ? h(
@@ -1464,7 +1465,7 @@ function addTodoFromForm() {
   })
 }
 
-function reportsTab() {
+function reportsBody() {
   const kind = state.reportKind
   const placeholder =
     kind === 'weekly'
@@ -1481,7 +1482,6 @@ function reportsTab() {
   return h(
     'div',
     null,
-    noticeNode(),
     h(
       'div',
       { className: 'wl-card wide' },
@@ -3701,7 +3701,29 @@ function logCalendarBlock() {
   )
 }
 
+function reportsFold() {
+  const open = Boolean(state.reportsOpen)
+  return h(
+    'div',
+    { className: `wl-fold${open ? ' open' : ''}` },
+    h(
+      'button',
+      {
+        className: 'wl-fold-head',
+        type: 'button',
+        onClick: () => {
+          state.reportsOpen = !open
+          render()
+        },
+      },
+      h('span', { className: 'wl-fold-caret' }, open ? '▾' : '▸'),
+      '汇报生成与已生成报告'
+    ),
+    open ? h('div', { className: 'wl-fold-body' }, reportsBody()) : null,
+  )
+}
 function render() {
+  if (state.tab === 'reports') state.tab = 'logs'
   const root = document.getElementById('app')
   if (!root) return
   root.replaceChildren(
@@ -3735,9 +3757,7 @@ function render() {
           ? logsTab()
           : state.tab === 'todos'
             ? todosTab()
-            : state.tab === 'reports'
-              ? reportsTab()
-              : state.tab === 'sessions'
+            : state.tab === 'sessions'
                 ? sessionsTab()
                 : settingsTab(),
     ),

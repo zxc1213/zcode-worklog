@@ -212,7 +212,7 @@ const clickTab = async (label) => {
   await wait(350)
 }
 
-await clickTab('日志')
+await clickTab('日志·汇报')
 await new Promise((resolve) => setTimeout(resolve, 50))
 assert.ok(doc.querySelector('.wl-cal-grid'), 'logs tab shows month calendar')
 assert.ok(text().includes('# 测试日志'), 'log content readable in view mode')
@@ -249,9 +249,13 @@ await new Promise((resolve) => setTimeout(resolve, 50))
 assert.ok(text().includes('提交了'), 'entity relations render')
 console.log('graph OK')
 
-await clickTab('汇报')
-assert.ok(text().includes('周报'), 'reports tab renders')
-assert.ok(text().includes('weekly-2026-10-26.md'), 'reports list rendered')
+await clickTab('日志·汇报')
+const reportsFoldBtn = [...doc.querySelectorAll('.wl-fold-head')].find((item) => item.textContent.includes('汇报生成'))
+assert.ok(reportsFoldBtn, 'reports fold exists in merged tab')
+reportsFoldBtn.click()
+await new Promise((resolve) => setTimeout(resolve, 20))
+assert.ok(text().includes('周报'), 'merged tab still exposes report kinds')
+assert.ok(text().includes('weekly-2026-10-26.md'), 'reports list rendered inside fold')
 console.log('reports OK')
 
 await clickTab('会话')
