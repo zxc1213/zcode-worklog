@@ -51,7 +51,7 @@ Ray：单人使用，本机多 AI 工具（ZCode/DSH/Claude Code/Codex/Gemini…
 
 ### C 提炼 Distill
 - **REQ-D1（P0，R3 已实现）提示词模板系统**：模板 = frontmatter{id,name,scene,system,user} + 正文；场景 scene 枚举（report-daily/report-weekly/report-month/report-quarter/ask/parse/suggest/summarize/custom-*）；变量 {{today}} {{rangeStart}} {{rangeEnd}} {{content}} {{todos}} {{entries}} 等，缺失变量安全置空；模板存 data/templates/*.md，用户可增删改、设为场景默认、导入导出；所有 AI 调用点（润色/问答/parse/suggest/总结）统一走模板引擎。
-- **REQ-D2（P1）周期工作推荐**：规则引擎打分（逾期顺延待办 > 外部系统高优/临期任务 > 活跃项目无日志 > 日历临近事项）产出「建议关注」清单；自动注入周报/日卡片，面板可手动刷新；每条建议可标记采纳/忽略，反馈记录用于调整权重（简单计数权重，不引入 ML）。
+- **REQ-D2（P1，R5 已实现）周期工作推荐**：规则引擎打分（逾期顺延待办 > 外部系统高优/临期任务 > 活跃项目无日志 > 日历临近事项）产出「建议关注」清单；自动注入周报/日卡片，面板可手动刷新；每条建议可标记采纳/忽略，反馈记录用于调整权重（简单计数权重，不引入 ML）。
 
 ### D 交付 Deliver
 - **REQ-E1（P0）报告融入新数据源**：日/周/月/季/绩效/项目报告自动包含外部条目与推荐小节。
@@ -94,6 +94,7 @@ Ray：单人使用，本机多 AI 工具（ZCode/DSH/Claude Code/Codex/Gemini…
 ## 8. 变更记录
 
 - v0.1（2026-10-31）：首版。九条基线映射完成，现状差距明确，路线图 R1-R6。
+- v0.6（2026-10-31）：R5 发布（0.8.0）。D2 已实现：lib/recommend.mjs 规则引擎（overdue/external/no-log-project/upcoming/stale 五类规则，评分=基础分×反馈权重），采纳/忽略反馈抑制同类权重，周报/月报自动注入「## 建议关注」，面板概览推荐卡片（采纳/忽略/刷新），worklog_recommend 工具（19 个）。
 - v0.5（2026-10-31）：R4 发布（0.7.0）。C4/C6 已实现：lib/adapters/{core,feishu,zentao,generic}.mjs + lib/connectors.mjs（注册/掩码/同步/占位符保密）；worklog_connectors 工具（18 个）；面板「外部连接器」块（新建/编辑/测试/同步/删除）；调度任务 connector-sync（默认 6h）。飞书子项（群消息/wiki）需真机 app 凭据验证——开放问题仍待 Ray。自测修复：连接器动作强制读最新配置（防旧句柄覆盖密钥）、zentao mapItem 作用域 bug。
 - v0.4（2026-10-31）：R3 发布（0.6.0）。D1 已实现：lib/templates.mjs 五场景（report/ask/todo-parse/todo-suggest/summarize），文件格式 frontmatter + ### SYSTEM/### USER，用户模板缺失段回落内置；四个 AI 调用点全部迁移；新增 worklog_report action=summarize（自由总结，无 AI 降级规则摘要）；worklog_templates 工具（17 个）；设置页「提示词模板」编辑块。自测修复：模板读取误用 async 导致内置回落（改 readFileSync）。设计复审：用量 kind 精确到场景名（todo-parse/todo-suggest/summarize）。
 - v0.3（2026-10-31）：R2 发布（0.5.0）。O1/O2 已实现：lib/entries.mjs（append-only+指纹去重+上限裁剪）、采集接线（归档 git/docs/sessions、watch 变化、调度会话扫描）、日报新增「## 采集条目」小节、lib/calendar.mjs 月/日聚合、面板「日历」页签（月视图+日详情）、worklog_calendar 工具（16 个工具）。设计复审调整：调度会话任务也直接产条目（不再等归档）。

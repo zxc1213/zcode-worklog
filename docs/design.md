@@ -30,7 +30,7 @@
 | `lib/calendar.mjs` | 日历聚合（复用 days/entries/todos/reports） | R2 ✅ |
 | `lib/templates.mjs` | 模板文件管理 + 变量渲染 + 场景默认 | R3 ✅ |
 | `lib/adapters/` 目录 | core.mjs / feishu.mjs / zentao.mjs / generic.mjs（Hermes 用 generic 承接） | R4 ✅ |
-| `lib/recommend.mjs` | 规则打分推荐 | R5 |
+| `lib/recommend.mjs` | 规则打分推荐（五类规则 + 反馈权重） | R5 ✅ |
 | `lib/graph.mjs` | 实体关系抽取与查询 | R6 |
 
 ## 3. 子系统设计
@@ -102,7 +102,7 @@
 | `worklog_calendar` | month/day | R2 ✅（工具数 15→16） |
 | `worklog_templates` | list/save/reset | R3 ✅（工具数 16→17） |
 | `worklog_connectors` | list/set/remove/test/sync | R4 ✅（工具数 17→18） |
-| `worklog_recommend` | get/feedback | R5 |
+| `worklog_recommend` | get/feedback | R5 ✅（工具数 18→19） |
 | `worklog_graph` | query/rebuild | R6 |
 
 ## 4. 关键决策记录
@@ -123,6 +123,7 @@
 ## 6. 变更记录
 
 - v0.1（2026-10-31）：首版。八个子系统设计与 R1-R6 工具面规划，与 REQ v0.1 对齐。
+- v0.6（2026-10-31）：R5 实现回填（0.8.0）。权重公式定为 (accepted+1)/(total+2)*1.5，下限 0.2；外部临期窗口 = 今天起 3 天；no-log-project 通过解析日文件 "### 项目名" 判断覆盖。面板概览卡片懒加载（当日缓存）。
 - v0.5（2026-10-31）：R4 实现回填（0.7.0）。设计落地差异：hermes.mjs 暂以 generic.mjs 承接（待接口信息后替换专用适配器）；连接器状态持久化到 config.connectors[]；同步去重靠条目指纹。飞书 feedMessages 默认关（需真实凭据后手动开）。
 - v0.4（2026-10-31）：R3 实现回填（0.6.0）。新增 summarize 场景与 worklog_report action=summarize（设计 v0.1 的"总结场景"落点，自由范围 + 无 AI 降级）。文件读取用 readFileSync（首版误用 async 导致解析失败的自测教训记入）。
 - v0.3（2026-10-31）：R2 实现回填（0.5.0）。设计复审修正一处：collect-sessions 调度任务在扫描时同步 appendEntries（定时采集即时产出条目，不等归档）。panel-sim 增加日历页签覆盖。

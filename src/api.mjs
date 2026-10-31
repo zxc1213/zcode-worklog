@@ -48,6 +48,7 @@ import { listSessionSources, parseSessionLines, scanSessions } from '../lib/sess
 import { getHistory, getTasks, runDueTasks, updateTask } from '../lib/scheduler.mjs'
 import { calendarDay, calendarMonth } from '../lib/calendar.mjs'
 import { CONNECTOR_TYPES, adapterFor, listConnectors, normalizeConnector, publicConnectorList, syncConnectors } from '../lib/connectors.mjs'
+import { buildRecommendations, recordFeedback } from '../lib/recommend.mjs'
 import { scanWatchDirs } from '../lib/watch.mjs'
 import { probeAiTool, WIZARD_TYPES } from '../lib/wizard.mjs'
 
@@ -268,6 +269,17 @@ export async function collectAction(config, args = {}) {
     return runDueTasks(config, { force: true, id: args.id || '' })
   }
   if (action === 'set') return updateTask(config, args)
+  throw new Error(`未知 action: ${action}`)
+}
+
+export async function recommendAction(config, args = {}) {
+  const action = args.action || 'get'
+  if (action === 'get') return buildRecommendations(config, { date: args.date || localDate() })
+  if (action === 'feedback') {
+    if (!args.kind) throw new Error('feedback 需要 kind')
+    const entry = await recordFeedback(config, args.key || '', String(args.kind), Boolean(args.accepted))
+    return { kind: args.kind, feedback: entry }
+  }
   throw new Error(`未知 action: ${action}`)
 }
 
@@ -555,6 +567,8 @@ export async function dispatch(op, args = {}) {
       return templatesAction(config, args)
     case 'connectors':
       return connectorsAction(config, args)
+    case 'recommend':
+      return recommendAction(config, args)
     case 'days':
       return listDays(config)
     case 'reports':

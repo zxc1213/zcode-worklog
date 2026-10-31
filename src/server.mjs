@@ -19,6 +19,7 @@ import {
   calendarAction,
   templatesAction,
   connectorsAction,
+  recommendAction,
   collectAction,
   configAction,
   wizardAction,
@@ -311,6 +312,23 @@ tool(
 )
 
 tool(
+  'worklog_recommend',
+  {
+    title: '工作建议',
+    description:
+      'WorkLog 周期工作建议（规则引擎，无需 AI）：action=get 返回按评分排序的建议清单（逾期顺延待办/外部任务临期/有提交但日志未覆盖的项目/今日动态），每条带 kind 与评分；action=feedback {kind, key?, accepted} 记录采纳/忽略反馈，同 kind 多次忽略会自动降低该类建议权重。周报/月报尾部已自动注入「## 建议关注」。',
+    inputSchema: z.object({
+      action: z.enum(['get', 'feedback']).optional(),
+      kind: z.string().optional(),
+      key: z.string().optional(),
+      accepted: z.boolean().optional(),
+      date: z.string().optional(),
+    }),
+  },
+  (args) => recommendAction(loadConfig(), args),
+)
+
+tool(
   'worklog_connectors',
   {
     title: '外部连接器',
@@ -400,6 +418,7 @@ server.registerTool(
         'calendar',
         'templates',
         'connectors',
+        'recommend',
       ]),
       args: z.record(z.string(), z.unknown()).optional(),
     }),

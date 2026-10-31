@@ -315,7 +315,7 @@ var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.7.0";
+    PLUGIN_VERSION = "0.8.0";
   }
 });
 
@@ -996,6 +996,607 @@ var init_sessions = __esm({
       "Caveat: The messages below",
       "[Request interrupted by user]"
     ];
+  }
+});
+
+// lib/store.mjs
+var store_exports = {};
+__export(store_exports, {
+  PRI_VALUES: () => PRI_VALUES,
+  addTodo: () => addTodo,
+  carryOverTodos: () => carryOverTodos,
+  cleanTodoDraft: () => cleanTodoDraft,
+  clearDoneTodos: () => clearDoneTodos,
+  compareTodos: () => compareTodos,
+  createBackup: () => createBackup,
+  deleteBackup: () => deleteBackup,
+  deleteTodo: () => deleteTodo,
+  extractProjects: () => extractProjects,
+  getDay: () => getDay,
+  getTodoStats: () => getTodoStats,
+  importWorkLog: () => importWorkLog,
+  listBackups: () => listBackups,
+  listDays: () => listDays,
+  listReports: () => listReports,
+  loadState: () => loadState,
+  loadTodos: () => loadTodos,
+  nextRepeatDue: () => nextRepeatDue,
+  queryTodos: () => queryTodos,
+  readReport: () => readReport,
+  recordAiUsage: () => recordAiUsage,
+  recordRun: () => recordRun,
+  restoreBackup: () => restoreBackup,
+  saveDay: () => saveDay,
+  saveState: () => saveState,
+  saveTodos: () => saveTodos,
+  searchDays: () => searchDays,
+  sortTodos: () => sortTodos,
+  todoStats: () => todoStats,
+  updateTodo: () => updateTodo,
+  writeReport: () => writeReport
+});
+import { randomUUID } from "node:crypto";
+import { existsSync as existsSync3 } from "node:fs";
+import { cp, mkdir as mkdir2, readdir as readdir2, readFile as readFile2, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
+import { basename, dirname as dirname2, join as join3, relative } from "node:path";
+function cleanTags(input2) {
+  const list = Array.isArray(input2) ? input2 : String(input2 || "").split(/[,，#\s]+/);
+  const out = [];
+  for (const raw of list) {
+    const tag = String(raw || "").trim().replace(/^#/, "");
+    if (tag && !out.includes(tag)) out.push(tag);
+    if (out.length >= MAX_TAGS) break;
+  }
+  return out;
+}
+function cleanSubtasks(input2) {
+  if (!Array.isArray(input2)) return [];
+  const out = [];
+  for (const item of input2) {
+    const title = String(typeof item === "string" ? item : item?.title || "").trim();
+    if (!title) continue;
+    out.push({
+      id: typeof item === "object" && item && String(item.id || "") ? String(item.id) : randomUUID(),
+      title,
+      done: typeof item === "object" && item ? Boolean(item.done) : false
+    });
+    if (out.length >= MAX_SUBTASKS) break;
+  }
+  return out;
+}
+function normalizeTodo(todo) {
+  if (!todo || typeof todo !== "object" || !todo.id || !todo.title) return null;
+  return {
+    ...todo,
+    md: String(todo.md || ""),
+    status: todo.status === "done" ? "done" : "open",
+    pri: PRI_VALUES.includes(todo.pri) ? todo.pri : "",
+    due: String(todo.due || "").slice(0, 10),
+    repeat: String(todo.repeat || ""),
+    tags: cleanTags(todo.tags),
+    subtasks: cleanSubtasks(todo.subtasks),
+    carries: Number.isInteger(todo.carries) && todo.carries > 0 ? todo.carries : 0,
+    lastCarry: String(todo.lastCarry || "").slice(0, 10)
+  };
+}
+async function readJson2(file2, fallback) {
+  try {
+    return JSON.parse(await readFile2(file2, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+async function writeJson(file2, value) {
+  await mkdir2(dirname2(file2), { recursive: true });
+  await writeFile2(file2, JSON.stringify(value, null, 2) + "\n", "utf8");
+}
+async function loadTodos(config2) {
+  const todos = await readJson2(todosFile(config2), []);
+  if (!Array.isArray(todos)) return [];
+  return todos.map(normalizeTodo).filter(Boolean);
+}
+async function saveTodos(config2, todos) {
+  await writeJson(todosFile(config2), todos);
+  return todos;
+}
+function compareTodos(a, b, today) {
+  const aDone = a.status === "done";
+  const bDone = b.status === "done";
+  if (aDone !== bDone) return aDone ? 1 : -1;
+  if (aDone) return String(b.done_at || "").localeCompare(String(a.done_at || ""));
+  const aOver = a.due && a.due < today ? 1 : 0;
+  const bOver = b.due && b.due < today ? 1 : 0;
+  if (aOver !== bOver) return bOver - aOver;
+  const aRank = aOver ? -1 : PRI_RANK[a.pri] ?? 3;
+  const bRank = bOver ? -1 : PRI_RANK[b.pri] ?? 3;
+  if (aRank !== bRank) return aRank - bRank;
+  if (a.due !== b.due) {
+    if (!a.due) return 1;
+    if (!b.due) return -1;
+    return a.due.localeCompare(b.due);
+  }
+  return String(b.created || "").localeCompare(String(a.created || ""));
+}
+function sortTodos(todos, today = localDate()) {
+  return [...todos].sort((a, b) => compareTodos(a, b, today));
+}
+function queryTodos(todos, query = {}, today = localDate()) {
+  const { status, pri, tag, q, sort = "smart" } = query;
+  let list = todos;
+  if (status === "open" || status === "done") list = list.filter((todo) => todo.status === status);
+  if (PRI_VALUES.includes(pri)) list = list.filter((todo) => todo.pri === pri);
+  if (tag) list = list.filter((todo) => todo.tags.includes(String(tag)));
+  const needle = String(q || "").trim().toLowerCase();
+  if (needle) {
+    list = list.filter(
+      (todo) => todo.title.toLowerCase().includes(needle) || String(todo.md || "").toLowerCase().includes(needle) || todo.tags.some((item) => item.toLowerCase().includes(needle))
+    );
+  }
+  if (sort === "due") {
+    return [...list].sort((a, b) => {
+      if (a.due === b.due) return String(a.created || "").localeCompare(String(b.created || ""));
+      if (!a.due) return 1;
+      if (!b.due) return -1;
+      return a.due.localeCompare(b.due);
+    });
+  }
+  if (sort === "created") {
+    return [...list].sort((a, b) => String(b.created || "").localeCompare(String(a.created || "")));
+  }
+  return sortTodos(list, today);
+}
+async function addTodo(config2, input2 = {}) {
+  const title = String(input2.title || "").trim();
+  if (!title) throw new Error("\u5F85\u529E\u6807\u9898\u4E0D\u80FD\u4E3A\u7A7A");
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const todo = {
+    id: randomUUID(),
+    title,
+    md: String(input2.md || input2.detail || ""),
+    status: input2.status === "done" ? "done" : "open",
+    pri: PRI_VALUES.includes(input2.pri || input2.priority) ? input2.pri || input2.priority : "",
+    due: String(input2.due || "").slice(0, 10),
+    repeat: String(input2.repeat || ""),
+    tags: cleanTags(input2.tags),
+    subtasks: cleanSubtasks(input2.subtasks),
+    carries: 0,
+    lastCarry: "",
+    created: now,
+    updated: now,
+    done_at: input2.status === "done" ? now : ""
+  };
+  const todos = await loadTodos(config2);
+  todos.push(todo);
+  await saveTodos(config2, todos);
+  return todo;
+}
+async function updateTodo(config2, patch = {}) {
+  const id = String(patch.id || "");
+  if (!id) throw new Error("\u7F3A\u5C11\u5F85\u529E id");
+  const todos = await loadTodos(config2);
+  const index = todos.findIndex((todo) => todo.id === id);
+  if (index < 0) throw new Error(`\u627E\u4E0D\u5230\u5F85\u529E ${id}`);
+  const current = todos[index];
+  const next = {
+    ...current,
+    ...patch,
+    id,
+    title: String(patch.title ?? current.title).trim() || current.title,
+    md: String(patch.md ?? current.md ?? ""),
+    pri: PRI_VALUES.includes(patch.pri ?? patch.priority ?? current.pri) ? patch.pri ?? patch.priority ?? current.pri : current.pri,
+    due: String(patch.due ?? current.due ?? "").slice(0, 10),
+    repeat: String(patch.repeat ?? current.repeat ?? ""),
+    tags: patch.tags === void 0 ? current.tags : cleanTags(patch.tags),
+    subtasks: patch.subtasks === void 0 ? current.subtasks : cleanSubtasks(patch.subtasks),
+    carries: Number.isInteger(patch.carries) && patch.carries >= 0 ? patch.carries : current.carries || 0,
+    lastCarry: String(patch.lastCarry ?? current.lastCarry ?? "").slice(0, 10),
+    updated: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  if (patch.status === "done" && current.status !== "done") next.done_at = (/* @__PURE__ */ new Date()).toISOString();
+  if (patch.status === "open") next.done_at = "";
+  todos[index] = next;
+  await saveTodos(config2, todos);
+  let spawned = null;
+  if (patch.status === "done" && current.status !== "done" && next.repeat) {
+    spawned = await spawnRepeatedTodo(config2, next, todos);
+  }
+  return { todo: next, spawned };
+}
+async function spawnRepeatedTodo(config2, todo, todos) {
+  const base = /* @__PURE__ */ new Date();
+  const due = nextRepeatDue(todo.repeat, base);
+  if (!due) return null;
+  const next = {
+    ...todo,
+    id: randomUUID(),
+    status: "open",
+    done_at: "",
+    tags: [...todo.tags || []],
+    subtasks: (todo.subtasks || []).map((sub) => ({ ...sub, done: false })),
+    carries: 0,
+    lastCarry: "",
+    created: (/* @__PURE__ */ new Date()).toISOString(),
+    updated: (/* @__PURE__ */ new Date()).toISOString(),
+    due
+  };
+  todos.push(next);
+  await saveTodos(config2, todos);
+  return next;
+}
+function nextRepeatDue(rule, fromDate = /* @__PURE__ */ new Date()) {
+  const date5 = new Date(fromDate);
+  const text = String(rule || "").trim();
+  if (text === "daily") {
+    date5.setDate(date5.getDate() + 1);
+    return localDate(date5);
+  }
+  const weekly = /^weekly:([0-6])$/.exec(text);
+  if (weekly) {
+    const target = Number(weekly[1]);
+    const current = date5.getDay();
+    let diff = (target - current + 7) % 7;
+    if (diff === 0) diff = 7;
+    date5.setDate(date5.getDate() + diff);
+    return localDate(date5);
+  }
+  const monthly = /^monthly:([1-9]|[12]\d|3[01])$/.exec(text);
+  if (monthly) {
+    const target = Math.min(28, Number(monthly[1]));
+    date5.setMonth(date5.getMonth() + 1, target);
+    return localDate(date5);
+  }
+  return "";
+}
+function cleanTodoDraft(input2 = {}) {
+  const title = String(input2.title || "").trim();
+  if (!title) throw new Error("\u8349\u7A3F\u6807\u9898\u4E0D\u80FD\u4E3A\u7A7A");
+  const due = /^\d{4}-\d{2}-\d{2}$/.test(String(input2.due || "")) ? String(input2.due).slice(0, 10) : "";
+  const repeat = /^(?:daily|weekly:[0-6]|monthly:(?:[1-9]|[12]\d|3[01]))$/.test(String(input2.repeat || "")) ? String(input2.repeat) : "";
+  const pri = PRI_VALUES.includes(input2.pri) ? input2.pri : "";
+  return { title, due, repeat, pri, tags: cleanTags(input2.tags) };
+}
+async function deleteTodo(config2, id) {
+  const todos = await loadTodos(config2);
+  const next = todos.filter((todo) => todo.id !== id);
+  if (next.length === todos.length) throw new Error(`\u627E\u4E0D\u5230\u5F85\u529E ${id}`);
+  await saveTodos(config2, next);
+  return { ok: true, id };
+}
+async function clearDoneTodos(config2) {
+  const todos = await loadTodos(config2);
+  const next = todos.filter((todo) => todo.status !== "done");
+  const removed = todos.length - next.length;
+  await saveTodos(config2, next);
+  return { ok: true, removed };
+}
+async function carryOverTodos(config2, { date: date5 = localDate() } = {}) {
+  const day = String(date5 || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error(`\u975E\u6CD5\u65E5\u671F\uFF1A${date5}`);
+  const todos = await loadTodos(config2);
+  const carried = [];
+  let skipped = 0;
+  for (const todo of todos) {
+    if (todo.status !== "open" || !todo.due || todo.due >= day) continue;
+    if (todo.lastCarry === day) {
+      skipped += 1;
+      continue;
+    }
+    todo.due = day;
+    todo.carries = (todo.carries || 0) + 1;
+    todo.lastCarry = day;
+    todo.updated = (/* @__PURE__ */ new Date()).toISOString();
+    carried.push({ id: todo.id, title: todo.title, pri: todo.pri, due: todo.due, carries: todo.carries });
+  }
+  if (carried.length) await saveTodos(config2, todos);
+  return { carried, skipped, date: day };
+}
+function todoStats(todos, today = localDate()) {
+  const list = Array.isArray(todos) ? todos : [];
+  const open2 = list.filter((todo) => todo.status !== "done");
+  const done = list.filter((todo) => todo.status === "done");
+  const dayOf = (todo) => String(todo.done_at || "").slice(0, 10);
+  const byPri = { \u9AD8: 0, \u4E2D: 0, \u4F4E: 0, \u65E0: 0 };
+  for (const todo of open2) byPri[PRI_RANK[todo.pri] === void 0 ? "\u65E0" : todo.pri] += 1;
+  return {
+    open: open2.length,
+    overdue: open2.filter((todo) => todo.due && todo.due < today).length,
+    dueToday: open2.filter((todo) => todo.due === today).length,
+    doneToday: done.filter((todo) => dayOf(todo) === today).length,
+    doneWeek: done.filter((todo) => dayOf(todo) && dayOf(todo) >= mondayOf(today)).length,
+    total: list.length,
+    byPri
+  };
+}
+async function getTodoStats(config2) {
+  return todoStats(await loadTodos(config2));
+}
+async function loadState(config2) {
+  return readJson2(stateFile(config2), {
+    lastArchive: "",
+    lastAutoDate: "",
+    runHistory: [],
+    aiUsage: []
+  });
+}
+async function saveState(config2, state) {
+  await writeJson(stateFile(config2), state);
+  return state;
+}
+async function recordRun(config2, entry) {
+  const state = await loadState(config2);
+  state.lastArchive = entry.date || state.lastArchive;
+  if (entry.mode === "auto") state.lastAutoDate = entry.date || state.lastAutoDate;
+  state.runHistory = [
+    { ...entry, at: (/* @__PURE__ */ new Date()).toISOString() },
+    ...Array.isArray(state.runHistory) ? state.runHistory : []
+  ].slice(0, 100);
+  await saveState(config2, state);
+  return state.runHistory[0];
+}
+async function recordAiUsage(config2, usage) {
+  const state = await loadState(config2);
+  state.aiUsage = [
+    { ...usage, at: (/* @__PURE__ */ new Date()).toISOString() },
+    ...Array.isArray(state.aiUsage) ? state.aiUsage : []
+  ].slice(0, 500);
+  await saveState(config2, state);
+}
+async function walkFiles(dir, visitor) {
+  let entries;
+  try {
+    entries = await readdir2(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const full = join3(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === "reports" || entry.name === "backups") continue;
+      await walkFiles(full, visitor);
+    } else if (entry.isFile()) {
+      await visitor(full, entry);
+    }
+  }
+}
+async function listDays(config2) {
+  const root = join3(config2.dataDir, "archive");
+  const days = [];
+  await walkFiles(root, async (full) => {
+    const name = basename(full);
+    if (!/^\d{4}-\d{2}-\d{2}\.md$/.test(name)) return;
+    try {
+      const info = await stat2(full);
+      days.push({
+        date: name.slice(0, 10),
+        path: full,
+        relative: relative(root, full),
+        size: info.size,
+        mtime: info.mtime.toISOString()
+      });
+    } catch {
+    }
+  });
+  days.sort((a, b) => b.date.localeCompare(a.date));
+  return days;
+}
+async function getDay(config2, dateString) {
+  const target = dayFile(config2, dateString);
+  if (existsSync3(target)) {
+    return { date: dateString, exists: true, text: await readFile2(target, "utf8"), path: target };
+  }
+  const days = await listDays(config2);
+  const found = days.find((day) => day.date === dateString);
+  if (found) {
+    return { date: dateString, exists: true, text: await readFile2(found.path, "utf8"), path: found.path };
+  }
+  return { date: dateString, exists: false, text: "", path: target };
+}
+async function saveDay(config2, dateString, text) {
+  const target = dayFile(config2, dateString);
+  await mkdir2(dirname2(target), { recursive: true });
+  await writeFile2(target, String(text ?? ""), "utf8");
+  return getDay(config2, dateString);
+}
+async function searchDays(config2, query) {
+  const q = String(query || "").trim();
+  if (!q) throw new Error("\u641C\u7D22\u5173\u952E\u8BCD\u4E0D\u80FD\u4E3A\u7A7A");
+  const lower = q.toLowerCase();
+  const days = await listDays(config2);
+  const hits = [];
+  for (const day of days) {
+    let text;
+    try {
+      text = await readFile2(day.path, "utf8");
+    } catch {
+      continue;
+    }
+    const haystack = text.toLowerCase();
+    let from = 0;
+    let count = 0;
+    let first = -1;
+    while (true) {
+      const index = haystack.indexOf(lower, from);
+      if (index < 0) break;
+      count += 1;
+      if (first < 0) first = index;
+      from = index + lower.length;
+    }
+    if (!count) continue;
+    const start = Math.max(0, first - Math.floor(MAX_SNIPPET / 2));
+    const end = Math.min(text.length, first + q.length + Math.floor(MAX_SNIPPET / 2));
+    hits.push({
+      date: day.date,
+      count,
+      snippet: `${start > 0 ? "\u2026" : ""}${text.slice(start, end).replace(/\s+/g, " ").trim()}${end < text.length ? "\u2026" : ""}`
+    });
+    if (hits.length >= MAX_SEARCH_HITS) break;
+  }
+  return hits;
+}
+async function extractProjects(config2) {
+  const days = await listDays(config2);
+  const projects = /* @__PURE__ */ new Map();
+  for (const day of days) {
+    let text;
+    try {
+      text = await readFile2(day.path, "utf8");
+    } catch {
+      continue;
+    }
+    const lines = text.split(/\r?\n/);
+    let current = null;
+    for (const line of lines) {
+      const heading = /^###\s+(.+?)\s*$/.exec(line);
+      if (heading) {
+        current = heading[1].trim();
+        if (!projects.has(current)) projects.set(current, { name: current, days: [], commits: 0 });
+        projects.get(current).days.push(day.date);
+        continue;
+      }
+      if (/^##\s+/.test(line)) current = null;
+      if (current && /^-\s+`[0-9a-f]+`/i.test(line)) projects.get(current).commits += 1;
+    }
+  }
+  return [...projects.values()].map((project) => ({
+    ...project,
+    days: [...new Set(project.days)].sort()
+  })).sort((a, b) => b.commits - a.commits || a.name.localeCompare(b.name));
+}
+async function listReports(config2) {
+  const dir = reportsDir(config2);
+  const reports = [];
+  let entries = [];
+  try {
+    entries = await readdir2(dir, { withFileTypes: true });
+  } catch {
+    return reports;
+  }
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    const full = join3(dir, entry.name);
+    const info = await stat2(full);
+    reports.push({ name: entry.name, size: info.size, mtime: info.mtime.toISOString() });
+  }
+  reports.sort((a, b) => b.mtime.localeCompare(a.mtime));
+  return reports;
+}
+async function readReport(config2, name) {
+  const safe = basename(String(name || ""));
+  if (!safe.endsWith(".md")) throw new Error("\u62A5\u544A\u6587\u4EF6\u540D\u4E0D\u5408\u6CD5");
+  const full = join3(reportsDir(config2), safe);
+  if (!existsSync3(full)) throw new Error(`\u62A5\u544A\u4E0D\u5B58\u5728\uFF1A${safe}`);
+  return { name: safe, text: await readFile2(full, "utf8") };
+}
+async function writeReport(config2, name, text) {
+  const safe = basename(String(name || ""));
+  if (!safe.endsWith(".md")) throw new Error("\u62A5\u544A\u6587\u4EF6\u540D\u4E0D\u5408\u6CD5");
+  const full = join3(reportsDir(config2), safe);
+  await mkdir2(dirname2(full), { recursive: true });
+  await writeFile2(full, String(text ?? ""), "utf8");
+  return { name: safe, path: full };
+}
+async function createBackup(config2) {
+  const days = await listDays(config2);
+  const archive = [];
+  for (const day of days) {
+    try {
+      archive.push({ date: day.date, relative: day.relative, text: await readFile2(day.path, "utf8") });
+    } catch {
+    }
+  }
+  const reports = [];
+  for (const report of await listReports(config2)) {
+    try {
+      reports.push({ name: report.name, text: (await readReport(config2, report.name)).text });
+    } catch {
+    }
+  }
+  const payload = {
+    format: "zcode-worklog-backup",
+    version: 1,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    config: {
+      ...config2,
+      ai: { ...config2.ai, apiKey: config2.ai.apiKey ? "__redacted__" : "" }
+    },
+    todos: await loadTodos(config2),
+    archive,
+    reports
+  };
+  const name = `zcode-worklog-backup-${(/* @__PURE__ */ new Date()).toISOString().replace(/[-:]/g, "").replace(/\..+$/, "")}.json`;
+  const file2 = join3(backupsDir(config2), name);
+  await mkdir2(dirname2(file2), { recursive: true });
+  await writeFile2(file2, JSON.stringify(payload, null, 2), "utf8");
+  return { file: file2, name, days: archive.length, reports: reports.length, size: (await stat2(file2)).size };
+}
+async function listBackups(config2) {
+  const dir = backupsDir(config2);
+  const out = [];
+  let entries = [];
+  try {
+    entries = await readdir2(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+    const full = join3(dir, entry.name);
+    const info = await stat2(full);
+    out.push({ name: entry.name, size: info.size, mtime: info.mtime.toISOString() });
+  }
+  out.sort((a, b) => b.mtime.localeCompare(a.mtime));
+  return out;
+}
+async function restoreBackup(config2, name) {
+  const safe = basename(String(name || ""));
+  const file2 = join3(backupsDir(config2), safe);
+  if (!existsSync3(file2)) throw new Error(`\u5907\u4EFD\u4E0D\u5B58\u5728\uFF1A${safe}`);
+  const payload = JSON.parse(await readFile2(file2, "utf8"));
+  if (!Array.isArray(payload.archive)) throw new Error("\u5907\u4EFD\u683C\u5F0F\u4E0D\u6B63\u786E");
+  let restored = 0;
+  for (const item of payload.archive) {
+    if (!item?.date || typeof item.text !== "string") continue;
+    await saveDay(config2, item.date, item.text);
+    restored += 1;
+  }
+  if (Array.isArray(payload.todos)) await saveTodos(config2, payload.todos);
+  for (const report of payload.reports || []) {
+    if (report?.name && typeof report.text === "string") {
+      await writeReport(config2, report.name, report.text);
+    }
+  }
+  return { ok: true, restored, todos: Array.isArray(payload.todos) ? payload.todos.length : 0 };
+}
+async function importWorkLog(config2, sourceDir) {
+  const candidates = [
+    join3(sourceDir, "data", "archive"),
+    join3(sourceDir, "archive")
+  ];
+  const source = candidates.find((candidate) => existsSync3(candidate));
+  if (!source) throw new Error("\u6CA1\u6709\u627E\u5230 data\\archive \u6216 archive \u76EE\u5F55");
+  const target = join3(config2.dataDir, "archive");
+  await mkdir2(target, { recursive: true });
+  await cp(source, target, { recursive: true, force: false, errorOnExist: false });
+  const days = await listDays(config2);
+  return { ok: true, source, importedDays: days.length };
+}
+async function deleteBackup(config2, name) {
+  const safe = basename(String(name || ""));
+  const file2 = join3(backupsDir(config2), safe);
+  if (!existsSync3(file2)) throw new Error(`\u5907\u4EFD\u4E0D\u5B58\u5728\uFF1A${safe}`);
+  await unlink(file2);
+  return { ok: true, name: safe };
+}
+var MAX_SEARCH_HITS, MAX_SNIPPET, PRI_VALUES, PRI_RANK, MAX_TAGS, MAX_SUBTASKS;
+var init_store = __esm({
+  "lib/store.mjs"() {
+    init_config();
+    MAX_SEARCH_HITS = 50;
+    MAX_SNIPPET = 180;
+    PRI_VALUES = ["\u9AD8", "\u4E2D", "\u4F4E"];
+    PRI_RANK = { \u9AD8: 0, \u4E2D: 1, \u4F4E: 2 };
+    MAX_TAGS = 8;
+    MAX_SUBTASKS = 20;
   }
 });
 
@@ -36205,575 +36806,13 @@ init_config();
 // lib/archive.mjs
 init_config();
 init_sessions();
+init_store();
+init_entries();
 import { execFile } from "node:child_process";
 import { existsSync as existsSync4 } from "node:fs";
 import { mkdir as mkdir4, readdir as readdir3, stat as stat3, writeFile as writeFile4 } from "node:fs/promises";
 import { basename as basename3, dirname as dirname4, extname, join as join5, relative as relative2, resolve as resolve2 } from "node:path";
 import { promisify } from "node:util";
-
-// lib/store.mjs
-init_config();
-import { randomUUID } from "node:crypto";
-import { existsSync as existsSync3 } from "node:fs";
-import { cp, mkdir as mkdir2, readdir as readdir2, readFile as readFile2, stat as stat2, unlink, writeFile as writeFile2 } from "node:fs/promises";
-import { basename, dirname as dirname2, join as join3, relative } from "node:path";
-var MAX_SEARCH_HITS = 50;
-var MAX_SNIPPET = 180;
-var PRI_VALUES = ["\u9AD8", "\u4E2D", "\u4F4E"];
-var PRI_RANK = { \u9AD8: 0, \u4E2D: 1, \u4F4E: 2 };
-var MAX_TAGS = 8;
-var MAX_SUBTASKS = 20;
-function cleanTags(input2) {
-  const list = Array.isArray(input2) ? input2 : String(input2 || "").split(/[,，#\s]+/);
-  const out = [];
-  for (const raw of list) {
-    const tag = String(raw || "").trim().replace(/^#/, "");
-    if (tag && !out.includes(tag)) out.push(tag);
-    if (out.length >= MAX_TAGS) break;
-  }
-  return out;
-}
-function cleanSubtasks(input2) {
-  if (!Array.isArray(input2)) return [];
-  const out = [];
-  for (const item of input2) {
-    const title = String(typeof item === "string" ? item : item?.title || "").trim();
-    if (!title) continue;
-    out.push({
-      id: typeof item === "object" && item && String(item.id || "") ? String(item.id) : randomUUID(),
-      title,
-      done: typeof item === "object" && item ? Boolean(item.done) : false
-    });
-    if (out.length >= MAX_SUBTASKS) break;
-  }
-  return out;
-}
-function normalizeTodo(todo) {
-  if (!todo || typeof todo !== "object" || !todo.id || !todo.title) return null;
-  return {
-    ...todo,
-    md: String(todo.md || ""),
-    status: todo.status === "done" ? "done" : "open",
-    pri: PRI_VALUES.includes(todo.pri) ? todo.pri : "",
-    due: String(todo.due || "").slice(0, 10),
-    repeat: String(todo.repeat || ""),
-    tags: cleanTags(todo.tags),
-    subtasks: cleanSubtasks(todo.subtasks),
-    carries: Number.isInteger(todo.carries) && todo.carries > 0 ? todo.carries : 0,
-    lastCarry: String(todo.lastCarry || "").slice(0, 10)
-  };
-}
-async function readJson2(file2, fallback) {
-  try {
-    return JSON.parse(await readFile2(file2, "utf8"));
-  } catch {
-    return fallback;
-  }
-}
-async function writeJson(file2, value) {
-  await mkdir2(dirname2(file2), { recursive: true });
-  await writeFile2(file2, JSON.stringify(value, null, 2) + "\n", "utf8");
-}
-async function loadTodos(config2) {
-  const todos = await readJson2(todosFile(config2), []);
-  if (!Array.isArray(todos)) return [];
-  return todos.map(normalizeTodo).filter(Boolean);
-}
-async function saveTodos(config2, todos) {
-  await writeJson(todosFile(config2), todos);
-  return todos;
-}
-function compareTodos(a, b, today) {
-  const aDone = a.status === "done";
-  const bDone = b.status === "done";
-  if (aDone !== bDone) return aDone ? 1 : -1;
-  if (aDone) return String(b.done_at || "").localeCompare(String(a.done_at || ""));
-  const aOver = a.due && a.due < today ? 1 : 0;
-  const bOver = b.due && b.due < today ? 1 : 0;
-  if (aOver !== bOver) return bOver - aOver;
-  const aRank = aOver ? -1 : PRI_RANK[a.pri] ?? 3;
-  const bRank = bOver ? -1 : PRI_RANK[b.pri] ?? 3;
-  if (aRank !== bRank) return aRank - bRank;
-  if (a.due !== b.due) {
-    if (!a.due) return 1;
-    if (!b.due) return -1;
-    return a.due.localeCompare(b.due);
-  }
-  return String(b.created || "").localeCompare(String(a.created || ""));
-}
-function sortTodos(todos, today = localDate()) {
-  return [...todos].sort((a, b) => compareTodos(a, b, today));
-}
-function queryTodos(todos, query = {}, today = localDate()) {
-  const { status, pri, tag, q, sort = "smart" } = query;
-  let list = todos;
-  if (status === "open" || status === "done") list = list.filter((todo) => todo.status === status);
-  if (PRI_VALUES.includes(pri)) list = list.filter((todo) => todo.pri === pri);
-  if (tag) list = list.filter((todo) => todo.tags.includes(String(tag)));
-  const needle = String(q || "").trim().toLowerCase();
-  if (needle) {
-    list = list.filter(
-      (todo) => todo.title.toLowerCase().includes(needle) || String(todo.md || "").toLowerCase().includes(needle) || todo.tags.some((item) => item.toLowerCase().includes(needle))
-    );
-  }
-  if (sort === "due") {
-    return [...list].sort((a, b) => {
-      if (a.due === b.due) return String(a.created || "").localeCompare(String(b.created || ""));
-      if (!a.due) return 1;
-      if (!b.due) return -1;
-      return a.due.localeCompare(b.due);
-    });
-  }
-  if (sort === "created") {
-    return [...list].sort((a, b) => String(b.created || "").localeCompare(String(a.created || "")));
-  }
-  return sortTodos(list, today);
-}
-async function addTodo(config2, input2 = {}) {
-  const title = String(input2.title || "").trim();
-  if (!title) throw new Error("\u5F85\u529E\u6807\u9898\u4E0D\u80FD\u4E3A\u7A7A");
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  const todo = {
-    id: randomUUID(),
-    title,
-    md: String(input2.md || input2.detail || ""),
-    status: input2.status === "done" ? "done" : "open",
-    pri: PRI_VALUES.includes(input2.pri || input2.priority) ? input2.pri || input2.priority : "",
-    due: String(input2.due || "").slice(0, 10),
-    repeat: String(input2.repeat || ""),
-    tags: cleanTags(input2.tags),
-    subtasks: cleanSubtasks(input2.subtasks),
-    carries: 0,
-    lastCarry: "",
-    created: now,
-    updated: now,
-    done_at: input2.status === "done" ? now : ""
-  };
-  const todos = await loadTodos(config2);
-  todos.push(todo);
-  await saveTodos(config2, todos);
-  return todo;
-}
-async function updateTodo(config2, patch = {}) {
-  const id = String(patch.id || "");
-  if (!id) throw new Error("\u7F3A\u5C11\u5F85\u529E id");
-  const todos = await loadTodos(config2);
-  const index = todos.findIndex((todo) => todo.id === id);
-  if (index < 0) throw new Error(`\u627E\u4E0D\u5230\u5F85\u529E ${id}`);
-  const current = todos[index];
-  const next = {
-    ...current,
-    ...patch,
-    id,
-    title: String(patch.title ?? current.title).trim() || current.title,
-    md: String(patch.md ?? current.md ?? ""),
-    pri: PRI_VALUES.includes(patch.pri ?? patch.priority ?? current.pri) ? patch.pri ?? patch.priority ?? current.pri : current.pri,
-    due: String(patch.due ?? current.due ?? "").slice(0, 10),
-    repeat: String(patch.repeat ?? current.repeat ?? ""),
-    tags: patch.tags === void 0 ? current.tags : cleanTags(patch.tags),
-    subtasks: patch.subtasks === void 0 ? current.subtasks : cleanSubtasks(patch.subtasks),
-    carries: Number.isInteger(patch.carries) && patch.carries >= 0 ? patch.carries : current.carries || 0,
-    lastCarry: String(patch.lastCarry ?? current.lastCarry ?? "").slice(0, 10),
-    updated: (/* @__PURE__ */ new Date()).toISOString()
-  };
-  if (patch.status === "done" && current.status !== "done") next.done_at = (/* @__PURE__ */ new Date()).toISOString();
-  if (patch.status === "open") next.done_at = "";
-  todos[index] = next;
-  await saveTodos(config2, todos);
-  let spawned = null;
-  if (patch.status === "done" && current.status !== "done" && next.repeat) {
-    spawned = await spawnRepeatedTodo(config2, next, todos);
-  }
-  return { todo: next, spawned };
-}
-async function spawnRepeatedTodo(config2, todo, todos) {
-  const base = /* @__PURE__ */ new Date();
-  const due = nextRepeatDue(todo.repeat, base);
-  if (!due) return null;
-  const next = {
-    ...todo,
-    id: randomUUID(),
-    status: "open",
-    done_at: "",
-    tags: [...todo.tags || []],
-    subtasks: (todo.subtasks || []).map((sub) => ({ ...sub, done: false })),
-    carries: 0,
-    lastCarry: "",
-    created: (/* @__PURE__ */ new Date()).toISOString(),
-    updated: (/* @__PURE__ */ new Date()).toISOString(),
-    due
-  };
-  todos.push(next);
-  await saveTodos(config2, todos);
-  return next;
-}
-function nextRepeatDue(rule, fromDate = /* @__PURE__ */ new Date()) {
-  const date5 = new Date(fromDate);
-  const text = String(rule || "").trim();
-  if (text === "daily") {
-    date5.setDate(date5.getDate() + 1);
-    return localDate(date5);
-  }
-  const weekly = /^weekly:([0-6])$/.exec(text);
-  if (weekly) {
-    const target = Number(weekly[1]);
-    const current = date5.getDay();
-    let diff = (target - current + 7) % 7;
-    if (diff === 0) diff = 7;
-    date5.setDate(date5.getDate() + diff);
-    return localDate(date5);
-  }
-  const monthly = /^monthly:([1-9]|[12]\d|3[01])$/.exec(text);
-  if (monthly) {
-    const target = Math.min(28, Number(monthly[1]));
-    date5.setMonth(date5.getMonth() + 1, target);
-    return localDate(date5);
-  }
-  return "";
-}
-function cleanTodoDraft(input2 = {}) {
-  const title = String(input2.title || "").trim();
-  if (!title) throw new Error("\u8349\u7A3F\u6807\u9898\u4E0D\u80FD\u4E3A\u7A7A");
-  const due = /^\d{4}-\d{2}-\d{2}$/.test(String(input2.due || "")) ? String(input2.due).slice(0, 10) : "";
-  const repeat = /^(?:daily|weekly:[0-6]|monthly:(?:[1-9]|[12]\d|3[01]))$/.test(String(input2.repeat || "")) ? String(input2.repeat) : "";
-  const pri = PRI_VALUES.includes(input2.pri) ? input2.pri : "";
-  return { title, due, repeat, pri, tags: cleanTags(input2.tags) };
-}
-async function deleteTodo(config2, id) {
-  const todos = await loadTodos(config2);
-  const next = todos.filter((todo) => todo.id !== id);
-  if (next.length === todos.length) throw new Error(`\u627E\u4E0D\u5230\u5F85\u529E ${id}`);
-  await saveTodos(config2, next);
-  return { ok: true, id };
-}
-async function clearDoneTodos(config2) {
-  const todos = await loadTodos(config2);
-  const next = todos.filter((todo) => todo.status !== "done");
-  const removed = todos.length - next.length;
-  await saveTodos(config2, next);
-  return { ok: true, removed };
-}
-async function carryOverTodos(config2, { date: date5 = localDate() } = {}) {
-  const day = String(date5 || "").slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error(`\u975E\u6CD5\u65E5\u671F\uFF1A${date5}`);
-  const todos = await loadTodos(config2);
-  const carried = [];
-  let skipped = 0;
-  for (const todo of todos) {
-    if (todo.status !== "open" || !todo.due || todo.due >= day) continue;
-    if (todo.lastCarry === day) {
-      skipped += 1;
-      continue;
-    }
-    todo.due = day;
-    todo.carries = (todo.carries || 0) + 1;
-    todo.lastCarry = day;
-    todo.updated = (/* @__PURE__ */ new Date()).toISOString();
-    carried.push({ id: todo.id, title: todo.title, pri: todo.pri, due: todo.due, carries: todo.carries });
-  }
-  if (carried.length) await saveTodos(config2, todos);
-  return { carried, skipped, date: day };
-}
-function todoStats(todos, today = localDate()) {
-  const list = Array.isArray(todos) ? todos : [];
-  const open2 = list.filter((todo) => todo.status !== "done");
-  const done = list.filter((todo) => todo.status === "done");
-  const dayOf = (todo) => String(todo.done_at || "").slice(0, 10);
-  const byPri = { \u9AD8: 0, \u4E2D: 0, \u4F4E: 0, \u65E0: 0 };
-  for (const todo of open2) byPri[PRI_RANK[todo.pri] === void 0 ? "\u65E0" : todo.pri] += 1;
-  return {
-    open: open2.length,
-    overdue: open2.filter((todo) => todo.due && todo.due < today).length,
-    dueToday: open2.filter((todo) => todo.due === today).length,
-    doneToday: done.filter((todo) => dayOf(todo) === today).length,
-    doneWeek: done.filter((todo) => dayOf(todo) && dayOf(todo) >= mondayOf(today)).length,
-    total: list.length,
-    byPri
-  };
-}
-async function getTodoStats(config2) {
-  return todoStats(await loadTodos(config2));
-}
-async function loadState(config2) {
-  return readJson2(stateFile(config2), {
-    lastArchive: "",
-    lastAutoDate: "",
-    runHistory: [],
-    aiUsage: []
-  });
-}
-async function saveState(config2, state) {
-  await writeJson(stateFile(config2), state);
-  return state;
-}
-async function recordRun(config2, entry) {
-  const state = await loadState(config2);
-  state.lastArchive = entry.date || state.lastArchive;
-  if (entry.mode === "auto") state.lastAutoDate = entry.date || state.lastAutoDate;
-  state.runHistory = [
-    { ...entry, at: (/* @__PURE__ */ new Date()).toISOString() },
-    ...Array.isArray(state.runHistory) ? state.runHistory : []
-  ].slice(0, 100);
-  await saveState(config2, state);
-  return state.runHistory[0];
-}
-async function recordAiUsage(config2, usage) {
-  const state = await loadState(config2);
-  state.aiUsage = [
-    { ...usage, at: (/* @__PURE__ */ new Date()).toISOString() },
-    ...Array.isArray(state.aiUsage) ? state.aiUsage : []
-  ].slice(0, 500);
-  await saveState(config2, state);
-}
-async function walkFiles(dir, visitor) {
-  let entries;
-  try {
-    entries = await readdir2(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    const full = join3(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === "reports" || entry.name === "backups") continue;
-      await walkFiles(full, visitor);
-    } else if (entry.isFile()) {
-      await visitor(full, entry);
-    }
-  }
-}
-async function listDays(config2) {
-  const root = join3(config2.dataDir, "archive");
-  const days = [];
-  await walkFiles(root, async (full) => {
-    const name = basename(full);
-    if (!/^\d{4}-\d{2}-\d{2}\.md$/.test(name)) return;
-    try {
-      const info = await stat2(full);
-      days.push({
-        date: name.slice(0, 10),
-        path: full,
-        relative: relative(root, full),
-        size: info.size,
-        mtime: info.mtime.toISOString()
-      });
-    } catch {
-    }
-  });
-  days.sort((a, b) => b.date.localeCompare(a.date));
-  return days;
-}
-async function getDay(config2, dateString) {
-  const target = dayFile(config2, dateString);
-  if (existsSync3(target)) {
-    return { date: dateString, exists: true, text: await readFile2(target, "utf8"), path: target };
-  }
-  const days = await listDays(config2);
-  const found = days.find((day) => day.date === dateString);
-  if (found) {
-    return { date: dateString, exists: true, text: await readFile2(found.path, "utf8"), path: found.path };
-  }
-  return { date: dateString, exists: false, text: "", path: target };
-}
-async function saveDay(config2, dateString, text) {
-  const target = dayFile(config2, dateString);
-  await mkdir2(dirname2(target), { recursive: true });
-  await writeFile2(target, String(text ?? ""), "utf8");
-  return getDay(config2, dateString);
-}
-async function searchDays(config2, query) {
-  const q = String(query || "").trim();
-  if (!q) throw new Error("\u641C\u7D22\u5173\u952E\u8BCD\u4E0D\u80FD\u4E3A\u7A7A");
-  const lower = q.toLowerCase();
-  const days = await listDays(config2);
-  const hits = [];
-  for (const day of days) {
-    let text;
-    try {
-      text = await readFile2(day.path, "utf8");
-    } catch {
-      continue;
-    }
-    const haystack = text.toLowerCase();
-    let from = 0;
-    let count = 0;
-    let first = -1;
-    while (true) {
-      const index = haystack.indexOf(lower, from);
-      if (index < 0) break;
-      count += 1;
-      if (first < 0) first = index;
-      from = index + lower.length;
-    }
-    if (!count) continue;
-    const start = Math.max(0, first - Math.floor(MAX_SNIPPET / 2));
-    const end = Math.min(text.length, first + q.length + Math.floor(MAX_SNIPPET / 2));
-    hits.push({
-      date: day.date,
-      count,
-      snippet: `${start > 0 ? "\u2026" : ""}${text.slice(start, end).replace(/\s+/g, " ").trim()}${end < text.length ? "\u2026" : ""}`
-    });
-    if (hits.length >= MAX_SEARCH_HITS) break;
-  }
-  return hits;
-}
-async function extractProjects(config2) {
-  const days = await listDays(config2);
-  const projects = /* @__PURE__ */ new Map();
-  for (const day of days) {
-    let text;
-    try {
-      text = await readFile2(day.path, "utf8");
-    } catch {
-      continue;
-    }
-    const lines = text.split(/\r?\n/);
-    let current = null;
-    for (const line of lines) {
-      const heading = /^###\s+(.+?)\s*$/.exec(line);
-      if (heading) {
-        current = heading[1].trim();
-        if (!projects.has(current)) projects.set(current, { name: current, days: [], commits: 0 });
-        projects.get(current).days.push(day.date);
-        continue;
-      }
-      if (/^##\s+/.test(line)) current = null;
-      if (current && /^-\s+`[0-9a-f]+`/i.test(line)) projects.get(current).commits += 1;
-    }
-  }
-  return [...projects.values()].map((project) => ({
-    ...project,
-    days: [...new Set(project.days)].sort()
-  })).sort((a, b) => b.commits - a.commits || a.name.localeCompare(b.name));
-}
-async function listReports(config2) {
-  const dir = reportsDir(config2);
-  const reports = [];
-  let entries = [];
-  try {
-    entries = await readdir2(dir, { withFileTypes: true });
-  } catch {
-    return reports;
-  }
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-    const full = join3(dir, entry.name);
-    const info = await stat2(full);
-    reports.push({ name: entry.name, size: info.size, mtime: info.mtime.toISOString() });
-  }
-  reports.sort((a, b) => b.mtime.localeCompare(a.mtime));
-  return reports;
-}
-async function readReport(config2, name) {
-  const safe = basename(String(name || ""));
-  if (!safe.endsWith(".md")) throw new Error("\u62A5\u544A\u6587\u4EF6\u540D\u4E0D\u5408\u6CD5");
-  const full = join3(reportsDir(config2), safe);
-  if (!existsSync3(full)) throw new Error(`\u62A5\u544A\u4E0D\u5B58\u5728\uFF1A${safe}`);
-  return { name: safe, text: await readFile2(full, "utf8") };
-}
-async function writeReport(config2, name, text) {
-  const safe = basename(String(name || ""));
-  if (!safe.endsWith(".md")) throw new Error("\u62A5\u544A\u6587\u4EF6\u540D\u4E0D\u5408\u6CD5");
-  const full = join3(reportsDir(config2), safe);
-  await mkdir2(dirname2(full), { recursive: true });
-  await writeFile2(full, String(text ?? ""), "utf8");
-  return { name: safe, path: full };
-}
-async function createBackup(config2) {
-  const days = await listDays(config2);
-  const archive = [];
-  for (const day of days) {
-    try {
-      archive.push({ date: day.date, relative: day.relative, text: await readFile2(day.path, "utf8") });
-    } catch {
-    }
-  }
-  const reports = [];
-  for (const report of await listReports(config2)) {
-    try {
-      reports.push({ name: report.name, text: (await readReport(config2, report.name)).text });
-    } catch {
-    }
-  }
-  const payload = {
-    format: "zcode-worklog-backup",
-    version: 1,
-    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-    config: {
-      ...config2,
-      ai: { ...config2.ai, apiKey: config2.ai.apiKey ? "__redacted__" : "" }
-    },
-    todos: await loadTodos(config2),
-    archive,
-    reports
-  };
-  const name = `zcode-worklog-backup-${(/* @__PURE__ */ new Date()).toISOString().replace(/[-:]/g, "").replace(/\..+$/, "")}.json`;
-  const file2 = join3(backupsDir(config2), name);
-  await mkdir2(dirname2(file2), { recursive: true });
-  await writeFile2(file2, JSON.stringify(payload, null, 2), "utf8");
-  return { file: file2, name, days: archive.length, reports: reports.length, size: (await stat2(file2)).size };
-}
-async function listBackups(config2) {
-  const dir = backupsDir(config2);
-  const out = [];
-  let entries = [];
-  try {
-    entries = await readdir2(dir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-    const full = join3(dir, entry.name);
-    const info = await stat2(full);
-    out.push({ name: entry.name, size: info.size, mtime: info.mtime.toISOString() });
-  }
-  out.sort((a, b) => b.mtime.localeCompare(a.mtime));
-  return out;
-}
-async function restoreBackup(config2, name) {
-  const safe = basename(String(name || ""));
-  const file2 = join3(backupsDir(config2), safe);
-  if (!existsSync3(file2)) throw new Error(`\u5907\u4EFD\u4E0D\u5B58\u5728\uFF1A${safe}`);
-  const payload = JSON.parse(await readFile2(file2, "utf8"));
-  if (!Array.isArray(payload.archive)) throw new Error("\u5907\u4EFD\u683C\u5F0F\u4E0D\u6B63\u786E");
-  let restored = 0;
-  for (const item of payload.archive) {
-    if (!item?.date || typeof item.text !== "string") continue;
-    await saveDay(config2, item.date, item.text);
-    restored += 1;
-  }
-  if (Array.isArray(payload.todos)) await saveTodos(config2, payload.todos);
-  for (const report of payload.reports || []) {
-    if (report?.name && typeof report.text === "string") {
-      await writeReport(config2, report.name, report.text);
-    }
-  }
-  return { ok: true, restored, todos: Array.isArray(payload.todos) ? payload.todos.length : 0 };
-}
-async function importWorkLog(config2, sourceDir) {
-  const candidates = [
-    join3(sourceDir, "data", "archive"),
-    join3(sourceDir, "archive")
-  ];
-  const source = candidates.find((candidate) => existsSync3(candidate));
-  if (!source) throw new Error("\u6CA1\u6709\u627E\u5230 data\\archive \u6216 archive \u76EE\u5F55");
-  const target = join3(config2.dataDir, "archive");
-  await mkdir2(target, { recursive: true });
-  await cp(source, target, { recursive: true, force: false, errorOnExist: false });
-  const days = await listDays(config2);
-  return { ok: true, source, importedDays: days.length };
-}
-async function deleteBackup(config2, name) {
-  const safe = basename(String(name || ""));
-  const file2 = join3(backupsDir(config2), safe);
-  if (!existsSync3(file2)) throw new Error(`\u5907\u4EFD\u4E0D\u5B58\u5728\uFF1A${safe}`);
-  await unlink(file2);
-  return { ok: true, name: safe };
-}
-
-// lib/archive.mjs
-init_entries();
 var execFileAsync = promisify(execFile);
 var SKIP_DIRS = /* @__PURE__ */ new Set([
   ".git",
@@ -37095,8 +37134,12 @@ async function archiveDays(config2, dates, options = {}) {
   return results;
 }
 
+// src/api.mjs
+init_store();
+
 // lib/report.mjs
 init_config();
+init_store();
 init_sessions();
 
 // lib/templates.mjs
@@ -37271,6 +37314,150 @@ var BUILTINS = {
     user: ["\u603B\u7ED3\u8303\u56F4\uFF1A{{rangeStart}} \u81F3 {{rangeEnd}}", "", "\u5F85\u529E\u5B8C\u6210\u60C5\u51B5\uFF1A{{todos}}", "", "\u6750\u6599\uFF1A", "{{content}}"].join("\n")
   }
 };
+
+// lib/recommend.mjs
+init_config();
+init_store();
+init_entries();
+init_connectors();
+var BASE_WEIGHTS = {
+  overdue: 10,
+  external: 8,
+  "no-log-project": 6,
+  upcoming: 5,
+  stale: 3
+};
+async function loadFeedback(config2) {
+  const state = await loadState(config2);
+  return state.recommendFeedback || {};
+}
+async function recordFeedback(config2, key, kind, accepted) {
+  const { saveState: saveState2 } = await Promise.resolve().then(() => (init_store(), store_exports));
+  const state = await loadState(config2);
+  const feedback = state.recommendFeedback || {};
+  const entry = feedback[kind] || { accepted: 0, ignored: 0 };
+  if (accepted) entry.accepted += 1;
+  else entry.ignored += 1;
+  feedback[kind] = entry;
+  state.recommendFeedback = feedback;
+  await saveState2(config2, state);
+  return entry;
+}
+function kindWeight(feedback, kind) {
+  const entry = feedback[kind];
+  if (!entry) return 1;
+  const total = entry.accepted + entry.ignored;
+  if (!total) return 1;
+  return Math.max(0.2, (entry.accepted + 1) / (total + 2) * 1.5);
+}
+async function buildRecommendations(config2, { date: date5 = localDate(), limit = 8 } = {}) {
+  const today = String(date5);
+  const feedback = await loadFeedback(config2);
+  const items = [];
+  const todos = await loadTodos(config2);
+  for (const todo of todos) {
+    if (todo.status === "done") continue;
+    if (todo.due && todo.due < today) {
+      const carries = todo.carries || 0;
+      items.push({
+        kind: "overdue",
+        score: BASE_WEIGHTS.overdue + carries * 2,
+        weight: kindWeight(feedback, "overdue"),
+        title: "\u903E\u671F\u5F85\u529E\uFF1A" + todo.title,
+        detail: "\u5230\u671F " + todo.due + (carries ? "\uFF0C\u5DF2\u987A\u5EF6 " + carries + " \u6B21" : ""),
+        refs: { todoId: todo.id }
+      });
+    } else if (!todo.due && String(todo.created || "").slice(0, 10) < shiftDays(today, -14)) {
+      items.push({
+        kind: "stale",
+        score: BASE_WEIGHTS.stale,
+        weight: kindWeight(feedback, "stale"),
+        title: "\u957F\u671F\u672A\u52A8\u5F85\u529E\uFF1A" + todo.title,
+        detail: "\u521B\u5EFA\u4E8E " + String(todo.created).slice(0, 10) + "\uFF0C\u4E24\u5468\u4EE5\u4E0A\u672A\u5904\u7406",
+        refs: { todoId: todo.id }
+      });
+    }
+  }
+  const entries = await loadEntries(config2);
+  const soonStart = today;
+  const soonEnd = shiftDays(today, 3);
+  const seen = /* @__PURE__ */ new Set();
+  for (const entry of entries) {
+    if (!["zentao", "feishu", "generic"].includes(entry.source)) continue;
+    if (entry.type === "error") continue;
+    const isTaskish = entry.source === "zentao" && ["task", "bug"].includes(entry.type);
+    if (!isTaskish) continue;
+    const key = entry.fp;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (entry.date >= soonStart && entry.date <= soonEnd) {
+      items.push({
+        kind: "external",
+        score: BASE_WEIGHTS.external,
+        weight: kindWeight(feedback, "external"),
+        title: "\u5916\u90E8\u4EFB\u52A1\u4E34\u671F\uFF1A" + entry.title,
+        detail: "\u6765\u6E90 " + entry.source + "\uFF0C\u65E5\u671F " + entry.date,
+        refs: { entryId: entry.id }
+      });
+    }
+  }
+  const gitProjects = /* @__PURE__ */ new Set();
+  for (const entry of entries) {
+    if (entry.source === "git" && entry.date === today && entry.project) gitProjects.add(entry.project);
+  }
+  const loggedProjects = /* @__PURE__ */ new Set();
+  const todayDay = (await listDays(config2)).find((day) => day.date === today);
+  if (todayDay) {
+    const { getDay: getDay2 } = await Promise.resolve().then(() => (init_store(), store_exports));
+    const day = await getDay2(config2, today);
+    for (const line of day.text.split("\n")) {
+      const match = line.match(/^### (.+)$/);
+      if (match) loggedProjects.add(match[1].trim());
+    }
+  }
+  for (const project of gitProjects) {
+    if (loggedProjects.has(project)) continue;
+    items.push({
+      kind: "no-log-project",
+      score: BASE_WEIGHTS["no-log-project"],
+      weight: kindWeight(feedback, "no-log-project"),
+      title: "\u9879\u76EE\u4ECA\u5929\u6709\u63D0\u4EA4\u4F46\u65E5\u5FD7\u672A\u8986\u76D6\uFF1A" + project,
+      detail: "\u5F52\u6863\u524D\u8865\u4E00\u6761\u8BF4\u660E\uFF0C\u5468\u62A5\u624D\u6709\u5185\u5BB9",
+      refs: { project }
+    });
+  }
+  for (const entry of entries) {
+    if (entry.date !== today) continue;
+    if (entry.source === "watch" || entry.source === "feishu" && entry.type === "wiki") {
+      items.push({
+        kind: "upcoming",
+        score: BASE_WEIGHTS.upcoming,
+        weight: kindWeight(feedback, "upcoming"),
+        title: "\u4ECA\u65E5\u52A8\u6001\uFF1A" + entry.title,
+        detail: "\u6765\u6E90 " + entry.source + (entry.project ? " \xB7 " + entry.project : ""),
+        refs: { entryId: entry.id }
+      });
+      break;
+    }
+  }
+  const ranked = items.map((item) => ({ ...item, final: Math.round(item.score * item.weight * 10) / 10 })).sort((a, b) => b.final - a.final).slice(0, limit);
+  return { date: today, items: ranked };
+}
+function shiftDays(dateString, days) {
+  const [y, m, d] = String(dateString).split("-").map(Number);
+  const date5 = new Date(y, m - 1, d);
+  date5.setDate(date5.getDate() + days);
+  const pad2 = (n) => String(n).padStart(2, "0");
+  return date5.getFullYear() + "-" + pad2(date5.getMonth() + 1) + "-" + pad2(date5.getDate());
+}
+function recommendSection(recommendations) {
+  if (!recommendations.items.length) return [];
+  const lines = ["- \u5EFA\u8BAE\u5173\u6CE8 " + recommendations.items.length + " \u9879\uFF08\u6309\u8BC4\u5206\u6392\u5E8F\uFF09\uFF1A"];
+  for (const item of recommendations.items.slice(0, 6)) {
+    lines.push("  - [" + item.kind + "] " + item.title + (item.detail ? "\uFF08" + item.detail + "\uFF09" : ""));
+  }
+  return ["## \u5EFA\u8BAE\u5173\u6CE8", ...lines, ""];
+}
 
 // lib/report.mjs
 function pad(n) {
@@ -37525,8 +37712,14 @@ ${String(error62?.message || error62)}
 `;
     }
   }
+  const recommendations = await buildRecommendations(config2);
+  const recoLines = recommendSection(recommendations);
   finalText = `${finalText.replace(/\n*$/, "\n")}
 ${(await todoReportSection(config2, dates)).join("\n")}`;
+  if (recoLines.length) {
+    finalText = `${finalText.replace(/\n*$/, "\n")}
+${recoLines.join("\n")}`;
+  }
   const name = reportName(kind, key);
   const path = await writeReport(config2, name, finalText);
   return { kind, key, name, path: path.path, text: finalText, days: days.length, ai };
@@ -38205,6 +38398,7 @@ init_sessions();
 
 // lib/scheduler.mjs
 init_config();
+init_store();
 var TASK_DEFS = [
   {
     id: "collect-sessions",
@@ -38367,6 +38561,7 @@ async function getHistory(config2) {
 }
 
 // lib/calendar.mjs
+init_store();
 init_entries();
 init_config();
 init_sessions();
@@ -38727,6 +38922,16 @@ async function collectAction(config2, args = {}) {
   if (action === "set") return updateTask(config2, args);
   throw new Error(`\u672A\u77E5 action: ${action}`);
 }
+async function recommendAction(config2, args = {}) {
+  const action = args.action || "get";
+  if (action === "get") return buildRecommendations(config2, { date: args.date || localDate() });
+  if (action === "feedback") {
+    if (!args.kind) throw new Error("feedback \u9700\u8981 kind");
+    const entry = await recordFeedback(config2, args.key || "", String(args.kind), Boolean(args.accepted));
+    return { kind: args.kind, feedback: entry };
+  }
+  throw new Error(`\u672A\u77E5 action: ${action}`);
+}
 async function connectorsAction(configArg, args = {}) {
   const config2 = loadConfig();
   const action = args.action || "list";
@@ -38985,6 +39190,8 @@ async function dispatch(op, args = {}) {
       return templatesAction(config2, args);
     case "connectors":
       return connectorsAction(config2, args);
+    case "recommend":
+      return recommendAction(config2, args);
     case "days":
       return listDays(config2);
     case "reports":
@@ -39239,6 +39446,21 @@ tool(
   (args) => calendarAction(loadConfig(), args)
 );
 tool(
+  "worklog_recommend",
+  {
+    title: "\u5DE5\u4F5C\u5EFA\u8BAE",
+    description: "WorkLog \u5468\u671F\u5DE5\u4F5C\u5EFA\u8BAE\uFF08\u89C4\u5219\u5F15\u64CE\uFF0C\u65E0\u9700 AI\uFF09\uFF1Aaction=get \u8FD4\u56DE\u6309\u8BC4\u5206\u6392\u5E8F\u7684\u5EFA\u8BAE\u6E05\u5355\uFF08\u903E\u671F\u987A\u5EF6\u5F85\u529E/\u5916\u90E8\u4EFB\u52A1\u4E34\u671F/\u6709\u63D0\u4EA4\u4F46\u65E5\u5FD7\u672A\u8986\u76D6\u7684\u9879\u76EE/\u4ECA\u65E5\u52A8\u6001\uFF09\uFF0C\u6BCF\u6761\u5E26 kind \u4E0E\u8BC4\u5206\uFF1Baction=feedback {kind, key?, accepted} \u8BB0\u5F55\u91C7\u7EB3/\u5FFD\u7565\u53CD\u9988\uFF0C\u540C kind \u591A\u6B21\u5FFD\u7565\u4F1A\u81EA\u52A8\u964D\u4F4E\u8BE5\u7C7B\u5EFA\u8BAE\u6743\u91CD\u3002\u5468\u62A5/\u6708\u62A5\u5C3E\u90E8\u5DF2\u81EA\u52A8\u6CE8\u5165\u300C## \u5EFA\u8BAE\u5173\u6CE8\u300D\u3002",
+    inputSchema: external_exports.object({
+      action: external_exports.enum(["get", "feedback"]).optional(),
+      kind: external_exports.string().optional(),
+      key: external_exports.string().optional(),
+      accepted: external_exports.boolean().optional(),
+      date: external_exports.string().optional()
+    })
+  },
+  (args) => recommendAction(loadConfig(), args)
+);
+tool(
   "worklog_connectors",
   {
     title: "\u5916\u90E8\u8FDE\u63A5\u5668",
@@ -39318,7 +39540,8 @@ server.registerTool(
         "wizard",
         "calendar",
         "templates",
-        "connectors"
+        "connectors",
+        "recommend"
       ]),
       args: external_exports.record(external_exports.string(), external_exports.unknown()).optional()
     }),

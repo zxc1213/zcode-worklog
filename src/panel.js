@@ -96,6 +96,8 @@ const state = {
   connList: null,
   connDraft: null,
   connLoading: false,
+  recoData: null,
+  recoLoading: false,
   reports: [],
   backups: [],
   config: null,
@@ -282,6 +284,7 @@ function overviewTab() {
     'div',
     null,
     noticeNode(),
+    recoCard(),
     h(
       'div',
       { className: 'wl-grid' },
@@ -3103,6 +3106,83 @@ function connectorsSection() {
       : null,
   )
 }
+
+async function loadReco() {
+  if (state.recoData && state.recoData.date === today()) return
+  if (state.recoLoading) return
+  state.recoLoading = true
+  render()
+  try {
+    state.recoData = await call('recommend', { action: 'get' })
+  } catch (error) {
+    setNotice('err', '建议加载失败：' + String(error?.message || error))
+  } finally {
+    state.recoLoading = false
+  }
+  render()
+}
+
+function recoCard() {
+  const data = state.recoData
+  const items = data?.items || []
+  if (!items.length) return null
+  return h(
+    'div',
+    { className: 'wl-card wide' },
+    h(
+      'div',
+      { className: 'wl-row' },
+      h('div', { className: 'wl-section-title', style: { flex: '1' } }, '建议关注'),
+      h('span', { className: 'wl-hint' }, '规则引擎 · 忽略会降低同类权重'),
+      h(
+        'button',
+        { className: 'wl-btn tiny', disabled: state.recoLoading, onClick: () => { state.recoData = null; loadReco() } },
+        '刷新',
+      ),
+    ),
+    items.map((item) =>
+      h(
+        'div',
+        { className: 'wl-row', key: item.kind + item.title },
+        h('span', { className: 'wl-tag' }, item.kind),
+        h(
+          'div',
+          { className: 'grow' },
+          h('div', { className: 'wl-item-title' }, item.title),
+          item.detail ? h('div', { className: 'wl-item-meta' }, item.detail) : null,
+        ),
+        h('span', { className: 'wl-hint' }, String(item.final || item.score)),
+        h(
+          'button',
+          {
+            className: 'wl-btn tiny',
+            disabled: state.busy === 'reco-fb',
+            onClick: () =>
+              act('reco-fb', async () => {
+                await call('recommend', { action: 'feedback', kind: item.kind, key: item.title, accepted: true })
+                state.recoData = null
+              }),
+          },
+          '采纳',
+        ),
+        h(
+          'button',
+          {
+            className: 'wl-btn tiny',
+            disabled: state.busy === 'reco-fb',
+            onClick: () =>
+              act('reco-fb', async () => {
+                await call('recommend', { action: 'feedback', kind: item.kind, key: item.title, accepted: false })
+                state.recoData = null
+              }),
+          },
+          '忽略',
+        ),
+      ),
+    ),
+  )
+}
+
 
 function render() {
   const root = document.getElementById('app')

@@ -135,7 +135,7 @@ Day-file format:
 
 ## Agent tools
 
-`worklog_status`, `worklog_day`, `worklog_search`, `worklog_todos`, `worklog_archive`, `worklog_sessions`, `worklog_report`, `worklog_ask`, `worklog_projects`, `worklog_usage`, `worklog_backup`, `worklog_config`, `worklog_open`, `worklog_collect` (collection scheduler & diagnostics), `worklog_wizard` (AI tool config wizard), `worklog_calendar` (calendar aggregation), `worklog_templates` (prompt templates: list/save/reset), `worklog_connectors` (external connectors: list/set/remove/test/sync).
+`worklog_status`, `worklog_day`, `worklog_search`, `worklog_todos`, `worklog_archive`, `worklog_sessions`, `worklog_report`, `worklog_ask`, `worklog_projects`, `worklog_usage`, `worklog_backup`, `worklog_config`, `worklog_open`, `worklog_collect` (collection scheduler & diagnostics), `worklog_wizard` (AI tool config wizard), `worklog_calendar` (calendar aggregation), `worklog_templates` (prompt templates: list/save/reset), `worklog_connectors` (external connectors: list/set/remove/test/sync), `worklog_recommend` (rule-based work suggestions: get/feedback).
 
 Session tool names are usually prefixed with `mcp__plugin_zcode-worklog_worklog__`.
 
