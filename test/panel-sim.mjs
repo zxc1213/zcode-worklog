@@ -213,8 +213,15 @@ const clickTab = async (label) => {
 }
 
 await clickTab('日志')
+await new Promise((resolve) => setTimeout(resolve, 50))
+assert.ok(doc.querySelector('.wl-cal-grid'), 'logs tab shows month calendar')
+assert.ok(text().includes('# 测试日志'), 'log content readable in view mode')
+const editBtn = [...doc.querySelectorAll('button')].find((item) => item.textContent === '编辑')
+assert.ok(editBtn, 'edit toggle exists')
+editBtn.click()
+await new Promise((resolve) => setTimeout(resolve, 20))
 const logArea = doc.querySelector('textarea')
-assert.ok(logArea && logArea.value.includes('# 测试日志'), 'logs tab loads day text')
+assert.ok(logArea && logArea.value.includes('# 测试日志'), 'edit mode shows textarea')
 console.log('logs OK')
 
 await clickTab('待办')

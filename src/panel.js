@@ -107,6 +107,10 @@ const state = {
   sessCalData: null,
   sessCalLoading: false,
   sessCalSelected: '',
+  logCalMonth: '',
+  logCalData: null,
+  logCalLoading: false,
+  logView: 'view',
   sessFilters: { q: '', project: '', source: '', start: '', end: '', minTurns: '', workOnly: false, workKeywords: '' },
   sessGroupBy: '',
   sessResult: null,
@@ -464,6 +468,7 @@ function logsTab() {
     'div',
     null,
     noticeNode(),
+    logCalendarBlock(),
     h(
       'div',
       { className: 'wl-date-row' },
@@ -495,6 +500,17 @@ function logsTab() {
     h(
       'div',
       { className: 'wl-toolbar' },
+      h(
+        'button',
+        {
+          className: 'wl-btn',
+          onClick: () => {
+            state.logView = state.logView === 'view' ? 'edit' : 'view'
+            render()
+          },
+        },
+        log.exists ? (state.logView === 'view' ? '编辑' : '预览') : '写内容',
+      ),
       h(
         'button',
         {
@@ -552,7 +568,13 @@ function logsTab() {
       ),
     ),
     log.exists ? null : h('div', { className: 'wl-notice info' }, '这一天还没有归档，可以直接写，或点「重新归档」扫描 Git/文档。'),
-    h('textarea', {
+    log.exists && state.logView === 'view'
+      ? h(
+          'div',
+          { className: 'wl-pre', style: { maxHeight: '420px', overflow: 'auto', marginTop: '8px' } },
+          log.text || '（内容为空）',
+        )
+      : h('textarea', {
       className: 'wl-area',
       value: log.text,
       placeholder: '# 工作日志\n\n## 今日概览\n…',
@@ -3584,6 +3606,99 @@ function sessCalendarBlock() {
 
 function sessionsCalendarWrapper() {
   return h('div', null, sessCalendarBlock())
+}
+
+async function loadLogCal() {
+  if (state.logCalLoading) return
+  state.logCalLoading = true
+  render()
+  try {
+    state.logCalData = await call('calendar', { action: 'month', month: state.logCalMonth })
+  } catch (error) {
+    setNotice('err', '日志月历加载失败：' + String(error?.message || error))
+  } finally {
+    state.logCalLoading = false
+  }
+  render()
+}
+
+function logCalKey(d) {
+  const now = new Date()
+  const y = d ? Number(String(d).slice(0, 4)) : now.getFullYear()
+  const m = d ? Number(String(d).slice(5, 7)) : now.getMonth() + 1
+  return y + '-' + String(m).padStart(2, '0')
+}
+
+async function pickLogDay(date) {
+  state.log.date = date
+  state.log.loaded = false
+  state.logView = 'view'
+  await act(
+    'load',
+    async () => {
+      await loadLog(date)
+    },
+    { refresh: false },
+  )
+}
+
+function logCalendarBlock() {
+  if (!state.logCalMonth) state.logCalMonth = logCalKey()
+  if (!state.logCalData && !state.logCalLoading) loadLogCal()
+  const data = state.logCalData
+  const days = data?.days || {}
+  const dates = Object.keys(days)
+  const lead = dates.length ? (new Date(dates[0]).getDay() + 6) % 7 : 0
+  return h(
+    'div',
+    { className: 'wl-card wide' },
+    h(
+      'div',
+      { className: 'wl-row' },
+      h('div', { className: 'wl-section-title' }, '日志月历'),
+      h(
+        'button',
+        { className: 'wl-btn tiny', disabled: state.logCalLoading, onClick: () => { state.logCalMonth = logCalKey(String(Number(state.logCalMonth.slice(0, 4)) - 1) + state.logCalMonth.slice(4)); loadLogCal() } },
+        '◀',
+      ),
+      h('span', { className: 'wl-hint' }, state.logCalMonth),
+      h(
+        'button',
+        { className: 'wl-btn tiny', disabled: state.logCalLoading, onClick: () => { state.logCalMonth = logCalKey(String(Number(state.logCalMonth.slice(0, 4)) + 1) + state.logCalMonth.slice(4)); loadLogCal() } },
+        '▶',
+      ),
+      h('button', { className: 'wl-btn tiny', onClick: () => { state.logCalMonth = logCalKey(); loadLogCal() } }, '今月'),
+    ),
+    data
+      ? h(
+          'div',
+          { className: 'wl-cal-grid' },
+          ['一', '二', '三', '四', '五', '六', '日'].map((label) => h('div', { className: 'wl-cal-head' }, label)),
+          Array.from({ length: lead }, (_, i) => h('span', { className: 'wl-cal-cell empty', key: 'e' + i }, '')),
+          dates.map((date) =>
+            h(
+              'button',
+              {
+                className: 'wl-cal-cell' + (state.log.date === date ? ' sel' : '') + (date === data.today ? ' today' : ''),
+                key: date,
+                onClick: () => pickLogDay(date),
+              },
+              h('div', { className: 'wl-cal-num' }, String(Number(date.slice(8, 10)))),
+              h(
+                'div',
+                { className: 'wl-cal-marks' },
+                days[date].archived ? h('span', { className: 'wl-cal-dot ok' }, '') : null,
+                days[date].hasDailyReport ? h('span', { className: 'wl-cal-dot rep' }, '') : null,
+                days[date].entryCount ? h('span', { className: 'wl-cal-badge' }, String(days[date].entryCount)) : null,
+                days[date].todoDone ? h('span', { className: 'wl-cal-badge todo' }, '✓' + days[date].todoDone) : null,
+              ),
+            ),
+          ),
+        )
+      : h('div', { className: 'wl-hint' }, state.logCalLoading ? '加载中…' : ''),
+    h('div', { className: 'wl-hint', style: { marginTop: '4px' } },
+      '点某天查看/编辑日志。● 已归档 · ● 有日报 · 数字=采集条目 · ✓=完成待办'),
+  )
 }
 
 function render() {
