@@ -75,6 +75,7 @@ const state = {
   todos: [],
   todoFilter: { pri: '', tag: '' },
   editingTodo: null,
+  editingDraft: null,
   reports: [],
   backups: [],
   config: null,
@@ -821,10 +822,7 @@ function todoItem(todo, todayText) {
           'button',
           {
             className: 'wl-btn tiny',
-            onClick: () => {
-              state.editingTodo = todo.id
-              render()
-            },
+            onClick: () => startTodoEdit(todo),
           },
           '编辑',
         )
@@ -843,40 +841,82 @@ function todoItem(todo, todayText) {
   )
 }
 
-function todoEditForm(todo) {
+function startTodoEdit(todo) {
   const current = String(todo.repeat || '')
-  const repeatType = current === 'daily' ? 'daily' : current.match(/^weekly:/) ? 'weekly' : current.match(/^monthly:/) ? 'monthly' : ''
+  const weekly = current.match(/^weekly:([0-6])$/)
+  const monthly = current.match(/^monthly:(\d{1,2})$/)
+  state.editingTodo = todo.id
+  state.editingDraft = {
+    title: todo.title,
+    pri: todo.pri || '',
+    due: todo.due || '',
+    repeatType: current === 'daily' ? 'daily' : weekly ? 'weekly' : monthly ? 'monthly' : '',
+    weekday: weekly ? Number(weekly[1]) : 1,
+    monthday: monthly ? Number(monthly[1]) : 1,
+    md: todo.md || '',
+    tags: (todo.tags || []).join(' '),
+    subtasks: (todo.subtasks || []).map((sub) => ({ ...sub })),
+  }
+  render()
+}
+
+function todoEditForm(todo) {
+  const draft = state.editingDraft
+  if (!draft) return todoItem(todo, today())
+  const harvest = () => {
+    draft.title = document.getElementById('wl-edit-title')?.value ?? draft.title
+    draft.pri = document.getElementById('wl-edit-pri')?.value ?? draft.pri
+    draft.due = document.getElementById('wl-edit-due')?.value ?? draft.due
+    draft.repeatType = document.getElementById('wl-edit-repeat')?.value ?? draft.repeatType
+    draft.weekday = document.getElementById('wl-edit-weekday')?.value ?? draft.weekday
+    draft.monthday = document.getElementById('wl-edit-monthday')?.value ?? draft.monthday
+    draft.md = document.getElementById('wl-edit-md')?.value ?? draft.md
+    draft.tags = document.getElementById('wl-edit-tags')?.value ?? draft.tags
+  }
   const save = () => {
-    const title = String(document.getElementById('wl-edit-title')?.value || '').trim()
+    harvest()
+    const title = String(draft.title || '').trim()
     if (!title) {
       setNotice('err', '标题不能为空')
       render()
       return
     }
-    const repeatTypeNow = document.getElementById('wl-edit-repeat')?.value || ''
     let repeat = ''
-    if (repeatTypeNow === 'daily') {
-      repeat = 'daily'
-    } else if (repeatTypeNow === 'weekly') {
-      const weekday = Number(document.getElementById('wl-edit-weekday')?.value ?? 1)
-      repeat = 'weekly:' + weekday
-    } else if (repeatTypeNow === 'monthly') {
-      const monthday = Math.min(28, Math.max(1, Number(document.getElementById('wl-edit-monthday')?.value || 1)))
-      repeat = 'monthly:' + monthday
+    if (draft.repeatType === 'daily') repeat = 'daily'
+    else if (draft.repeatType === 'weekly') repeat = 'weekly:' + (Number(draft.weekday) || 0)
+    else if (draft.repeatType === 'monthly') {
+      repeat = 'monthly:' + Math.min(28, Math.max(1, Number(draft.monthday) || 1))
     }
+    const tags = [...new Set(
+      String(draft.tags || '')
+        .split(/[\s,，、]+/)
+        .map((item) => item.trim().replace(/^#/, ''))
+        .filter(Boolean),
+    )]
     const patch = {
       id: todo.id,
       title,
-      pri: document.getElementById('wl-edit-pri')?.value || '',
-      due: document.getElementById('wl-edit-due')?.value || '',
+      pri: draft.pri || '',
+      due: draft.due || '',
       repeat,
-      md: document.getElementById('wl-edit-md')?.value || '',
+      md: draft.md || '',
+      tags,
+      subtasks: draft.subtasks,
     }
     act('todo-edit', async () => {
       await call('todos', { action: 'update', ...patch })
       state.editingTodo = null
+      state.editingDraft = null
       setNotice('ok', '已保存：' + title)
     })
+  }
+  const addSubtask = () => {
+    harvest()
+    const input = document.getElementById('wl-edit-sub-new')
+    const title = String(input?.value || '').trim()
+    if (!title) return
+    draft.subtasks.push({ id: 'sub-' + Date.now(), title, done: false })
+    render()
   }
   return h(
     'div',
@@ -884,51 +924,71 @@ function todoEditForm(todo) {
     h(
       'div',
       { className: 'grow' },
-      h('input', { className: 'wl-input', id: 'wl-edit-title', value: todo.title }),
+      h('input', { className: 'wl-input', id: 'wl-edit-title', value: draft.title }),
       h(
         'div',
         { className: 'wl-row', style: { marginTop: '6px' } },
         h(
           'select',
-          { className: 'wl-select', id: 'wl-edit-pri', style: { width: '86px' } },
-          h('option', { value: '', selected: !todo.pri }, '优先级'),
-          h('option', { value: '高', selected: todo.pri === '高' }, '高'),
-          h('option', { value: '中', selected: todo.pri === '中' }, '中'),
-          h('option', { value: '低', selected: todo.pri === '低' }, '低'),
+          {
+            className: 'wl-select',
+            id: 'wl-edit-pri',
+            style: { width: '86px' },
+            onChange: harvest,
+          },
+          h('option', { value: '', selected: !draft.pri }, '优先级'),
+          h('option', { value: '高', selected: draft.pri === '高' }, '高'),
+          h('option', { value: '中', selected: draft.pri === '中' }, '中'),
+          h('option', { value: '低', selected: draft.pri === '低' }, '低'),
         ),
         h('input', {
           className: 'wl-input',
           id: 'wl-edit-due',
           type: 'date',
-          value: todo.due || '',
+          value: draft.due || '',
           style: { width: '136px' },
+          onChange: harvest,
         }),
         h(
           'select',
-          { className: 'wl-select', id: 'wl-edit-repeat', style: { width: '92px' } },
-          h('option', { value: '', selected: !repeatType }, '不重复'),
-          h('option', { value: 'daily', selected: repeatType === 'daily' }, '每天'),
-          h('option', { value: 'weekly', selected: repeatType === 'weekly' }, '每周…'),
-          h('option', { value: 'monthly', selected: repeatType === 'monthly' }, '每月…'),
+          {
+            className: 'wl-select',
+            id: 'wl-edit-repeat',
+            style: { width: '92px' },
+            onChange: () => {
+              harvest()
+              render()
+            },
+          },
+          h('option', { value: '', selected: !draft.repeatType }, '不重复'),
+          h('option', { value: 'daily', selected: draft.repeatType === 'daily' }, '每天'),
+          h('option', { value: 'weekly', selected: draft.repeatType === 'weekly' }, '每周…'),
+          h('option', { value: 'monthly', selected: draft.repeatType === 'monthly' }, '每月…'),
         ),
-        repeatType === 'weekly'
+        draft.repeatType === 'weekly'
           ? h(
               'select',
-              { className: 'wl-select', id: 'wl-edit-weekday', style: { width: '92px' } },
+              {
+                className: 'wl-select',
+                id: 'wl-edit-weekday',
+                style: { width: '92px' },
+                onChange: harvest,
+              },
               ...WEEKDAY_LABELS.map((label, index) =>
-                h('option', { value: index, selected: current === 'weekly:' + index }, '周' + label),
+                h('option', { value: index, selected: Number(draft.weekday) === index }, '周' + label),
               ),
             )
           : null,
-        repeatType === 'monthly'
+        draft.repeatType === 'monthly'
           ? h('input', {
               className: 'wl-input',
               id: 'wl-edit-monthday',
               type: 'number',
               min: 1,
               max: 28,
-              value: current.match(/^monthly:(\d{1,2})$/) ? Number(current.slice(8)) : 1,
+              value: draft.monthday,
               style: { width: '64px' },
+              onChange: harvest,
             })
           : null,
       ),
@@ -938,15 +998,63 @@ function todoEditForm(todo) {
         rows: 2,
         placeholder: '备注（详情、链接、上下文）',
         style: { marginTop: '6px' },
-      }, todo.md || ''),
-      (todo.tags || []).length || (todo.subtasks || []).length
-        ? h(
+        onInput: harvest,
+      }, draft.md || ''),
+      h('input', {
+        className: 'wl-input',
+        id: 'wl-edit-tags',
+        placeholder: '标签，空格分隔，如：周报 okr',
+        style: { marginTop: '6px' },
+        onInput: harvest,
+      }, draft.tags || ''),
+      h(
+        'div',
+        { className: 'wl-section', style: { marginTop: '6px' } },
+        h('div', { className: 'wl-section-title' }, '子任务 ' + draft.subtasks.filter((sub) => sub.done).length + '/' + draft.subtasks.length),
+        draft.subtasks.map((sub, index) =>
+          h(
             'div',
-            { className: 'wl-item-meta', style: { marginTop: '4px' } },
-            (todo.tags || []).map((tag) => h('span', { className: 'wl-tag' }, '#' + tag)),
-            subCountNode(todo),
-          )
-        : null,
+            { className: 'wl-row', key: sub.id, style: { marginTop: '2px' } },
+            h('input', {
+              className: 'wl-check',
+              type: 'checkbox',
+              checked: Boolean(sub.done),
+              onChange: () => {
+                harvest()
+                draft.subtasks[index].done = !draft.subtasks[index].done
+                render()
+              },
+            }),
+            h('span', { className: 'grow' + (sub.done ? ' wl-sub-done' : '') }, sub.title),
+            h(
+              'button',
+              {
+                className: 'wl-btn danger tiny',
+                onClick: () => {
+                  harvest()
+                  draft.subtasks.splice(index, 1)
+                  render()
+                },
+              },
+              '删',
+            ),
+          ),
+        ),
+        h(
+          'div',
+          { className: 'wl-row', style: { marginTop: '4px' } },
+          h('input', {
+            className: 'wl-input',
+            id: 'wl-edit-sub-new',
+            placeholder: '新子任务，回车添加',
+            style: { flex: '1' },
+            onKeydown: (event) => {
+              if (event.key === 'Enter') addSubtask()
+            },
+          }),
+          h('button', { className: 'wl-btn tiny', onClick: addSubtask }, '添加子任务'),
+        ),
+      ),
       h(
         'div',
         { className: 'wl-row', style: { marginTop: '6px' } },
@@ -961,6 +1069,7 @@ function todoEditForm(todo) {
             className: 'wl-btn',
             onClick: () => {
               state.editingTodo = null
+              state.editingDraft = null
               render()
             },
           },
@@ -983,14 +1092,31 @@ function addTodoFromForm() {
   const raw = titleInput?.value?.trim() || ''
   if (!raw) return
   const priSelect = document.getElementById('wl-todo-pri')
+  const addPri = priSelect?.value || ''
   const dueInput = document.getElementById('wl-todo-due')
+  const addDue = dueInput?.value || ''
   const priMatch = raw.match(/!(高|中|低)/)
   const dueMatch = raw.match(/@(\d{4}-\d{2}-\d{2})/)
-  const title = raw.replace(/!(高|中|低)/g, '').replace(/@\d{4}-\d{2}-\d{2}/g, '').trim()
-  const pri = priSelect?.value || (priMatch ? priMatch[1] : '')
-  const due = dueInput?.value || (dueMatch ? dueMatch[1] : '')
+  const repeatMatch = raw.match(/repeat=(daily|weekly:[0-6]|monthly:(?:[1-9]|[12]\d|3[01]))/)
+  const tagMatches = raw.match(/#[^\s#@!]+/g) || []
+  const tags = [...new Set(tagMatches.map((item) => item.slice(1)))]
+  const title = raw
+    .replace(/!(高|中|低)/g, '')
+    .replace(/@\d{4}-\d{2}-\d{2}/g, '')
+    .replace(/repeat=\S+/g, '')
+    .replace(/#[^\s#@!]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!title) {
+    setNotice('err', '标题不能为空（只留下了标记符号）')
+    render()
+    return
+  }
+  const pri = addPri || (priMatch ? priMatch[1] : '')
+  const due = addDue || (dueMatch ? dueMatch[1] : '')
+  const repeat = repeatMatch ? repeatMatch[1] : ''
   act('todo-add', async () => {
-    await call('todos', { action: 'add', title, pri, due })
+    await call('todos', { action: 'add', title, pri, due, repeat, tags })
     if (titleInput) titleInput.value = ''
     setNotice('ok', `已添加：${title}`)
   })

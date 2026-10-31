@@ -232,3 +232,28 @@ describe('todos v2 report section', () => {
     assert.match(report.text, /顺延最多：老拖延（顺延 3 次，仍未完成）/)
   })
 })
+
+describe('todos v2 m2', () => {
+  it('repeating a todo carries tags and resets subtask done flags', async () => {
+    const added = await store.addTodo(config, {
+      title: '每日巡检',
+      repeat: 'daily',
+      tags: ['巡检'],
+      subtasks: [{ title: '看日志', done: true }, { title: '发通报' }],
+    })
+    const done = await store.updateTodo(config, { id: added.id, status: 'done' })
+    assert.ok(done.spawned, 'daily todo spawns the next instance')
+    assert.deepEqual(done.spawned.tags, ['巡检'])
+    assert.equal(done.spawned.subtasks.length, 2)
+    assert.ok(done.spawned.subtasks.every((sub) => !sub.done), 'subtask done flags reset on spawn')
+    assert.equal(done.spawned.carries, 0)
+    assert.equal(done.spawned.status, 'open')
+  })
+
+  it('adds todos with tags through the api and filters by tag', async () => {
+    await api.todoAction(config, { action: 'add', title: '带标签任务', tags: ['周报', 'okr'], pri: '高' })
+    const byTag = await api.todoAction(config, { action: 'list', tag: '周报' })
+    assert.ok(byTag.some((todo) => todo.title === '带标签任务'))
+    assert.ok(byTag.every((todo) => todo.tags.includes('周报')))
+  })
+})

@@ -7,8 +7,8 @@ description: 管理待办：列表、添加、编辑、完成、重开、删除�
 按第一个词分派，调用 `worklog_todos`：
 
 - 为空或 `list` → `{ action: "list" }`，结果已按智能排序（逾期 > 高/中/低 > 到期日升序），按「进行中 / 已完成」分组列出。支持过滤：`{ action: "list", status: "open"|"done", pri: "高"|"中"|"低", tag: "标签", q: "关键词", sort: "smart"|"due"|"created" }`；
-- `add <标题>` → `{ action: "add", title }`。支持附加 `!高` / `!中` / `!低`、`@YYYY-MM-DD`、`repeat=daily|weekly:0-6|monthly:1-31`；tags/subtasks 参数 0.3.1 开放；
-- `edit <id>` → 需要改哪个字段就传哪个：`{ action: "update", id, title?, pri?, due?, repeat?, md? }`；
+- `add <标题>` → `{ action: "add", title, tags?, subtasks? }`。行内支持 `!高` / `!中` / `!低`、`@YYYY-MM-DD`、`#标签`（可多个）、`repeat=daily|weekly:0-6|monthly:1-28`；subtasks 传 `{title, done?}` 数组；
+- `edit <id>` → 需要改哪个字段就传哪个：`{ action: "update", id, title?, pri?, due?, repeat?, md?, tags?, subtasks? }`；
 - `done <id>` → `{ action: "complete", id }`；
 - `reopen <id>` → `{ action: "reopen", id }`；
 - `del <id>` → `{ action: "delete", id }`；

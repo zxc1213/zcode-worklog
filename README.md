@@ -49,7 +49,7 @@ Six tabs:
 |---|---|
 | Overview | Today's archive state, log/todo/project/backup/AI-session counts, today's AI sessions, recent runs, one-click archive |
 | Logs | Read/edit/save a day's Markdown, search the archive, re-archive, generate a daily report |
-| Todos | Add, inline edit, complete, reopen, delete, clear completed; smart order (overdue > priority > due date), pri/tag filters, stats bar; `!high` / `@2026-10-30` shortcuts |
+| Todos | Add, inline edit, complete, reopen, delete, clear completed; subtask checklist and tags managed in the edit form; smart order (overdue > priority > due date), pri/tag filters, stats bar; `!high` / `#tag` / `@2026-10-30` shortcuts |
 | Reports | Daily, weekly, monthly, quarterly, performance material, project dossier; optional AI polish; view generated reports |
 | Sessions | Scan local AI tool sessions by date; view source/title/turns/project and session sources; read-only, never writes the archive |
 | Settings | Collapsible blocks: data & scanning, AI polish, backup/restore, import from old WorkLog; sticky save bar on top |

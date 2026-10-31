@@ -34472,7 +34472,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 var PLUGIN_NAME = "zcode-worklog";
-var PLUGIN_VERSION = "0.3.0";
+var PLUGIN_VERSION = "0.3.1";
 function pluginHome() {
   const explicit = String(process.env.WORKLOG_HOME || "").trim();
   if (explicit) return resolve(explicit);
@@ -37492,7 +37492,7 @@ tool(
   "worklog_todos",
   {
     title: "\u7BA1\u7406\u5F85\u529E",
-    description: "\u7BA1\u7406\u672C\u5730\u5F85\u529E\uFF1Alist/add/update/complete/reopen/delete/clear_done/carry_over/stats\u3002list \u9ED8\u8BA4\u667A\u80FD\u6392\u5E8F\uFF08\u903E\u671F > \u9AD8/\u4E2D/\u4F4E > \u5230\u671F\u65E5\uFF09\uFF0C\u652F\u6301 status/pri/tag/q \u8FC7\u6EE4\uFF1Badd \u4E0E update \u652F\u6301 pri\uFF08\u9AD8/\u4E2D/\u4F4E\uFF09\u3001due\uFF08YYYY-MM-DD\uFF09\u3001md\u3001repeat\uFF08daily / weekly:0-6 / monthly:1-31\uFF09\uFF1Bcarry_over \u628A\u903E\u671F\u672A\u5B8C\u6210\u9879\u7684 due \u6539\u4E3A\u4ECA\u5929\uFF08\u540C\u65E5\u5E42\u7B49\uFF0C\u5F52\u6863\u4ECA\u5929\u65F6\u81EA\u52A8\u6267\u884C\uFF09\u3002",
+    description: "\u7BA1\u7406\u672C\u5730\u5F85\u529E\uFF1Alist/add/update/complete/reopen/delete/clear_done/carry_over/stats\u3002list \u9ED8\u8BA4\u667A\u80FD\u6392\u5E8F\uFF08\u903E\u671F > \u9AD8/\u4E2D/\u4F4E > \u5230\u671F\u65E5\uFF09\uFF0C\u652F\u6301 status/pri/tag/q \u8FC7\u6EE4\uFF1Badd \u4E0E update \u652F\u6301 pri\uFF08\u9AD8/\u4E2D/\u4F4E\uFF09\u3001due\uFF08YYYY-MM-DD\uFF09\u3001md\u3001repeat\uFF08daily / weekly:0-6 / monthly:1-28\uFF09\u3001tags\uFF08\u5B57\u7B26\u4E32\u6570\u7EC4\uFF0C\u53EF\u53BB # \u524D\u7F00\uFF09\u3001subtasks\uFF08{title, done} \u5217\u8868\uFF09\uFF1Bcarry_over \u628A\u903E\u671F\u672A\u5B8C\u6210\u9879\u7684 due \u6539\u4E3A\u4ECA\u5929\uFF08\u540C\u65E5\u5E42\u7B49\uFF0C\u5F52\u6863\u4ECA\u5929\u65F6\u81EA\u52A8\u6267\u884C\uFF09\u3002",
     inputSchema: external_exports.object({
       action: external_exports.enum([
         "list",
@@ -37511,6 +37511,8 @@ tool(
       due: external_exports.string().optional(),
       md: external_exports.string().optional(),
       repeat: external_exports.string().optional(),
+      tags: external_exports.array(external_exports.string()).optional(),
+      subtasks: external_exports.array(external_exports.object({ id: external_exports.string().optional(), title: external_exports.string(), done: external_exports.boolean().optional() })).optional(),
       status: external_exports.enum(["open", "done"]).optional(),
       tag: external_exports.string().optional(),
       q: external_exports.string().optional(),

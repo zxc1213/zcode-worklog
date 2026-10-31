@@ -613,3 +613,8 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+.wl-sub-done {
+  color: var(--wl-faint);
+  text-decoration: line-through;
+}
