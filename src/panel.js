@@ -1705,13 +1705,6 @@ async function scanSessionsNow() {
   }, { refresh: false })
 }
 
-async function loadSessionSources() {
-  await act('sessions-sources', async () => {
-    const data = await call('sessions', { action: 'sources' })
-    state.sessions.sources = data.sources || []
-  }, { refresh: false })
-}
-
 function sessionsTab() {
   const sessions = state.sessions
   const result = sessions.result
@@ -1739,15 +1732,6 @@ function sessionsTab() {
           onClick: scanSessionsNow,
         },
         state.busy === 'sessions-scan' ? '扫描中…' : '扫描会话',
-      ),
-      h(
-        'button',
-        {
-          className: 'wl-btn',
-          disabled: state.busy === 'sessions-sources',
-          onClick: loadSessionSources,
-        },
-        '会话源',
       ),
     ),
     h('div', { className: 'wl-hint' }, '只读本机 AI 工具会话（Claude Code / Codex / DeepSeek Harness / WorkBuddy / ZCode / OpenCode / Gemini CLI）；归档时会自动写入日文档。首次扫描解析历史文件，之后按文件 mtime+size 增量缓存。'),
@@ -1800,30 +1784,11 @@ function sessionsTab() {
             : h('div', { className: 'wl-empty' }, '这一天没有扫描到 AI 会话。'),
         )
       : null,
-    sessions.sources
-      ? h(
-          'div',
-          null,
-          h('div', { className: 'wl-label' }, '会话源'),
-          h(
-            'div',
-            { className: 'wl-list' },
-            sessions.sources.map((source) =>
-              h(
-                'div',
-                { className: 'wl-item', key: source.id + source.path },
-                h(
-                  'div',
-                  { className: 'grow' },
-                  h('div', { className: 'wl-item-title' }, source.label),
-                  h('div', { className: 'wl-item-meta', style: { fontFamily: 'var(--wl-mono)' } }, source.path),
-                ),
-                h('span', { className: `wl-tag ${source.exists ? 'low' : ''}` }, source.exists ? '已找到' : '未安装'),
-              ),
-            ),
-          ),
-        )
-      : null,
+    h(
+      'div',
+      { className: 'wl-hint', style: { marginTop: '8px' } },
+      '扫不到某些工具的会话？到「设置 → 数据与扫描」的会话目录里自行添加路径，或在「设置 → 采集调度与诊断」查看各来源状态。',
+    ),
   )
 }
 
@@ -2343,6 +2308,13 @@ function schedSection() {
                     h('span', { className: source.exists ? 'wl-hint' : 'wl-carry' }, source.exists ? '✓' : '✗'),
                   ),
                 ),
+                sources.some((source) => !source.exists)
+                  ? h(
+                      'div',
+                      { className: 'wl-hint', style: { marginTop: '4px' } },
+                      '✗ 的来源未安装或路径不对；扫不到的工具可以在上方「数据与扫描 → 会话目录」自行添加路径。',
+                    )
+                  : null,
                 h('div', { className: 'wl-section-title', style: { marginTop: '8px' } }, '监控目录'),
                 (data?.watchDirs || []).length
                   ? data.watchDirs.map((dir) =>
