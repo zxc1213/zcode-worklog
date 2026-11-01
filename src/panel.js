@@ -2614,6 +2614,14 @@ function weekDatesOf(anchor) {
   return list
 }
 
+// Month arithmetic with year rollover ('2026-01' - 1 -> '2025-12').
+function shiftMonth(month, delta) {
+  const y = Number(String(month).slice(0, 4))
+  const m = Number(String(month).slice(5, 7))
+  const d = new Date(y, m - 1 + delta, 1)
+  const pad = (n) => String(n).padStart(2, '0')
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1)
+}
 function calGrid() {
   const data = state.calData
   if (!data) return h('div', { className: 'wl-hint' }, '加载中…')
@@ -2824,7 +2832,7 @@ function scheduleTab() {
                 state.calAnchor = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
                 if (state.calAnchor.slice(0, 7) !== state.calMonth) loadCalMonth(state.calAnchor.slice(0, 7))
                 else render()
-              } else loadCalMonth(calKey(String(Number(state.calMonth.slice(0, 4))) - 1 + state.calMonth.slice(4)))
+              } else loadCalMonth(shiftMonth(state.calMonth, -1))
             },
           },
           '◀',
@@ -2860,8 +2868,7 @@ function scheduleTab() {
                 if (state.calAnchor.slice(0, 7) !== state.calMonth) loadCalMonth(state.calAnchor.slice(0, 7))
                 else render()
               } else {
-                const y = Number(state.calMonth.slice(0, 4))
-                loadCalMonth(calKey(y + 1 + state.calMonth.slice(4)))
+                loadCalMonth(shiftMonth(state.calMonth, 1))
               }
             },
           },
@@ -3821,13 +3828,13 @@ function sessCalendarBlock() {
       h('div', { className: 'wl-section-title' }, '会话月历'),
       h(
         'button',
-        { className: 'wl-btn tiny', disabled: state.sessCalLoading, onClick: () => { state.sessCalMonth = sessCalKey(String(Number(state.sessCalMonth.slice(0, 4)) - 1) + state.sessCalMonth.slice(4)); loadSessCal() } },
+        { className: 'wl-btn tiny', disabled: state.sessCalLoading, onClick: () => { state.sessCalMonth = shiftMonth(state.sessCalMonth, -1); loadSessCal() } },
         '◀',
       ),
       h('span', { className: 'wl-hint' }, state.sessCalMonth),
       h(
         'button',
-        { className: 'wl-btn tiny', disabled: state.sessCalLoading, onClick: () => { state.sessCalMonth = sessCalKey(String(Number(state.sessCalMonth.slice(0, 4)) + 1) + state.sessCalMonth.slice(4)); loadSessCal() } },
+        { className: 'wl-btn tiny', disabled: state.sessCalLoading, onClick: () => { state.sessCalMonth = shiftMonth(state.sessCalMonth, 1); loadSessCal() } },
         '▶',
       ),
       h('button', { className: 'wl-btn tiny', onClick: () => { state.sessCalMonth = sessCalKey(); loadSessCal() } }, '今月'),

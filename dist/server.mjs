@@ -37133,6 +37133,8 @@ async function todoDaySection(config2, dateString, carried = null) {
     if (carried.carried.length > TODO_LIST_CAP) names.push(`\u7B49 ${carried.carried.length} \u6761`);
     lines.push(`- \u987A\u5EF6\uFF1A${names.join("\u3001")}`);
   }
+  const openTitles = open2.slice(0, 5).map((todo) => todoLine(todo));
+  if (open2.length) lines.push("- \u5F53\u524D\u672A\u5B8C\u6210\uFF1A" + openTitles.join("\u3001") + (open2.length > 5 ? ` \u7B49 ${open2.length} \u6761` : ""));
   const dues = open2.map((todo) => todo.due).filter(Boolean);
   if (open2.length) {
     lines.push(
