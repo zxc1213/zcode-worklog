@@ -43,22 +43,21 @@ zcode plugins install zcode-worklog@zcode-worklog
 
 ## Panel
 
-Six tabs:
+Five tabs (UX v3 IA):
 
-| Tab | Contents |
-|---|---|
-| Overview | Today's archive state, log/todo/project/backup/AI-session counts, today's AI sessions, recent runs, one-click archive |
-| Logs | Read/edit/save a day's Markdown, search the archive, re-archive, generate a daily report |
-| Todos | Add, inline edit, complete, reopen, delete, clear completed; subtask checklist and tags managed in the edit form; smart order (overdue > priority > due date), pri/tag filters, stats bar; AI smart-fill / batch parse / daily top-3 suggestion (needs AI config); `!high` / `#tag` / `@2026-10-30` / `repeat=daily` shortcuts |
-| Reports | Daily, weekly, monthly, quarterly, performance material, project dossier; optional AI polish; view generated reports |
-| Sessions | One-click full-history session sync into a local index; filter by keyword/project dir/source/date/turns or work-related only (scan dirs + custom keywords); group by project/source/date/mark/custom group; mixed EN/CN keyword analysis (click to filter); batch marks and custom groups |
-| Settings | Collapsible blocks: data & scanning, AI polish, backup/restore, import from old WorkLog; sticky save bar on top |
+| Tab | Answers | Contents |
+|---|---|---|
+| **Today** (default) | What should I do now? | Archive state card (generate today's log, or open / continue editing), due + overdue todos with quick add and a link to the full workbench, rule-based suggestions (adopt/ignore), today's AI sessions, yesterday review |
+| **Time** | What happened on a day? | The panel's only calendar (month/week; marks: ● log · ▼ due todos · ◦ sessions) beside a day detail pane (due todos, read/edit day log, day sessions, day records, generate / regenerate / backfill). The full todo workbench sits below: inline edit, subtasks, tags, pri/tag filters, AI smart-fill / batch parse / daily top-3 (needs AI config), `!high` / `#tag` / `@2026-10-30` / `repeat=daily` shortcuts |
+| **Library** | Where is that old thing? | Segmented views — Sessions (sync into a local index; filter by keyword/project/source/date window/turns/work-related; group by project/source/date/mark/custom group; batch marks), Logs (archive search with inline full-text preview), Graph (entities and relations) |
+| **Report** | What goes out? | Flat generator on top (daily / weekly / monthly / quarterly / performance / project dossier / free summary, optional AI polish), grouped generated-report list with open / regenerate (confirm) / copy Markdown |
+| **Settings** | How is it configured? | Left-nav subpages: General / AI / Collection & scheduler / Connectors / Prompt templates / Backup & migration / Diagnostics; dirty drafts get a bottom save bar; lazy-loaded subpages show an error plus Retry on failure |
 
 The panel talks to this plugin's own MCP server through the panel-only `worklog_api` tool. The plugin inlines the panel script and stylesheet into `ui://zcode-worklog/panel.html`, so the host loads no external program or subresources. If the panel stays on the loading screen, close and reopen it; if that fails, update the plugin and restart ZCode (`zcode plugins update zcode-worklog@zcode-worklog`).
 
 ## Reusing local AI configs
 
-**Settings → AI polish → Scan local AI tools** reads these locations on this machine and lists reusable endpoints. Clicking **Use** writes the endpoint into the plugin config; API keys stay inside the local server process and are never shown in the panel.
+**Settings → AI → Scan local AI tools** reads these locations on this machine and lists reusable endpoints. Clicking **Use** writes the endpoint into the plugin config; API keys stay inside the local server process and are never shown in the panel.
 
 | Source | What is read |
 |---|---|
@@ -94,7 +93,7 @@ Weeks run Monday–Sunday and belong to the month containing Thursday. Copy an o
 
 ## Daily archive
 
-`worklog_archive` (or the panel's **Archive today**) will:
+`worklog_archive` (or the panel's **Generate today's log**) will:
 
 1. Find Git repositories up to 3 levels below `scanRoots` and collect today's commits (filtered by `gitAuthor`, falling back to each repo's `git config user.name`).
 2. Scan `docRoots` up to 6 levels for `.md/.docx/.xlsx/.pptx/.pdf/...` modified today.
@@ -120,7 +119,7 @@ Archiving read-only scans the day's real user prompts in local AI tool records a
 | Gemini CLI | `~/.gemini|.qwen|.iflow/tmp/*/chats/*.json` |
 | Custom | The settings' extra AI session roots; generic user-message parsing for jsonl/json |
 
-Only sessions with real user prompts are counted; `<system-reminder>` / `<environment_context>` and model-only runtime injections are filtered. At most 3 prompt excerpts per session per day stay in the local cache; the day file only records source/time/turns/title plus the project directory. Parsed results are cached by file `mtime + size` in `data/session-cache.json`, so only changed files are re-parsed; `worklog_sessions refresh` forces a rescan. The panel's Sessions tab scans by date; Settings can disable "summarize AI sessions when archiving" or add extra session roots. Session content is read and written locally only and is never uploaded automatically; material goes to the configured AI endpoint only when you explicitly check AI polish.
+Only sessions with real user prompts are counted; `<system-reminder>` / `<environment_context>` and model-only runtime injections are filtered. At most 3 prompt excerpts per session per day stay in the local cache; the day file only records source/time/turns/title plus the project directory. Parsed results are cached by file `mtime + size` in `data/session-cache.json`, so only changed files are re-parsed; `worklog_sessions refresh` forces a rescan. The panel's **Library → Sessions** view syncs the index and queries it by date window; **Settings → Collection & scheduler** can disable "summarize AI sessions when archiving" or add extra session roots. Session content is read and written locally only and is never uploaded automatically; material goes to the configured AI endpoint only when you explicitly check AI polish.
 
 Day-file format:
 
@@ -163,11 +162,11 @@ A `SessionStart` hook injects one status line (today archived or not, open/overd
 
 ## Migration
 
-Use the panel's **Settings → Import from old WorkLog** with the old install directory (for example `E:\WorkLog`). Only `data\archive` is copied; the source is left untouched. Old `settings.json`, todos and performance templates are not migrated.
+Use the panel's **Settings → Backup & migration → Import from old WorkLog** with the old install directory (for example `E:\WorkLog`). Only `data\archive` is copied; the source is left untouched. Old `settings.json`, todos and performance templates are not migrated.
 
 ## Scope
 
-Implemented: Git/document archiving, log editing/search, todos (subtasks/tags/AI assistant), deterministic reports, optional AI polish/Q&A, AI session digest, backups, old archive import, auto-archive, side panel, compensating collection scheduler, AI tool config wizard, watched-dir fingerprint scanning (local/cloud/git).
+Implemented: Git/document archiving, log editing/search, todos (subtasks/tags/AI assistant), deterministic reports, optional AI polish/Q&A, AI session digest, backups, old archive import, auto-archive, side panel, scheduled collection (missed runs are compensated on startup), AI tool config wizard, watched-dir incremental scanning (local/cloud/git).
 
 Not implemented: Cursor/Trae/Windsurf VS Code database session scanning, Word/Excel export, performance template restoration, Feishu timesheets, business flow diagrams.
 
@@ -177,7 +176,7 @@ Not implemented: Cursor/Trae/Windsurf VS Code database session scanning, Word/Ex
 npm install        # build/test only (esbuild + MCP SDK + ext-apps + jsdom)
 npm run build      # writes dist/: server.mjs, session-start.mjs, panel.js, panel.html, panel.css
 npm test           # store / archive / reports / MCP API
-npm run test:panel # jsdom MCP App host simulation: handshake, bootstrap, all six tabs
+npm run test:panel # jsdom MCP App host simulation: handshake, bootstrap, all five tabs
 npm run smoke      # end-to-end in a temp directory
 node test/smoke-mcp.mjs   # real stdio JSON-RPC: initialize / tools/list / tools/call / resources/read
 ```

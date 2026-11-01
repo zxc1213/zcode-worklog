@@ -117,8 +117,7 @@ const state = {
   schedData: null,
   schedLoading: false,
   calMonth: '',
-  calData: null,
-  calDataLoading: false,
+  calMonths: {},
   calSelected: '',
   calMode: 'month',
   calAnchor: '',
@@ -449,7 +448,7 @@ function todayTab() {
       { className: 'wl-card' },
       dueTodos.length
         ? dueTodos.map((todo) => todoItem(todo, todayText))
-        : h('div', { className: 'wl-empty' }, '今天没有到期或逾期的待办 ✓'),
+        : h('div', { className: 'wl-empty' }, '暂无今日到期待办 ✓'),
       h(
         'div',
         { className: 'wl-row', style: { marginTop: '6px' } },
@@ -524,7 +523,7 @@ function todayTab() {
               h('div', { className: 'wl-pre', style: { maxHeight: '180px' } }, state.yesterday.text.split(/\r?\n/).slice(0, 10).join('\n')),
               h('button', { className: 'wl-btn', onClick: () => openDay(state.yesterday.date) }, '打开昨天的日志'),
             ]
-          : h('div', { className: 'wl-empty' }, '昨天没有日志。'),
+          : h('div', { className: 'wl-empty' }, '暂无昨日日志。'),
     ),
   )
 }
@@ -617,7 +616,7 @@ function runSearch() {
     'search',
     async () => {
       state.hits = await call('search', { query })
-      if (!state.hits.length) setNotice('info', '没有找到匹配的归档。')
+      if (!state.hits.length) setNotice('info', '暂无匹配的归档日志。')
     },
     { refresh: false },
   )
@@ -1333,7 +1332,7 @@ function todoEditForm(todo) {
                   render()
                 },
               },
-              '删',
+              '删除',
             ),
           ),
         ),
@@ -1613,7 +1612,7 @@ function reportKindKey(name) {
 }
 
 function reportsListGrouped() {
-  if (!state.reports.length) return h('div', { className: 'wl-empty' }, '还没有生成报告。')
+  if (!state.reports.length) return h('div', { className: 'wl-empty' }, '暂无报告，可在上方生成。')
   const groups = {}
   for (const report of state.reports.slice(0, 80)) {
     const { kind } = reportKindKey(report.name)
@@ -1690,7 +1689,7 @@ async function detectAi() {
     const data = await call('ai', { action: 'detect' })
     state.aiCandidates = Array.isArray(data?.candidates) ? data.candidates : []
     state.aiPick = ''
-    if (!state.aiCandidates.length) setNotice('info', '没有发现可复用的本机 AI 配置，可在下方手动填写。')
+    if (!state.aiCandidates.length) setNotice('info', '暂无可复用的本机 AI 配置，可在下方手动填写。')
   } catch (error) {
     state.aiCandidates = []
     setNotice('err', `扫描本机 AI 配置失败：${String(error?.message || error)}`)
@@ -2025,7 +2024,7 @@ function settingsAiPage() {
         ? h('div', { className: 'wl-hint' }, '加载中…')
         : state.aiCandidates.length
           ? aiCandidateRow(state.aiCandidates)
-          : h('div', { className: 'wl-empty' }, '没有发现可复用的本机 AI 配置。'),
+          : h('div', { className: 'wl-empty' }, '暂无可复用的本机 AI 配置，可在下方手动填写。'),
       h('div', { className: 'wl-label' }, '接口格式'),
       h(
         'select',
@@ -2097,12 +2096,20 @@ function settingsAiPage() {
               {
                 className: 'wl-btn danger',
                 disabled: state.busy === 'config-clear',
-                onClick: () =>
-                  act('config-clear', async () => {
-                    await call('config', { action: 'set', patch: { ai: { clearApiKey: true } } })
-                    state.settings = null
-                    setNotice('ok', '已清除 API Key')
-                  }),
+                onClick: () => {
+                state.confirm = {
+                  title: '清除 API Key？',
+                  body: '将清除已保存的 Key，清除后需重新填写才能继续使用 AI 润色，确认？',
+                  okLabel: '清除',
+                  run: () =>
+                    act('config-clear', async () => {
+                      await call('config', { action: 'set', patch: { ai: { clearApiKey: true } } })
+                      state.settings = null
+                      setNotice('ok', '已清除 API Key')
+                    }),
+                }
+                render()
+              },
               },
               '清除 Key',
             ),
@@ -2115,7 +2122,7 @@ function settingsAiPage() {
 }
 
 // 诊断：来源健康 + 运行历史（原概览「最近运行」迁入）+ 调度执行历史
-// + AI 用量 + 会话索引缓存（重扫 = 清理并重建，op 枚举不变）。
+// + AI 用量 + 会话索引缓存（重扫 = 清空索引重新同步，op 枚举不变）。
 function settingsDiagPage() {
   if (!state.schedData && !state.schedLoading) loadSched().then(render, () => render())
   loadSessIndex()
@@ -2218,7 +2225,7 @@ function settingsDiagPage() {
                     ),
                   ),
                 ]
-              : h('div', { className: 'wl-hint' }, '还没有 AI 调用记录。'),
+              : h('div', { className: 'wl-hint' }, '暂无 AI 调用记录。'),
           ),
           h(
             'div',
@@ -2226,11 +2233,11 @@ function settingsDiagPage() {
             h('div', { className: 'wl-section-title', style: { marginTop: '0' } }, '会话索引缓存'),
             state.sessIndex?.total
               ? h('div', { className: 'wl-hint' }, `${state.sessIndex.total} 个会话 · 建于 ${String(state.sessIndex.builtAt).slice(5, 16).replace('T', ' ')}`)
-              : h('div', { className: 'wl-hint' }, '还没有索引。'),
+              : h('div', { className: 'wl-hint' }, '暂无会话索引，点「强制重扫」建立。'),
             h(
               'div',
               { className: 'wl-row', style: { marginTop: '6px' } },
-              h('button', { className: 'wl-btn', disabled: state.busy === 'sess-sync', onClick: () => syncAllSessions(true) }, '强制重扫（清理并重建缓存）'),
+              h('button', { className: 'wl-btn', disabled: state.busy === 'sess-sync', onClick: () => syncAllSessions(true) }, '强制重扫（清空索引并重新同步）'),
             ),
           ),
         ],
@@ -2273,7 +2280,7 @@ function settingsTplPage() {
             ),
           ]
         : !list.length
-          ? h('div', { className: 'wl-hint' }, state.tplLoading ? '加载中…' : '无模板')
+          ? h('div', { className: 'wl-hint' }, state.tplLoading ? '加载中…' : '暂无模板。')
           : [
               h(
                 'div',
@@ -2358,13 +2365,27 @@ function settingsTplPage() {
                   {
                     className: 'wl-btn',
                     disabled: state.busy === 'tpl-reset',
-                    onClick: () =>
-                      act('tpl-reset', async () => {
-                        await call('templates', { action: 'reset', scene: draft.scene })
-                        state.tplList = null
-                        state.tplDraft = null
-                        setNotice('ok', '已恢复内置模板')
-                      }),
+                    onClick: () => {
+                      const resetTpl = () =>
+                        act('tpl-reset', async () => {
+                          await call('templates', { action: 'reset', scene: draft.scene })
+                          state.tplList = null
+                          state.tplDraft = null
+                          setNotice('ok', '已恢复内置模板')
+                        })
+                      if (current?.source !== 'user') {
+                        // built-in scene: nothing user-authored to lose
+                        resetTpl()
+                        return
+                      }
+                      state.confirm = {
+                        title: '恢复内置模板？',
+                        body: '将覆盖「' + (draft?.name || draft?.scene || '该场景') + '」的自定义模板，确认？',
+                        okLabel: '恢复默认',
+                        run: resetTpl,
+                      }
+                      render()
+                    },
                   },
                   '恢复默认',
                 ),
@@ -2420,7 +2441,7 @@ function settingsBackupPage() {
               ),
             ),
           )
-        : h('div', { className: 'wl-empty' }, '还没有备份。'),
+        : h('div', { className: 'wl-empty' }, '暂无备份，点「创建备份」生成。'),
     ),
     h(
       'div',
@@ -2751,24 +2772,37 @@ function calKey(d) {
   return y + '-' + String(m).padStart(2, '0')
 }
 
-async function loadCalMonth(month) {
-  state.calMonth = month || state.calMonth || calKey()
-  state.calData = null
+// Calendar month payloads are cached per month so a week view spanning two
+// months can merge both sides (the old single-payload version refetched in a
+// loop on cross-month weeks).
+async function fetchCalMonth(key) {
+  if (state.calMonths[key]) return state.calMonths[key]
+  state.calMonths[key] = 'loading'
   render()
   try {
-    state.calData = await call('calendar', { action: 'month', month: state.calMonth })
+    state.calMonths[key] = await call('calendar', { action: 'month', month: key })
   } catch (error) {
     setNotice('err', '日历加载失败：' + String(error?.message || error))
+    state.calMonths[key] = { month: key, today: today(), days: {} }
   }
   render()
+  return state.calMonths[key]
+}
+
+async function loadCalMonth(month) {
+  state.calMonth = month || state.calMonth || calKey()
+  render()
+  await fetchCalMonth(state.calMonth)
 }
 
 async function selectCalDay(date, { edit = false } = {}) {
   state.calSelected = date
   state.dayEdit = edit
+  // Week view: the anchor follows the picked day so the shown week always
+  // contains it (also across month boundaries).
+  if (state.calMode === 'week') state.calAnchor = date
   if (state.calMonth !== date.slice(0, 7)) {
     state.calMonth = date.slice(0, 7)
-    state.calData = null
   }
   state.calDayLoading = true
   render()
@@ -2852,23 +2886,28 @@ function shiftMonth(month, delta) {
   return d.getFullYear() + '-' + pad(d.getMonth() + 1)
 }
 function calGrid() {
-  const data = state.calData
-  if (!data) return h('div', { className: 'wl-hint' }, '加载中…')
-  const days = data.days || {}
-  const now = data.today
+  const data = state.calMonths[state.calMonth]
+  if (!data || data === 'loading') return h('div', { className: 'wl-hint' }, '加载中…')
+  const now = data.today || today()
   let cells = []
   if (state.calMode === 'week') {
     const anchor = state.calAnchor || now
     const week = weekDatesOf(anchor)
-    const missing = week.some((date) => !days[date])
-    if (missing) {
-      // cross-month week: pull the neighbouring month, then re-render
-      loadCalMonth(week[3].slice(0, 7))
-      return h('div', { className: 'wl-hint' }, '加载中…')
+    const days = {}
+    const missing = new Set()
+    for (const date of week) {
+      const monthKey = date.slice(0, 7)
+      const monthData = state.calMonths[monthKey]
+      if (!monthData || monthData === 'loading') missing.add(monthKey)
+      else if (monthData.days && monthData.days[date]) days[date] = monthData.days[date]
     }
-    cells = week.map((date) => calCell(days[date], now))
+    // Pull whatever months the week touches, then render — days without
+    // records become blank cells instead of retrying forever.
+    for (const monthKey of missing) fetchCalMonth(monthKey)
+    cells = week.map((date) => calCell(days[date] || { date, archived: false, todoDue: 0, sessionCount: 0 }, now))
   } else {
-    const first = data.month + '-01'
+    const days = data.days || {}
+    const first = (data.month || state.calMonth) + '-01'
     const lead = (new Date(first).getDay() + 6) % 7
     for (let i = 0; i < lead; i++) cells.push(h('span', { className: 'wl-cal-cell empty' }, ''))
     for (const date of Object.keys(days)) cells.push(calCell(days[date], now))
@@ -3089,7 +3128,7 @@ function dayDetail() {
               ),
             ),
           )
-        : h('div', { className: 'wl-hint' }, '该天没有到期待办。'),
+        : h('div', { className: 'wl-hint' }, '暂无当天到期待办。'),
       h(
         'div',
         { className: 'wl-row', style: { marginTop: '4px' } },
@@ -3170,14 +3209,13 @@ function dayDetail() {
 // Calendar card — the only calendar in the panel (the session tab's month
 // calendar was removed with UX v3).
 function timeCalendar() {
-  const data = state.calData
+  const data = state.calMonths[state.calMonth]
   const shiftWeek = (delta) => {
     const d = new Date(state.calAnchor || data?.today || today())
     d.setDate(d.getDate() + delta * 7)
     const p = (n) => String(n).padStart(2, '0')
     state.calAnchor = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
-    if (state.calAnchor.slice(0, 7) !== state.calMonth) loadCalMonth(state.calAnchor.slice(0, 7))
-    else render()
+    render()
   }
   return [
     h(
@@ -3187,7 +3225,6 @@ function timeCalendar() {
         'button',
         {
           className: 'wl-btn tiny',
-          disabled: state.calDataLoading,
           onClick: () => {
             if (state.calMode === 'week') shiftWeek(-1)
             else loadCalMonth(shiftMonth(state.calMonth, -1))
@@ -3206,6 +3243,8 @@ function timeCalendar() {
           className: 'wl-btn tiny' + (state.calMode === 'week' ? '' : ' primary'),
           onClick: () => {
             state.calMode = 'month'
+            // leaving week mode: land the month view on the week being shown
+            state.calMonth = (state.calAnchor || today()).slice(0, 7)
             state.calAnchor = ''
             render()
           },
@@ -3228,7 +3267,6 @@ function timeCalendar() {
         'button',
         {
           className: 'wl-btn tiny',
-          disabled: state.calDataLoading,
           onClick: () => {
             if (state.calMode === 'week') shiftWeek(1)
             else loadCalMonth(shiftMonth(state.calMonth, 1))
@@ -3248,18 +3286,7 @@ function timeCalendar() {
 // clicking a day only refreshes the right pane.
 function timeTab() {
   if (!state.calMonth) state.calMonth = calKey()
-  if (!state.calData && !state.calDataLoading) {
-    state.calDataLoading = true
-    call('calendar', { action: 'month', month: state.calMonth })
-      .then((data) => {
-        state.calData = data
-      })
-      .catch((error) => setNotice('err', '日历加载失败：' + String(error?.message || error)))
-      .finally(() => {
-        state.calDataLoading = false
-        render()
-      })
-  }
+  if (!state.calMonths[state.calMonth]) fetchCalMonth(state.calMonth)
   return h(
     'div',
     null,
@@ -3530,7 +3557,7 @@ function connBlock() {
       : state.connLoading && !state.connList
         ? h('div', { className: 'wl-hint' }, '加载中…')
         : [
-            connectors.length ? connectors.map(connRow) : h('div', { className: 'wl-hint' }, '还没有连接器。新建一个开始拉取外部数据。'),
+            connectors.length ? connectors.map(connRow) : h('div', { className: 'wl-hint' }, '暂无连接器，点「新建连接器」开始拉取外部数据。'),
             h(
               'div',
               { className: 'wl-row', style: { marginTop: '8px' } },
@@ -3697,11 +3724,11 @@ function graphView() {
                 onClick: () =>
                   act('graph-rebuild', async () => {
                     const stats = await call('graph', { action: 'rebuild' })
-                    setNotice('ok', '图谱已重建：' + stats.nodes + ' 节点 / ' + stats.edges + ' 关系')
+                    setNotice('ok', '图谱已更新：' + stats.nodes + ' 节点 / ' + stats.edges + ' 关系')
                     state.graphData = null
                   }),
               },
-              '重建',
+              '更新图谱',
             ),
           ),
           state.graphLoading ? loading : null,
@@ -3794,7 +3821,7 @@ function graphEntityView(data) {
             h('span', { className: 'wl-hint' }, String(relation.count) + ' 次'),
           ),
         )
-      : h('div', { className: 'wl-empty' }, '该实体暂无关系'),
+      : h('div', { className: 'wl-empty' }, '暂无关系记录。'),
   )
 }
 
@@ -3891,7 +3918,7 @@ function sessRow(session) {
             h(
               'div',
               { className: 'wl-hint', style: { marginTop: '4px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' } },
-              (session.preview || '（无摘录，点「按日扫描」可看当天详情）') +
+              (session.preview || '（无摘录）') +
                 '\n目录：' + (session.cwd || '—') +
                 '\n文件：' + (session.file || '—') +
                 '\n日期：' + session.first + ' ~ ' + session.last,
@@ -3969,12 +3996,12 @@ function sessionsV2Block() {
     h(
       'div',
       { className: 'wl-row' },
-      h('button', { className: 'wl-btn primary', disabled: state.busy === 'sess-sync', onClick: () => syncAllSessions(false) }, '同步全部会话'),
+      h('button', { className: 'wl-btn primary', disabled: state.busy === 'sess-sync', onClick: () => syncAllSessions(false) }, '同步会话'),
       h('button', { className: 'wl-btn', disabled: state.busy === 'sess-sync', onClick: () => syncAllSessions(true) }, '强制重扫'),
       h('span', { className: 'wl-hint' },
         state.sessIndex?.total
           ? '索引 ' + state.sessIndex.total + ' 条 · ' + String(state.sessIndex.builtAt).slice(5, 16).replace('T', ' ')
-          : '还没有索引，点「同步全部会话」'),
+          : '暂无会话索引，点「同步会话」开始。'),
     ),
     h(
       'div',

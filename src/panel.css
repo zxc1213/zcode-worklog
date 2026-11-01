@@ -278,7 +278,6 @@ body {
 .wl-btn:focus-visible,
 .wl-tab:focus-visible,
 .wl-click:focus-visible,
-.wl-fold-head:focus-visible,
 .wl-input:focus-visible,
 .wl-select:focus-visible,
 .wl-area:focus-visible {
@@ -553,58 +552,6 @@ body {
   padding: 9px 14px;
   background: var(--wl-bg);
   border-bottom: 1px solid var(--wl-border-soft);
-}
-
-.wl-fold {
-  border: 1px solid var(--wl-border-soft);
-  border-radius: 8px;
-  margin-bottom: 8px;
-  overflow: hidden;
-}
-
-.wl-fold-head {
-  appearance: none;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  background: var(--wl-card);
-  border: 0;
-  color: var(--wl-text);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 650;
-  text-align: left;
-  padding: 8px 10px;
-  cursor: pointer;
-}
-
-.wl-fold-head:hover {
-  background: var(--wl-border-soft);
-}
-
-.wl-fold-caret {
-  width: 12px;
-  flex: none;
-  color: var(--wl-faint);
-  font-size: 10px;
-}
-
-.wl-fold-title {
-  flex: none;
-}
-
-.wl-fold-head .wl-hint {
-  margin-left: auto;
-  max-width: 58%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wl-fold-body {
-  padding: 4px 10px 10px;
-  border-top: 1px solid var(--wl-border-soft);
 }
 
 @media (max-width: 400px) {
