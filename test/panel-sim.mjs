@@ -59,18 +59,20 @@ const bootstrap = {
       recent: [{ id: 't1', title: '测试待办', status: 'open', pri: '高', due: '2026-10-29' }],
     },
     sessions: { count: 1, turns: 2, items: [{ source: 'claude', title: '今日会话简表项', turns: 2, start: '09:12', end: '09:40' }] },
-    backups: { count: 0, latest: null },
+    backups: { count: 1, latest: { name: 'backup-test.json' } },
     projects: [{ name: 'demo-project', days: ['2026-10-28'], commits: 2 }],
-    runHistory: [],
+    runHistory: [{ date: '2026-10-29', mode: 'manual', status: 'ok', note: '2 提交 / 1 文档' }],
+    aiUsage: { calls: 2, in: 100, out: 50, total: 150, byModel: [{ model: 'GLM-5.2', calls: 2, in: 100, out: 50, total: 150 }] },
     config,
   },
   days: [{ date: '2026-10-28', size: 100, relative: '2026-10/第5周/2026-10-28.md' }],
   todos: [{ id: 't1', title: '测试待办', status: 'open', pri: '高', due: '2026-10-29' }],
   reports: [{ name: 'weekly-2026-10-26.md', size: 100, mtime: '2026-10-28T10:00:00.000Z' }],
-  backups: [],
+  backups: [{ name: 'backup-test.json', size: 2048, mtime: '2026-10-28T10:00:00.000Z' }],
   config,
 }
 
+let failCollect = true
 const messages = []
 const jsdomErrors = []
 const virtualConsole = new VirtualConsole()
@@ -125,8 +127,15 @@ function respond(window, message) {
       structured = { builtAt: '2026-10-31T09:00:00.000Z', nodeCount: 3, edgeCount: 3, types: { project: 1, person: 1, tool: 1 }, nodes: [{ key: 'project:商城', type: 'project', label: '商城', weight: 5 }, { key: 'person:Ray', type: 'person', label: 'Ray', weight: 3 }] }
     else if (op === 'graph' && args.entity)
       structured = { entity: args.entity, found: true, type: 'project', label: args.entity, weight: 5, relations: [{ kind: '提交了', count: 3, direction: 'in', other: 'Ray', otherType: 'person' }] }
-    else if (op === 'collect' && args.action === 'diagnostics')
+    else if (op === 'collect' && args.action === 'diagnostics') {
+      if (failCollect) {
+        // first call fails: exercises the lazy-load failure + retry path
+        failCollect = false
+        reply(window, message.id, { isError: true, content: [{ type: 'text', text: '模拟诊断加载失败' }] })
+        return
+      }
       structured = { tasks: [{ id: 'collect-sessions', kind: 'collect-sessions', title: 'AI 会话采集', description: 'x', enabled: false, everyHours: 4, dailyAt: '', lastRunAt: '', lastStatus: '', lastError: '' }], history: [], sources: [{ id: 'claude', label: 'Claude Code', path: 'C:/x', kind: 'dir', exists: true, enabled: true }], watchDirs: [] }
+    }
     else if (op === 'templates' && args.action === 'list')
       structured = { templates: [{ scene: 'report', name: '报告润色', hint: '周报月报', kind: 'report', source: 'builtin', system: 'S', user: 'U' }] }
     else if (op === 'connectors' && args.action === 'list')
@@ -159,6 +168,7 @@ function respond(window, message) {
         applied: { name: 'Demo Provider', models: ['GLM-5.2', 'GLM-5-Turbo'] },
         config: bootstrap.config,
       }
+    else if (op === 'config') structured = bootstrap.config
     else if (op === 'sessions' && args.action === 'sources')
       structured = {
         sources: [
@@ -375,24 +385,59 @@ assert.ok(!doc.querySelector('.wl-modal'), 'confirm closes the dialog')
 assert.ok(text().includes('# 报告内容'), 'regenerated report text is displayed in place')
 console.log('report OK (flat generator + confirm)')
 
-// --- settings tab: async folds keep the double-guard regression -------
-
-const clickFold = async (label) => {
-  const head = [...doc.querySelectorAll('.wl-fold-head')].find((item) => item.textContent.includes(label))
-  assert.ok(head, `fold ${label} exists`)
-  head.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-  await wait(200)
-}
+// --- settings tab: left-nav subpages, no folds, lazy load + retry ------
 
 await clickTab('设置')
-assert.ok(text().includes('保存设置'), 'settings save bar renders')
-assert.ok(text().includes('数据与扫描'), 'settings tab is split into folds')
-assert.ok(text().includes('备份与恢复'), 'settings tab shows backup fold')
-await wait(250)
-await clickFold('数据与扫描')
-assert.ok(text().includes('扫描根目录'), 'data fold expands')
-await clickFold('AI 润色')
-await wait(300)
+await wait(150)
+const subLabels = [...doc.querySelectorAll('.wl-subnav button')].map((item) => item.textContent)
+assert.deepEqual(
+  subLabels,
+  ['通用', 'AI 接口', '采集与调度', '连接器', '提示词模板', '备份与迁移', '诊断'],
+  'settings sub-nav has the seven pages',
+)
+assert.ok([...doc.querySelectorAll('.wl-subnav button')][0].className.includes('on'), '通用 is the default subpage')
+assert.ok(text().includes('数据目录'), 'general page shows the data dir')
+assert.ok(text().includes('自动归档'), 'general page shows auto archive')
+assert.ok([...doc.querySelectorAll('textarea')].length >= 3, 'general page has scan/doc/watch textareas')
+
+// dirty draft save bar: typing reveals it without a re-render (focus safe)
+const scanArea = [...doc.querySelectorAll('textarea')][0]
+scanArea.value = 'E:\\ws\nE:\\more'
+scanArea.dispatchEvent(new window.Event('input', { bubbles: true }))
+await wait(30)
+const dirtyBar = doc.querySelector('#wl-dirty-bar')
+assert.ok(dirtyBar, 'dirty save bar exists on draft subpages')
+assert.equal(dirtyBar.style.display, 'flex', 'typing reveals the dirty bar')
+// switching subpages keeps the dirty draft and the bar
+;[...doc.querySelectorAll('.wl-subnav button')].find((item) => item.textContent === 'AI 接口').click()
+await wait(350)
+assert.ok(text().includes('扫描本机 AI 工具'), 'AI page shows detect actions')
+assert.ok(text().includes('AI 工具配置向导'), 'wizard is merged into the AI page')
+assert.ok(text().includes('探测'), 'wizard probe action is reachable')
+;[...doc.querySelectorAll('.wl-subnav button')].find((item) => item.textContent === '通用').click()
+await wait(50)
+assert.equal(doc.querySelector('#wl-dirty-bar').style.display, 'flex', 'dirty bar survives subpage switches')
+;[...doc.querySelectorAll('#wl-dirty-bar button')].find((item) => item.textContent === '放弃').click()
+await wait(50)
+assert.equal(doc.querySelector('#wl-dirty-bar').style.display, 'none', 'discard clears the dirty state')
+console.log('settings general/dirty-bar OK')
+
+// lazy load failure + retry on 采集与调度 (first diagnostics call fails)
+;[...doc.querySelectorAll('.wl-subnav button')].find((item) => item.textContent === '采集与调度').click()
+await wait(350)
+assert.ok(text().includes('采集与调度加载失败'), 'lazy load failure surfaces an error')
+const retryBtn = [...doc.querySelectorAll('button')].find((item) => item.textContent === '重试')
+assert.ok(retryBtn, 'failure offers a retry button')
+retryBtn.click()
+await wait(450)
+assert.ok(text().includes('调度任务'), 'retry loads the diagnostics content')
+assert.ok(text().includes('运行所有到期任务'), 'immediate-run buttons live on the collect page')
+assert.ok(text().includes('额外 AI 会话目录'), 'extra session dirs live on the collect page')
+console.log('settings collect OK (lazy fail + retry)')
+
+// AI page: candidate linkage (moved from the old fold assertions)
+;[...doc.querySelectorAll('.wl-subnav button')].find((item) => item.textContent === 'AI 接口').click()
+await wait(350)
 const pick = doc.querySelector('#wl-ai-pick')
 assert.ok(pick, 'AI candidate dropdown renders')
 assert.ok(pick.textContent.includes('Demo Provider'), 'dropdown lists the candidate')
@@ -413,30 +458,49 @@ await wait(400)
 modelPick = doc.querySelector('#wl-ai-model-pick')
 assert.ok(modelPick, 'model select still renders after loading')
 assert.equal(modelPick.querySelectorAll('option').length, 4, 'placeholder plus three loaded models')
-const manualInput = [...doc.querySelectorAll('input')].find((el) => el.placeholder === '或手动填写模型名')
-assert.ok(manualInput, 'manual model input renders when models are loaded')
 assert.equal(text().split('已加载 3 个模型').length - 1, 1, 'model hint renders exactly once')
-// regression: expanding the async settings folds must not freeze the panel
-const schedFold = [...doc.querySelectorAll('.wl-fold-head')].find((item) => item.textContent.includes('采集调度与诊断'))
-assert.ok(schedFold, 'sched fold head exists')
-schedFold.click()
-await new Promise((resolve) => setTimeout(resolve, 80))
-assert.ok(text().includes('调度任务'), 'sched fold rendered body')
-const tplFold = [...doc.querySelectorAll('.wl-fold-head')].find((item) => item.textContent.includes('提示词模板'))
-assert.ok(tplFold, 'tpl fold head exists')
-tplFold.click()
-await new Promise((resolve) => setTimeout(resolve, 80))
-assert.ok(text().includes('变量：'), 'tpl fold rendered body')
-const connFold = [...doc.querySelectorAll('.wl-fold-head')].find((item) => item.textContent.includes('外部连接器'))
-assert.ok(connFold, 'conn fold head exists')
-connFold.click()
-await new Promise((resolve) => setTimeout(resolve, 80))
-assert.ok(text().includes('新建连接器'), 'conn fold rendered body')
+console.log('settings ai OK (wizard merged)')
 
-connFold.click()
-await new Promise((resolve) => setTimeout(resolve, 20))
-console.log('settings folds OK')
+// 连接器 / 提示词模板
+;[...doc.querySelectorAll('.wl-subnav button')].find((item) => item.textContent === '连接器').click()
+await wait(300)
+assert.ok(text().includes('新建连接器'), 'connector page renders')
+;[...doc.querySelectorAll('.wl-subnav button')].find((item) => item.textContent === '提示词模板').click()
+await wait(300)
+assert.ok(text().includes('变量：'), 'template page renders')
+console.log('settings conn/tpl OK')
+
+// 备份与迁移: delete asks first
+;[...doc.querySelectorAll('.wl-subnav button')].find((item) => item.textContent === '备份与迁移').click()
+await wait(150)
+assert.ok(text().includes('创建备份'), 'backup page renders')
+assert.ok(text().includes('backup-test.json'), 'backup list renders')
+const backupDel = [...doc.querySelectorAll('button')].find((item) => item.textContent === '删除' && item.className.includes('danger'))
+assert.ok(backupDel, 'backup delete button exists')
+backupDel.click()
+await wait(20)
+assert.ok(text().includes('删除备份 backup-test.json？'), 'backup delete asks for confirmation')
+;[...doc.querySelectorAll('.wl-modal button')].find((item) => item.textContent === '取消').click()
+await wait(20)
+assert.ok(!doc.querySelector('.wl-modal'), 'cancel aborts the delete')
+console.log('settings backup OK (delete confirm)')
+
+// 诊断: sources + run history + usage + cache
+;[...doc.querySelectorAll('.wl-subnav button')].find((item) => item.textContent === '诊断').click()
+await wait(350)
+assert.ok(text().includes('会话来源健康'), 'diag shows source health')
+assert.ok(text().includes('Claude Code'), 'diag lists the source row')
+assert.ok(text().includes('运行历史'), 'diag shows the migrated run history')
+assert.ok(text().includes('2 提交'), 'run history rows render')
+assert.ok(text().includes('AI 用量'), 'diag shows AI usage')
+assert.ok(text().includes('会话索引缓存'), 'diag shows the session cache card')
+assert.ok(text().includes('强制重扫'), 'cache rebuild action exists')
+console.log('settings diag OK')
+
+// folds are gone everywhere — the fold mechanism is retired
+assert.equal(doc.querySelectorAll('.wl-fold').length, 0, 'no fold blocks remain in the whole panel')
 console.log('settings OK')
+
 
 const ops = messages
   .filter((message) => message.method === 'tools/call')

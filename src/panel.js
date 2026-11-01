@@ -174,7 +174,10 @@ const state = {
   aiModels: [],
   aiModelsBusy: false,
   aiModelsNote: '',
-  settingsOpen: { data: false, ai: false, backup: false, import: false, sched: false, wizard: false, tpls: false, conns: false },
+  sub: 'general',
+  tplError: '',
+  connError: '',
+  sessIndexLoading: false,
 }
 
 function h(tag, props = {}, ...children) {
@@ -1810,30 +1813,6 @@ function aiCandidateRow(candidates) {
   )
 }
 
-function settingsSection(key, title, hint, ...children) {
-  const open = Boolean(state.settingsOpen[key])
-  return h(
-    'div',
-    { className: `wl-fold${open ? ' open' : ''}` },
-    h(
-      'button',
-      {
-        className: 'wl-fold-head',
-        type: 'button',
-        'aria-expanded': open ? 'true' : 'false',
-        onClick: () => {
-          state.settingsOpen[key] = !state.settingsOpen[key]
-          render()
-        },
-      },
-      h('span', { className: 'wl-fold-caret' }, open ? '▾' : '▸'),
-      h('span', { className: 'wl-fold-title' }, title),
-      hint ? h('span', { className: 'wl-hint' }, hint) : null,
-    ),
-    open ? h('div', { className: 'wl-fold-body' }, ...children) : null,
-  )
-}
-
 async function saveSettings() {
   const draft = state.settings
   if (!draft) return
@@ -1862,77 +1841,135 @@ async function saveSettings() {
   })
 }
 
-function settingsTab() {
-  const draft = state.settings || draftFromConfig(state.config)
-  const config = state.config || {}
-  const set = (key) => (event) => {
-    draft[key] = event.target.type === 'checkbox' ? event.target.checked : event.target.value
-  }
-  const aiHint = config.ai?.model
-    ? `${config.ai.model}${config.ai.hasApiKey ? ' · 已配置 Key' : ' · 无 Key'}`
-    : '未配置'
-  const dataHint = draft.dataDir || config.dataDir || ''
+const SETTINGS_SUBS = [
+  ['general', '通用'],
+  ['ai', 'AI 接口'],
+  ['collect', '采集与调度'],
+  ['conn', '连接器'],
+  ['tpl', '提示词模板'],
+  ['backup', '备份与迁移'],
+  ['diag', '诊断'],
+]
 
+// Settings tab: regular left-nav + right form pages, one thing per page
+// (UX v3 §4.5 — replaces the old single page with four async folds inside).
+function settingsTab() {
+  if (!SETTINGS_SUBS.some(([key]) => key === state.sub)) state.sub = 'general'
+  return h(
+    'div',
+    null,
+    h(
+      'div',
+      { className: 'wl-subnav' },
+      SETTINGS_SUBS.map(([key, label]) =>
+        h(
+          'button',
+          {
+            className: state.sub === key ? 'on' : '',
+            onClick: () => {
+              state.sub = key
+              render()
+            },
+          },
+          label,
+        ),
+      ),
+    ),
+    state.sub === 'general'
+      ? settingsGeneralPage()
+      : state.sub === 'ai'
+        ? settingsAiPage()
+        : state.sub === 'collect'
+          ? settingsCollectPage()
+          : state.sub === 'conn'
+            ? settingsConnPage()
+            : state.sub === 'tpl'
+              ? settingsTplPage()
+              : state.sub === 'backup'
+                ? settingsBackupPage()
+                : settingsDiagPage(),
+  )
+}
+
+// Dirty check: the clean draft is reproducible from config, so comparing the
+// live draft against a fresh draftFromConfig is the single source of truth —
+// no mutation-point tracking can drift.
+function settingsDirty() {
+  if (!state.settings || !state.config) return false
+  return JSON.stringify(state.settings) !== JSON.stringify(draftFromConfig(state.config))
+}
+
+// Bottom save bar for draft-bearing subpages (通用 / AI 接口 / 采集与调度).
+// Keystrokes toggle it via DOM (no re-render, no focus loss); every render
+// re-derives visibility from the computed dirty state.
+function dirtyBarNode() {
+  return h(
+    'div',
+    { className: 'wl-dirtybar', id: 'wl-dirty-bar', style: { display: settingsDirty() ? 'flex' : 'none' } },
+    h('span', { className: 'wl-hint', style: { color: 'var(--wl-warn)', flex: '1' } }, '有未保存的修改'),
+    h(
+      'button',
+      {
+        className: 'wl-btn',
+        onClick: () => {
+          state.settings = draftFromConfig(state.config)
+          setNotice('info', '已放弃未保存的修改')
+          render()
+        },
+      },
+      '放弃',
+    ),
+    h(
+      'button',
+      { className: 'wl-btn primary', disabled: state.busy === 'config-save', onClick: saveSettings },
+      state.busy === 'config-save' ? '保存中…' : '保存修改',
+    ),
+  )
+}
+
+// Draft field mutator: writes into the draft and (without re-render) reveals
+// the dirty bar so typing never loses focus.
+function settingsSet(draft) {
+  return (key) => (event) => {
+    draft[key] = event.target.type === 'checkbox' ? event.target.checked : event.target.value
+    const bar = document.getElementById('wl-dirty-bar')
+    if (bar && settingsDirty()) bar.style.display = 'flex'
+  }
+}
+
+// 通用：数据目录（只读）/ 扫描目录 / 监控目录 / git 作者 / 自动归档。
+function settingsGeneralPage() {
+  const draft = (state.settings = state.settings || draftFromConfig(state.config))
+  const config = state.config || {}
+  const set = settingsSet(draft)
   return h(
     'div',
     null,
     noticeNode(),
     h(
       'div',
-      { className: 'wl-savebar' },
-      h(
-        'button',
-        { className: 'wl-btn primary', disabled: state.busy === 'config-save', onClick: saveSettings },
-        state.busy === 'config-save' ? '保存中…' : '保存设置',
-      ),
-      h(
-        'button',
-        {
-          className: 'wl-btn',
-          onClick: () => {
-            state.settings = draftFromConfig(state.config)
-            setNotice('info', '已恢复为上次保存的设置')
-            render()
-          },
-        },
-        '撤销修改',
-      ),
-      h('span', { className: 'wl-hint' }, '折叠分块，改完点保存'),
-    ),
-
-    settingsSection(
-      'data',
-      '数据与扫描',
-      dataHint,
-      h('div', { className: 'wl-label' }, '数据目录'),
-      h('input', { className: 'wl-input', value: draft.dataDir, onInput: set('dataDir') }),
-      h('div', { className: 'wl-hint' }, `配置：${config.configFile || ''}`),
-
+      { className: 'wl-card' },
+      h('div', { className: 'wl-label', style: { marginTop: '0' } }, '数据目录'),
+      h('input', { className: 'wl-input', value: config.dataDir || '', disabled: true }),
+      h('div', { className: 'wl-hint', style: { marginTop: '4px' } }, `配置文件：${config.configFile || ''}`),
       h('div', { className: 'wl-label' }, 'Git 扫描根目录（每行一个，最多向下 3 层）'),
       h('textarea', { className: 'wl-area small', value: draft.scanRoots, onInput: set('scanRoots') }),
       h('div', { className: 'wl-label' }, '文档扫描目录（每行一个，最多向下 6 层）'),
       h('textarea', { className: 'wl-area small', value: draft.docRoots, onInput: set('docRoots') }),
-      h('div', { className: 'wl-label' }, '额外 AI 会话目录（每行一个，可选）'),
-      h('textarea', { className: 'wl-area small', value: draft.sessionRoots, onInput: set('sessionRoots') }),
-      h('div', { className: 'wl-hint' }, '自动扫描：~/.claude/projects、~/.codex/sessions、$DSH_HOME/sessions、~/.workbuddy/projects、~/.zcode（数据库）、~/.local/share/opencode、~/.gemini/tmp。'),
+      h('div', { className: 'wl-label' }, '监控目录（每行一条：路径 或 路径|cloud 或 路径|git）'),
+      h('textarea', { className: 'wl-area small', value: draft.watchDirsText, onInput: set('watchDirsText') }),
       h('div', { className: 'wl-label' }, 'Git 作者（留空 = 各仓库 git config user.name）'),
       h('input', { className: 'wl-input', value: draft.gitAuthor, onInput: set('gitAuthor') }),
-
-      h(
-        'div',
-        { className: 'wl-checkline' },
-        h('input', { type: 'checkbox', checked: draft.git, onChange: set('git') }),
-        '扫描 Git 提交',
-        h('input', { type: 'checkbox', checked: draft.docs, onChange: set('docs'), style: { marginLeft: '10px' } }),
-        '扫描文档变更',
-        h('input', { type: 'checkbox', checked: draft.sessions, onChange: set('sessions'), style: { marginLeft: '10px' } }),
-        '归档时汇总 AI 会话',
-      ),
+    ),
+    h(
+      'div',
+      { className: 'wl-card' },
+      h('div', { className: 'wl-label', style: { marginTop: '0' } }, '自动归档'),
       h(
         'div',
         { className: 'wl-checkline' },
         h('input', { type: 'checkbox', checked: draft.autoArchive, onChange: set('autoArchive') }),
-        '自动归档',
+        '每天自动生成',
         h('input', { type: 'checkbox', checked: draft.skipWeekends, onChange: set('skipWeekends'), style: { marginLeft: '10px' } }),
         '跳过周末',
         h('input', {
@@ -1943,28 +1980,49 @@ function settingsTab() {
           style: { width: '96px', marginLeft: 'auto' },
         }),
       ),
+      h('div', { className: 'wl-hint' }, '到点且 ZCode 在运行时自动生成当天日志；错过的下次启动补跑。'),
     ),
+    dirtyBarNode(),
+  )
+}
 
-    settingsSection(
-      'ai',
-      'AI 润色',
-      aiHint,
+// AI 接口：润色配置 + 本机候选 + 配置向导（向导并入此页，不再是独立折叠块）。
+function settingsAiPage() {
+  const draft = (state.settings = state.settings || draftFromConfig(state.config))
+  const config = state.config || {}
+  const set = settingsSet(draft)
+  if (state.aiCandidates === null && !state.aiBusy) detectAi()
+  if (!state.wizardTypes && !state.wizardTypesLoading) {
+    state.wizardTypesLoading = true
+    call('wizard', { action: 'types' })
+      .then((result) => {
+        state.wizardTypes = result?.types || []
+      })
+      .catch(() => {
+        state.wizardTypes = []
+      })
+      .finally(() => {
+        state.wizardTypesLoading = false
+        render()
+      })
+  }
+  const aiHint = config.ai?.model ? `${config.ai.model}${config.ai.hasApiKey ? ' · 已配置 Key' : ' · 无 Key'}` : '未配置'
+  return h(
+    'div',
+    null,
+    noticeNode(),
+    h('div', { className: 'wl-hint', style: { marginBottom: '6px' } }, '当前：' + aiHint),
+    h(
+      'div',
+      { className: 'wl-card' },
       h(
         'div',
-        { className: 'wl-toolbar' },
-        h(
-          'button',
-          {
-            className: 'wl-btn',
-            disabled: state.aiBusy,
-            onClick: detectAi,
-          },
-          state.aiBusy ? '扫描中…' : '扫描本机 AI 工具',
-        ),
+        { className: 'wl-toolbar', style: { margin: '0 0 8px' } },
+        h('button', { className: 'wl-btn', disabled: state.aiBusy, onClick: detectAi }, state.aiBusy ? '扫描中…' : '扫描本机 AI 工具'),
         h('span', { className: 'wl-hint' }, '只在本机读取 ZCode / DeepSeek Harness / Claude Code / Codex / Gemini / 环境变量'),
       ),
       state.aiCandidates === null
-        ? null
+        ? h('div', { className: 'wl-hint' }, '加载中…')
         : state.aiCandidates.length
           ? aiCandidateRow(state.aiCandidates)
           : h('div', { className: 'wl-empty' }, '没有发现可复用的本机 AI 配置。'),
@@ -1999,9 +2057,7 @@ function settingsTab() {
                 },
               },
               h('option', { value: '' }, `— 从 ${state.aiModels.length} 个模型中选择 —`),
-              state.aiModels.map((model) =>
-                h('option', { value: model, selected: model === draft.aiModel }, model),
-              ),
+              state.aiModels.map((model) => h('option', { value: model, selected: model === draft.aiModel }, model)),
               draft.aiModel && !state.aiModels.includes(draft.aiModel)
                 ? h('option', { value: draft.aiModel, selected: true }, `${draft.aiModel}（当前填写）`)
                 : null,
@@ -2012,15 +2068,7 @@ function settingsTab() {
               placeholder: 'gpt-4o-mini，加载后可下拉选择',
               onInput: set('aiModel'),
             }),
-        h(
-          'button',
-          {
-            className: 'wl-btn',
-            disabled: state.aiModelsBusy,
-            onClick: loadAiModels,
-          },
-          state.aiModelsBusy ? '加载中…' : '加载模型',
-        ),
+        h('button', { className: 'wl-btn', disabled: state.aiModelsBusy, onClick: loadAiModels }, state.aiModelsBusy ? '加载中…' : '加载模型'),
       ),
       state.aiModels.length
         ? h('input', {
@@ -2031,7 +2079,7 @@ function settingsTab() {
             style: { marginTop: '6px' },
           })
         : null,
-      state.aiModelsNote ? h('div', { className: 'wl-hint' }, state.aiModelsNote) : null,
+      state.aiModelsNote ? h('div', { className: 'wl-hint', style: { marginTop: '4px' } }, state.aiModelsNote) : null,
       h('div', { className: 'wl-label' }, 'API Key'),
       h('input', {
         className: 'wl-input',
@@ -2061,14 +2109,284 @@ function settingsTab() {
           )
         : null,
     ),
+    wizardBlock(),
+    dirtyBarNode(),
+  )
+}
 
-    settingsSection(
-      'backup',
-      '备份与恢复',
-      `${state.backups.length} 份备份`,
+// 诊断：来源健康 + 运行历史（原概览「最近运行」迁入）+ 调度执行历史
+// + AI 用量 + 会话索引缓存（重扫 = 清理并重建，op 枚举不变）。
+function settingsDiagPage() {
+  if (!state.schedData && !state.schedLoading) loadSched().then(render, () => render())
+  loadSessIndex()
+  const data = state.schedData
+  const sources = data?.sources || []
+  const history = data?.history || []
+  const usage = state.status?.aiUsage
+  return h(
+    'div',
+    null,
+    noticeNode(),
+    data?.error
+      ? h(
+          'div',
+          { className: 'wl-card' },
+          h('div', { className: 'wl-notice err', style: { marginBottom: '6px' } }, '诊断数据加载失败：' + data.error),
+          h(
+            'button',
+            {
+              className: 'wl-btn',
+              disabled: state.schedLoading,
+              onClick: () => {
+                state.schedData = null
+                loadSched().then(render, () => render())
+              },
+            },
+            '重试',
+          ),
+        )
+      : [
+          h(
+            'div',
+            { className: 'wl-card' },
+            h('div', { className: 'wl-section-title', style: { marginTop: '0' } }, '会话来源健康'),
+            state.schedLoading && !data ? h('div', { className: 'wl-hint' }, '加载中…') : null,
+            sources.map((source) =>
+              h(
+                'div',
+                { className: 'wl-row', key: source.id + source.path },
+                h('span', { className: 'wl-tag' }, source.label),
+                h('span', { className: 'grow wl-hint', style: { wordBreak: 'break-all' } }, source.path),
+                h('span', { className: source.exists ? 'wl-hint' : 'wl-carry' }, source.exists ? '✓' : '✗'),
+              ),
+            ),
+            sources.some((source) => !source.exists)
+              ? h('div', { className: 'wl-hint', style: { marginTop: '4px' } }, '✗ 的来源未安装或路径不对；可在「采集与调度」的额外会话目录里自行添加路径。')
+              : null,
+          ),
+          h(
+            'div',
+            { className: 'wl-card' },
+            h('div', { className: 'wl-section-title', style: { marginTop: '0' } }, '运行历史'),
+            (state.status?.runHistory || []).length
+              ? state.status.runHistory.slice(0, 8).map((item, index) =>
+                  h(
+                    'div',
+                    { className: 'wl-row', key: index },
+                    h('span', { className: 'wl-hint' }, String(item.date || '').slice(5)),
+                    h('span', { className: 'wl-tag' }, item.mode || ''),
+                    h('span', { className: item.status === 'ok' ? 'wl-hint grow' : 'wl-carry grow' }, (item.status || '') + (item.note ? ' · ' + item.note : '')),
+                  ),
+                )
+              : h('div', { className: 'wl-hint' }, '暂无归档运行记录。'),
+          ),
+          history.length
+            ? h(
+                'div',
+                { className: 'wl-card' },
+                h('div', { className: 'wl-section-title', style: { marginTop: '0' } }, '调度执行历史'),
+                history.slice(0, 8).map((item) =>
+                  h(
+                    'div',
+                    { className: 'wl-row', key: item.at },
+                    h('span', { className: 'wl-hint' }, String(item.at).slice(5, 16).replace('T', ' ')),
+                    h('span', { className: 'grow wl-hint' }, item.title || item.id),
+                    h(
+                      'span',
+                      { className: item.status === 'ok' ? 'wl-hint' : 'wl-carry' },
+                      item.status +
+                        (item.sessions !== undefined ? ' ' + item.sessions + ' 场' : '') +
+                        (item.changed !== undefined ? ' 变化 ' + item.changed : ''),
+                    ),
+                  ),
+                ),
+              )
+            : null,
+          h(
+            'div',
+            { className: 'wl-card' },
+            h('div', { className: 'wl-section-title', style: { marginTop: '0' } }, 'AI 用量'),
+            usage && usage.calls
+              ? [
+                  h('div', { className: 'wl-hint' }, `共 ${usage.calls} 次调用 · 输入 ${usage.in} · 输出 ${usage.out} · 合计 ${usage.total} tokens`),
+                  (usage.byModel || []).map((row) =>
+                    h(
+                      'div',
+                      { className: 'wl-row', key: row.model },
+                      h('span', { className: 'wl-tag' }, row.model),
+                      h('span', { className: 'grow wl-hint' }, `${row.calls} 次 · ${row.total} tokens`),
+                    ),
+                  ),
+                ]
+              : h('div', { className: 'wl-hint' }, '还没有 AI 调用记录。'),
+          ),
+          h(
+            'div',
+            { className: 'wl-card' },
+            h('div', { className: 'wl-section-title', style: { marginTop: '0' } }, '会话索引缓存'),
+            state.sessIndex?.total
+              ? h('div', { className: 'wl-hint' }, `${state.sessIndex.total} 个会话 · 建于 ${String(state.sessIndex.builtAt).slice(5, 16).replace('T', ' ')}`)
+              : h('div', { className: 'wl-hint' }, '还没有索引。'),
+            h(
+              'div',
+              { className: 'wl-row', style: { marginTop: '6px' } },
+              h('button', { className: 'wl-btn', disabled: state.busy === 'sess-sync', onClick: () => syncAllSessions(true) }, '强制重扫（清理并重建缓存）'),
+            ),
+          ),
+        ],
+  )
+}
+
+// 连接器子页：原折叠块 body 整体平移（新建/编辑/测试/同步/删除，删除需确认）。
+function settingsConnPage() {
+  return h('div', null, noticeNode(), connBlock())
+}
+
+// 提示词模板子页：原折叠块 body 平移（5 场景编辑/恢复内置），失败可重试。
+function settingsTplPage() {
+  if (!state.tplList && !state.tplLoading) loadTpls().then(render, () => render())
+  const list = state.tplList || []
+  const draft = state.tplDraft
+  const current = draft ? list.find((item) => item.scene === draft.scene) : null
+  return h(
+    'div',
+    null,
+    noticeNode(),
+    h(
+      'div',
+      { className: 'wl-card' },
+      state.tplError
+        ? [
+            h('div', { className: 'wl-notice err', style: { marginBottom: '6px' } }, '模板加载失败：' + state.tplError),
+            h(
+              'button',
+              {
+                className: 'wl-btn',
+                disabled: state.tplLoading,
+                onClick: () => {
+                  state.tplList = null
+                  state.tplError = ''
+                  loadTpls().then(render, () => render())
+                },
+              },
+              '重试',
+            ),
+          ]
+        : !list.length
+          ? h('div', { className: 'wl-hint' }, state.tplLoading ? '加载中…' : '无模板')
+          : [
+              h(
+                'div',
+                { className: 'wl-row' },
+                h(
+                  'select',
+                  {
+                    className: 'wl-select',
+                    style: { width: '150px' },
+                    value: draft?.scene || '',
+                    onChange: (event) => {
+                      tplDraftFor(event.target.value)
+                      render()
+                    },
+                  },
+                  list.map((item) => h('option', { value: item.scene, selected: draft?.scene === item.scene }, item.name)),
+                ),
+                h('span', { className: 'wl-hint' }, current?.hint || ''),
+                h('span', { className: `wl-tag ${current?.source === 'user' ? 'mid' : ''}` }, current?.source === 'user' ? '自定义' : '内置'),
+              ),
+              h('div', { className: 'wl-hint', style: { marginTop: '4px' } }, '变量：{{today}} {{rangeStart}} {{rangeEnd}} {{content}} {{todos}} {{question}} {{text}}，缺失安全置空'),
+              draft
+                ? h('input', {
+                    className: 'wl-input',
+                    value: draft.name,
+                    placeholder: '模板名',
+                    style: { marginTop: '6px' },
+                    onInput: (event) => {
+                      draft.name = event.target.value
+                    },
+                  })
+                : null,
+              draft
+                ? h('textarea', {
+                    className: 'wl-input',
+                    rows: 5,
+                    value: draft.system,
+                    placeholder: 'SYSTEM 段（角色与硬性规则）',
+                    style: { marginTop: '6px' },
+                    onInput: (event) => {
+                      draft.system = event.target.value
+                    },
+                  })
+                : null,
+              draft
+                ? h('textarea', {
+                    className: 'wl-input',
+                    rows: 7,
+                    value: draft.user,
+                    placeholder: 'USER 段（内容与变量）',
+                    style: { marginTop: '6px' },
+                    onInput: (event) => {
+                      draft.user = event.target.value
+                    },
+                  })
+                : null,
+              h(
+                'div',
+                { className: 'wl-row', style: { marginTop: '6px' } },
+                h(
+                  'button',
+                  {
+                    className: 'wl-btn primary',
+                    disabled: state.busy === 'tpl-save',
+                    onClick: () =>
+                      act('tpl-save', async () => {
+                        await call('templates', {
+                          action: 'save',
+                          scene: draft.scene,
+                          name: draft.name,
+                          system: draft.system,
+                          user: draft.user,
+                        })
+                        state.tplList = null
+                        setNotice('ok', '模板已保存：' + draft.name)
+                      }),
+                  },
+                  '保存',
+                ),
+                h(
+                  'button',
+                  {
+                    className: 'wl-btn',
+                    disabled: state.busy === 'tpl-reset',
+                    onClick: () =>
+                      act('tpl-reset', async () => {
+                        await call('templates', { action: 'reset', scene: draft.scene })
+                        state.tplList = null
+                        state.tplDraft = null
+                        setNotice('ok', '已恢复内置模板')
+                      }),
+                  },
+                  '恢复默认',
+                ),
+              ),
+            ],
+    ),
+  )
+}
+
+// 备份与迁移：创建/恢复（确认）/删除（确认）+ 旧 WorkLog 导入。
+function settingsBackupPage() {
+  return h(
+    'div',
+    null,
+    noticeNode(),
+    h(
+      'div',
+      { className: 'wl-card' },
+      h('div', { className: 'wl-section-title', style: { marginTop: '0' } }, '备份'),
       h(
         'div',
-        { className: 'wl-toolbar' },
+        { className: 'wl-toolbar', style: { margin: '4px 0 8px' } },
         h(
           'button',
           {
@@ -2095,48 +2413,19 @@ function settingsTab() {
                   'div',
                   { className: 'grow' },
                   h('div', { className: 'wl-item-title' }, backup.name),
-                  h(
-                    'div',
-                    { className: 'wl-item-meta' },
-                    `${Math.round(backup.size / 1024)} KB · ${String(backup.mtime || '').replace('T', ' ').slice(0, 16)}`,
-                  ),
+                  h('div', { className: 'wl-item-meta' }, `${Math.round(backup.size / 1024)} KB · ${String(backup.mtime || '').replace('T', ' ').slice(0, 16)}`),
                 ),
-                h(
-                  'button',
-                  {
-                    className: 'wl-btn tiny',
-                    disabled: state.busy === 'backup-restore',
-                    onClick: () =>
-                      act('backup-restore', async () => {
-                        const result = await call('backup', { action: 'restore', name: backup.name })
-                        setNotice('ok', `已恢复 ${result.restored} 天日志、${result.todos} 条待办`)
-                      }),
-                  },
-                  '恢复',
-                ),
-                h(
-                  'button',
-                  {
-                    className: 'wl-btn danger tiny',
-                    disabled: state.busy === 'backup-delete',
-                    onClick: () =>
-                      act('backup-delete', async () => {
-                        await call('backup', { action: 'delete', name: backup.name })
-                        setNotice('ok', '备份已删除')
-                      }),
-                  },
-                  '删除',
-                ),
+                h('button', { className: 'wl-btn tiny', disabled: state.busy === 'backup-restore', onClick: () => confirmBackup(backup, 'restore') }, '恢复'),
+                h('button', { className: 'wl-btn danger tiny', disabled: state.busy === 'backup-delete', onClick: () => confirmBackup(backup, 'delete') }, '删除'),
               ),
             ),
           )
         : h('div', { className: 'wl-empty' }, '还没有备份。'),
     ),
-
-    settingsSection(
-      'import',
-      '从旧 WorkLog 导入',
-      '迁移旧 data\\archive',
+    h(
+      'div',
+      { className: 'wl-card' },
+      h('div', { className: 'wl-section-title', style: { marginTop: '0' } }, '从旧 WorkLog 导入'),
       h('div', { className: 'wl-hint' }, '填旧 WorkLog 安装目录（例如 E:\\WorkLog），复制其 data\\archive 到当前数据目录。'),
       h(
         'div',
@@ -2164,13 +2453,29 @@ function settingsTab() {
         ),
       ),
     ),
-    schedSection(),
-    wizardSection(),
-    tplSection(),
-    connectorsSection(),
   )
 }
 
+// Overwrite/destructive backup ops ask first (UX v3 global rule §2.6).
+function confirmBackup(backup, what) {
+  const restore = what === 'restore'
+  state.confirm = {
+    title: (restore ? '恢复备份 ' : '删除备份 ') + backup.name + '？',
+    body: restore ? '将用该备份覆盖当前的日志与待办。' : '删除后不可恢复。',
+    okLabel: restore ? '恢复' : '删除',
+    run: () =>
+      act(restore ? 'backup-restore' : 'backup-delete', async () => {
+        if (restore) {
+          const result = await call('backup', { action: 'restore', name: backup.name })
+          setNotice('ok', `已恢复 ${result.restored} 天日志、${result.todos} 条待办`)
+        } else {
+          await call('backup', { action: 'delete', name: backup.name })
+          setNotice('ok', '备份已删除')
+        }
+      }),
+  }
+  render()
+}
 async function loadSched() {
   // Guard both 'already loaded' and 'load in flight': schedSection re-renders
   // on every state change, and an unguarded call here once froze the panel
@@ -2257,259 +2562,188 @@ function taskRow(task) {
   )
 }
 
-function schedSection() {
-  const open = Boolean(state.settingsOpen.sched)
-  if (open && !state.schedData && !state.schedLoading) loadSched().then(render)
-  const data = state.schedData
-  const tasks = data?.tasks || []
-  const sources = data?.sources || []
-  const history = data?.history || []
+function schedRunBtn(label, action) {
   return h(
-    'div',
-    { className: `wl-fold${open ? ' open' : ''}` },
-    h(
-      'button',
-      {
-        className: 'wl-fold-head',
-        type: 'button',
-        onClick: () => {
-          state.settingsOpen.sched = !open
-          render()
-        },
-      },
-      h('span', { className: 'wl-fold-caret' }, open ? '▾' : '▸'),
-      h('span', { className: 'wl-fold-title' }, '采集调度与诊断'),
-      h('span', { className: 'wl-hint' }, '定时采集 / 来源健康 / 监控目录'),
-    ),
-    open
-      ? h(
-          'div',
-          { className: 'wl-fold-body' },
-          state.schedLoading && !data
-            ? h('div', { className: 'wl-hint' }, '加载中…')
-            : [
-                h(
-                  'div',
-                  { className: 'wl-row' },
-                  h(
-                    'button',
-                    {
-                      className: 'wl-btn',
-                      disabled: state.busy === 'sched',
-                      onClick: () => refreshSched(() => call('collect', { action: 'run' })),
-                    },
-                    '运行所有到期任务',
-                  ),
-                  h(
-                    'button',
-                    {
-                      className: 'wl-btn',
-                      disabled: state.busy === 'sched',
-                      onClick: () => refreshSched(() => call('collect', { action: 'scan_sessions' })),
-                    },
-                    '立即扫描会话',
-                  ),
-                  h(
-                    'button',
-                    {
-                      className: 'wl-btn',
-                      disabled: state.busy === 'sched',
-                      onClick: () => refreshSched(() => call('collect', { action: 'scan_watch' })),
-                    },
-                    '立即扫描目录',
-                  ),
-                ),
-                h('div', { className: 'wl-section-title', style: { marginTop: '8px' } }, '调度任务'),
-                tasks.length ? tasks.map(taskRow) : h('div', { className: 'wl-hint' }, '无任务'),
-                h('div', { className: 'wl-section-title', style: { marginTop: '8px' } }, '会话来源'),
-                sources.map((source) =>
-                  h(
-                    'div',
-                    { className: 'wl-row', key: source.id + source.path },
-                    h('span', { className: 'wl-tag' }, source.label),
-                    h('span', { className: 'grow wl-hint', style: { wordBreak: 'break-all' } }, source.path),
-                    h('span', { className: source.exists ? 'wl-hint' : 'wl-carry' }, source.exists ? '✓' : '✗'),
-                  ),
-                ),
-                sources.some((source) => !source.exists)
-                  ? h(
-                      'div',
-                      { className: 'wl-hint', style: { marginTop: '4px' } },
-                      '✗ 的来源未安装或路径不对；扫不到的工具可以在上方「数据与扫描 → 会话目录」自行添加路径。',
-                    )
-                  : null,
-                h('div', { className: 'wl-section-title', style: { marginTop: '8px' } }, '监控目录'),
-                (data?.watchDirs || []).length
-                  ? data.watchDirs.map((dir) =>
-                      h(
-                        'div',
-                        { className: 'wl-row', key: dir.path },
-                        h('span', { className: 'wl-tag' }, dir.kind),
-                        h('span', { className: 'grow wl-hint', style: { wordBreak: 'break-all' } }, dir.path),
-                      ),
-                    )
-                  : h(
-                      'div',
-                      { className: 'wl-hint' },
-                      '在「数据与扫描」里加监控目录：每行一条，格式 路径 或 路径|cloud 或 路径|git',
-                    ),
-                history.length
-                  ? [
-                      h('div', { className: 'wl-section-title', style: { marginTop: '8px' } }, '最近调度历史'),
-                      history.slice(0, 8).map((item) =>
-                        h(
-                          'div',
-                          { className: 'wl-row', key: item.at },
-                          h('span', { className: 'wl-hint' }, String(item.at).slice(5, 16).replace('T', ' ')),
-                          h('span', { className: 'grow wl-hint' }, item.title || item.id),
-                          h(
-                            'span',
-                            { className: item.status === 'ok' ? 'wl-hint' : 'wl-carry' },
-                            item.status +
-                              (item.sessions !== undefined ? ' ' + item.sessions + ' 场' : '') +
-                              (item.changed !== undefined ? ' 变化 ' + item.changed : ''),
-                          ),
-                        ),
-                      ),
-                    ]
-                  : null,
-              ],
-        )
-      : null,
+    'button',
+    { className: 'wl-btn', disabled: state.busy === 'sched', onClick: () => refreshSched(() => call('collect', { action })) },
+    label,
   )
 }
 
-function wizardSection() {
-  const open = Boolean(state.settingsOpen.wizard)
-  const draft = state.wizardDraft
-  const probe = state.wizardProbe
-  if (open && !state.wizardTypes && !state.wizardTypesLoading) {
-    state.wizardTypesLoading = true
-    call('wizard', { action: 'types' })
-      .then((result) => {
-        state.wizardTypes = result?.types || []
-      })
-      .catch(() => {
-        state.wizardTypes = []
-      })
-      .finally(() => {
-        state.wizardTypesLoading = false
-        render()
-      })
-  }
+// 采集与调度：调度任务 + 立即运行 + 采集开关 + 额外会话目录。
+// 诊断加载器与「诊断」子页共用（双守卫；失败留哨兵供「重试」）。
+function settingsCollectPage() {
+  const draft = (state.settings = state.settings || draftFromConfig(state.config))
+  const set = settingsSet(draft)
+  if (!state.schedData && !state.schedLoading) loadSched().then(render, () => render())
+  const data = state.schedData
+  const tasks = data?.tasks || []
   return h(
     'div',
-    { className: `wl-fold${open ? ' open' : ''}` },
-    h(
-      'button',
-      {
-        className: 'wl-fold-head',
-        type: 'button',
-        onClick: () => {
-          state.settingsOpen.wizard = !open
-          render()
-        },
-      },
-      h('span', { className: 'wl-fold-caret' }, open ? '▾' : '▸'),
-      'AI 工具配置向导',
-      h('span', { className: 'wl-hint' }, '按位置探测并一键应用'),
-    ),
-    open
+    null,
+    noticeNode(),
+    data?.error
       ? h(
           'div',
-          { className: 'wl-fold-body' },
+          { className: 'wl-card' },
+          h('div', { className: 'wl-notice err', style: { marginBottom: '6px' } }, '采集与调度加载失败：' + data.error),
+          h(
+            'button',
+            {
+              className: 'wl-btn',
+              disabled: state.schedLoading,
+              onClick: () => {
+                state.schedData = null
+                loadSched().then(render, () => render())
+              },
+            },
+            '重试',
+          ),
+        )
+      : [
           h(
             'div',
-            { className: 'wl-row', style: { marginTop: '6px' } },
+            { className: 'wl-card' },
+            h('div', { className: 'wl-section-title', style: { marginTop: '0' } }, '调度任务'),
+            state.schedLoading && !data ? h('div', { className: 'wl-hint' }, '加载中…') : null,
             h(
-              'select',
-              {
-                className: 'wl-select',
-                style: { width: '150px' },
-                value: draft.type,
-                onChange: (event) => {
-                  draft.type = event.target.value
-                  state.wizardProbe = null
-                  render()
-                },
-              },
-              (state.wizardTypes || []).length
-                ? state.wizardTypes.map((item) =>
-                    h('option', { value: item.type, selected: draft.type === item.type }, item.title),
-                  )
-                : h('option', { value: draft.type }, draft.type),
+              'div',
+              { className: 'wl-row' },
+              schedRunBtn('运行所有到期任务', 'run'),
+              schedRunBtn('立即扫描会话', 'scan_sessions'),
+              schedRunBtn('立即扫描目录', 'scan_watch'),
             ),
-            h('input', {
-              className: 'wl-input',
-              placeholder: '位置（可选，默认扫标准路径）',
-              value: draft.location,
-              onInput: (event) => {
-                draft.location = event.target.value
-              },
+            tasks.length ? tasks.map(taskRow) : h('div', { className: 'wl-hint' }, data ? '无任务' : '加载中…'),
+          ),
+          h(
+            'div',
+            { className: 'wl-card' },
+            h('div', { className: 'wl-section-title', style: { marginTop: '0' } }, '采集开关'),
+            h(
+              'div',
+              { className: 'wl-checkline' },
+              h('input', { type: 'checkbox', checked: draft.git, onChange: set('git') }),
+              '扫描 Git 提交',
+              h('input', { type: 'checkbox', checked: draft.docs, onChange: set('docs'), style: { marginLeft: '10px' } }),
+              '扫描文档变更',
+              h('input', { type: 'checkbox', checked: draft.sessions, onChange: set('sessions'), style: { marginLeft: '10px' } }),
+              '汇总 AI 会话',
+            ),
+            h('div', { className: 'wl-label' }, '额外 AI 会话目录（每行一个，可选）'),
+            h('textarea', { className: 'wl-area small', value: draft.sessionRoots, onInput: set('sessionRoots') }),
+            h('div', { className: 'wl-hint' }, '自动扫描：~/.claude/projects、~/.codex/sessions、$DSH_HOME/sessions、~/.workbuddy/projects、~/.zcode（数据库）、~/.local/share/opencode、~/.gemini/tmp。'),
+          ),
+          h(
+            'div',
+            { className: 'wl-card' },
+            h('div', { className: 'wl-section-title', style: { marginTop: '0' } }, '监控目录'),
+            (data?.watchDirs || []).length
+              ? data.watchDirs.map((dir) =>
+                  h(
+                    'div',
+                    { className: 'wl-row', key: dir.path },
+                    h('span', { className: 'wl-tag' }, dir.kind),
+                    h('span', { className: 'grow wl-hint', style: { wordBreak: 'break-all' } }, dir.path),
+                  ),
+                )
+              : h('div', { className: 'wl-hint' }, data ? '暂无。可在「通用」里添加：每行一条，格式 路径 或 路径|cloud 或 路径|git' : '加载中…'),
+          ),
+        ],
+    dirtyBarNode(),
+  )
+}
+// AI 工具配置向导（并入「AI 接口」子页；原折叠壳退役，body 平移）。
+function wizardBlock() {
+  const draft = state.wizardDraft
+  const probe = state.wizardProbe
+  return h(
+    'div',
+    { className: 'wl-card' },
+    h('div', { className: 'wl-section-title', style: { marginTop: '0' } }, 'AI 工具配置向导'),
+    h('div', { className: 'wl-hint' }, '按位置探测并一键应用'),
+    h(
+      'div',
+      { className: 'wl-row', style: { marginTop: '6px' } },
+      h(
+        'select',
+        {
+          className: 'wl-select',
+          style: { width: '150px' },
+          value: draft.type,
+          onChange: (event) => {
+            draft.type = event.target.value
+            state.wizardProbe = null
+            render()
+          },
+        },
+        (state.wizardTypes || []).length
+          ? state.wizardTypes.map((item) => h('option', { value: item.type, selected: draft.type === item.type }, item.title))
+          : h('option', { value: draft.type }, state.wizardTypesLoading ? '加载中…' : draft.type),
+      ),
+      h('input', {
+        className: 'wl-input',
+        placeholder: '位置（可选，默认扫标准路径）',
+        value: draft.location,
+        onInput: (event) => {
+          draft.location = event.target.value
+        },
+      }),
+      h(
+        'button',
+        {
+          className: 'wl-btn',
+          disabled: state.busy === 'wizard',
+          onClick: () =>
+            act('wizard', async () => {
+              state.wizardProbe = await call('wizard', { action: 'probe', type: draft.type, location: draft.location })
+              if (!state.wizardProbe.ok) setNotice('err', state.wizardProbe.error || '探测失败')
             }),
+        },
+        '探测',
+      ),
+    ),
+    probe && probe.ok && probe.type === 'custom'
+      ? h('div', { className: 'wl-hint', style: { marginTop: '6px' } }, '文件数 ' + probe.custom.fileCount + '。' + (probe.custom.note || ''))
+      : null,
+    probe && probe.ok && probe.type !== 'custom'
+      ? (probe.candidates || []).map((candidate) =>
+          h(
+            'div',
+            { className: 'wl-item', key: candidate.id, style: { marginTop: '6px' } },
+            h(
+              'div',
+              { className: 'grow' },
+              h('div', { className: 'wl-item-title' }, candidate.name || candidate.id),
+              h(
+                'div',
+                { className: 'wl-item-meta' },
+                candidate.baseUrl,
+                ' · 模型 ' + (candidate.modelsCount || 0) + ' 个',
+                candidate.model ? ' · 当前 ' + candidate.model : '',
+                ' · Key ' + (candidate.hasKey ? '已配置 ' + (candidate.keyHint || '') : '未配置'),
+              ),
+              candidate.note ? h('div', { className: 'wl-item-meta' }, candidate.note) : null,
+            ),
             h(
               'button',
               {
-                className: 'wl-btn',
-                disabled: state.busy === 'wizard',
+                className: 'wl-btn primary tiny',
+                disabled: state.busy === 'wizard-apply',
                 onClick: () =>
-                  act('wizard', async () => {
-                    state.wizardProbe = await call('wizard', { action: 'probe', type: draft.type, location: draft.location })
-                    if (!state.wizardProbe.ok) setNotice('err', state.wizardProbe.error || '探测失败')
+                  act('wizard-apply', async () => {
+                    await call('ai', { action: 'apply', id: candidate.id })
+                    setNotice('ok', '已应用：' + (candidate.name || candidate.id))
                   }),
               },
-              '探测',
+              '应用',
             ),
           ),
-          probe && probe.ok && probe.type === 'custom'
-            ? h(
-                'div',
-                { className: 'wl-hint', style: { marginTop: '6px' } },
-                '文件数 ' + probe.custom.fileCount + '。' + (probe.custom.note || ''),
-              )
-            : null,
-          probe && probe.ok && probe.type !== 'custom'
-            ? (probe.candidates || []).map((candidate) =>
-                h(
-                  'div',
-                  { className: 'wl-item', key: candidate.id, style: { marginTop: '6px' } },
-                  h(
-                    'div',
-                    { className: 'grow' },
-                    h('div', { className: 'wl-item-title' }, candidate.name || candidate.id),
-                    h(
-                      'div',
-                      { className: 'wl-item-meta' },
-                      candidate.baseUrl,
-                      ' · 模型 ' + (candidate.modelsCount || 0) + ' 个',
-                      candidate.model ? ' · 当前 ' + candidate.model : '',
-                      ' · Key ' + (candidate.hasKey ? '已配置 ' + (candidate.keyHint || '') : '未配置'),
-                    ),
-                    candidate.note ? h('div', { className: 'wl-item-meta' }, candidate.note) : null,
-                  ),
-                  h(
-                    'button',
-                    {
-                      className: 'wl-btn primary tiny',
-                      disabled: state.busy === 'wizard-apply',
-                      onClick: () =>
-                        act('wizard-apply', async () => {
-                          await call('ai', { action: 'apply', id: candidate.id })
-                          setNotice('ok', '已应用：' + (candidate.name || candidate.id))
-                        }),
-                    },
-                    '应用',
-                  ),
-                ),
-              )
-            : null,
-          probe && probe.ok && probe.hint ? h('div', { className: 'wl-hint', style: { marginTop: '4px' } }, probe.hint) : null,
-          probe && !probe.ok ? h('div', { className: 'wl-carry', style: { marginTop: '6px' } }, probe.error || '探测失败') : null,
         )
       : null,
+    probe && probe.ok && probe.hint ? h('div', { className: 'wl-hint', style: { marginTop: '4px' } }, probe.hint) : null,
+    probe && !probe.ok ? h('div', { className: 'wl-carry', style: { marginTop: '6px' } }, probe.error || '探测失败') : null,
   )
 }
-
 function calKey(d) {
   const now = new Date()
   const y = d ? Number(String(d).slice(0, 4)) : now.getFullYear()
@@ -3051,13 +3285,14 @@ async function loadTpls() {
   try {
     const data = await call('templates', { action: 'list' })
     state.tplList = (data && Array.isArray(data.templates) ? data.templates : [])
+    state.tplError = ''
     const first = state.tplList[0]
     if (first && !state.tplDraft) {
       state.tplDraft = { scene: first.scene, name: first.name, system: first.system, user: first.user, source: first.source }
     }
   } catch (error) {
     state.tplList = []
-    setNotice('err', '模板加载失败：' + String(error?.message || error) + '（重开折叠可重试）')
+    state.tplError = String(error?.message || error)
   } finally {
     state.tplLoading = false
   }
@@ -3070,139 +3305,6 @@ function tplDraftFor(scene) {
   return state.tplDraft
 }
 
-function tplSection() {
-  const open = Boolean(state.settingsOpen.tpls)
-  if (open && !state.tplList && !state.tplLoading) loadTpls().then(render)
-  const list = state.tplList || []
-  const draft = state.tplDraft
-  const current = draft ? list.find((item) => item.scene === draft.scene) : null
-  return h(
-    'div',
-    { className: `wl-fold${open ? ' open' : ''}` },
-    h(
-      'button',
-      {
-        className: 'wl-fold-head',
-        type: 'button',
-        onClick: () => {
-          state.settingsOpen.tpls = !open
-          render()
-        },
-      },
-      h('span', { className: 'wl-fold-caret' }, open ? '▾' : '▸'),
-      '提示词模板',
-      h('span', { className: 'wl-hint' }, '全部 AI 调用的提示词可自定义'),
-    ),
-    open
-      ? h(
-          'div',
-          { className: 'wl-fold-body' },
-          !list.length
-            ? h('div', { className: 'wl-hint' }, state.tplLoading ? '加载中…' : '无模板')
-            : [
-                h(
-                  'div',
-                  { className: 'wl-row' },
-                  h(
-                    'select',
-                    {
-                      className: 'wl-select',
-                      style: { width: '150px' },
-                      value: draft?.scene || '',
-                      onChange: (event) => {
-                        tplDraftFor(event.target.value)
-                        render()
-                      },
-                    },
-                    list.map((item) =>
-                      h('option', { value: item.scene, selected: draft?.scene === item.scene }, item.name),
-                    ),
-                  ),
-                  h('span', { className: 'wl-hint' }, current?.hint || ''),
-                  h('span', { className: `wl-tag ${current?.source === 'user' ? 'mid' : ''}` }, current?.source === 'user' ? '自定义' : '内置'),
-                ),
-                h('div', { className: 'wl-hint', style: { marginTop: '4px' } },
-                  '变量：{{today}} {{rangeStart}} {{rangeEnd}} {{content}} {{todos}} {{question}} {{text}}，缺失安全置空'),
-                draft
-                  ? h('input', {
-                      className: 'wl-input',
-                      value: draft.name,
-                      placeholder: '模板名',
-                      style: { marginTop: '6px' },
-                      onInput: (event) => {
-                        draft.name = event.target.value
-                      },
-                    })
-                  : null,
-                draft
-                  ? h('textarea', {
-                      className: 'wl-input',
-                      rows: 5,
-                      value: draft.system,
-                      placeholder: 'SYSTEM 段（角色与硬性规则）',
-                      style: { marginTop: '6px' },
-                      onInput: (event) => {
-                        draft.system = event.target.value
-                      },
-                    })
-                  : null,
-                draft
-                  ? h('textarea', {
-                      className: 'wl-input',
-                      rows: 7,
-                      value: draft.user,
-                      placeholder: 'USER 段（内容与变量）',
-                      style: { marginTop: '6px' },
-                      onInput: (event) => {
-                        draft.user = event.target.value
-                      },
-                    })
-                  : null,
-                h(
-                  'div',
-                  { className: 'wl-row', style: { marginTop: '6px' } },
-                  h(
-                    'button',
-                    {
-                      className: 'wl-btn primary',
-                      disabled: state.busy === 'tpl-save',
-                      onClick: () =>
-                        act('tpl-save', async () => {
-                          await call('templates', {
-                            action: 'save',
-                            scene: draft.scene,
-                            name: draft.name,
-                            system: draft.system,
-                            user: draft.user,
-                          })
-                          state.tplList = null
-                          setNotice('ok', '模板已保存：' + draft.name)
-                        }),
-                    },
-                    '保存',
-                  ),
-                  h(
-                    'button',
-                    {
-                      className: 'wl-btn',
-                      disabled: state.busy === 'tpl-reset',
-                      onClick: () =>
-                        act('tpl-reset', async () => {
-                          await call('templates', { action: 'reset', scene: draft.scene })
-                          state.tplList = null
-                          state.tplDraft = null
-                          setNotice('ok', '已恢复内置模板')
-                        }),
-                    },
-                    '恢复默认',
-                  ),
-                ),
-              ],
-        )
-      : null,
-  )
-}
-
 async function loadConns() {
   if (state.connList || state.connLoading) return
   state.connLoading = true
@@ -3210,9 +3312,10 @@ async function loadConns() {
   try {
     const list = await call('connectors', { action: 'list' })
     state.connList = list && typeof list === 'object' ? list : { connectors: [], types: [] }
+    state.connError = ''
   } catch (error) {
     state.connList = { connectors: [], types: [] }
-    setNotice('err', '连接器加载失败：' + String(error?.message || error) + '（重开折叠可重试）')
+    state.connError = String(error?.message || error)
   } finally {
     state.connLoading = false
   }
@@ -3270,11 +3373,23 @@ function connRow(connector) {
       ),
       h(
         'button',
-        { className: 'wl-btn danger tiny', onClick: () => act('conn-del', async () => {
-          await call('connectors', { action: 'remove', id: connector.id })
-          state.connList = null
-        }) },
-        '删',
+        {
+          className: 'wl-btn danger tiny',
+          onClick: () => {
+            state.confirm = {
+              title: '删除连接器？',
+              body: '将删除 ' + (connector.label || connector.id) + '，删除后需重新配置。',
+              okLabel: '删除',
+              run: () =>
+                act('conn-del', async () => {
+                  await call('connectors', { action: 'remove', id: connector.id })
+                  state.connList = null
+                }),
+            }
+            render()
+          },
+        },
+        '删除',
       ),
     ),
   )
@@ -3388,73 +3503,72 @@ function connEditor() {
   )
 }
 
-function connectorsSection() {
-  const open = Boolean(state.settingsOpen.conns)
-  if (open && !state.connList && !state.connLoading) loadConns().then(render)
+// 连接器 body（原折叠壳退役）。加载失败留哨兵供「重试」；删除需确认。
+function connBlock() {
+  if (!state.connList && !state.connLoading && !state.connError) loadConns().then(render, () => render())
   const connectors = state.connList?.connectors || []
   return h(
     'div',
-    { className: `wl-fold${open ? ' open' : ''}` },
-    h(
-      'button',
-      {
-        className: 'wl-fold-head',
-        type: 'button',
-        onClick: () => {
-          state.settingsOpen.conns = !open
-          render()
-        },
-      },
-      h('span', { className: 'wl-fold-caret' }, open ? '▾' : '▸'),
-      '外部连接器',
-      h('span', { className: 'wl-hint' }, '飞书 / 禅道 / 通用 JSON（只读采集）'),
-    ),
-    open
-      ? h(
-          'div',
-          { className: 'wl-fold-body' },
-          state.connLoading && !state.connList
-            ? h('div', { className: 'wl-hint' }, '加载中…')
-            : [
-                connectors.length
-                  ? connectors.map(connRow)
-                  : h('div', { className: 'wl-hint' }, '还没有连接器。新建一个开始拉取外部数据。'),
-                h(
-                  'div',
-                  { className: 'wl-row', style: { marginTop: '8px' } },
-                  h(
+    { className: 'wl-card' },
+    state.connError
+      ? [
+          h('div', { className: 'wl-notice err', style: { marginBottom: '6px' } }, '连接器加载失败：' + state.connError),
+          h(
+            'button',
+            {
+              className: 'wl-btn',
+              disabled: state.connLoading,
+              onClick: () => {
+                state.connList = null
+                state.connError = ''
+                loadConns().then(render, () => render())
+              },
+            },
+            '重试',
+          ),
+        ]
+      : state.connLoading && !state.connList
+        ? h('div', { className: 'wl-hint' }, '加载中…')
+        : [
+            connectors.length ? connectors.map(connRow) : h('div', { className: 'wl-hint' }, '还没有连接器。新建一个开始拉取外部数据。'),
+            h(
+              'div',
+              { className: 'wl-row', style: { marginTop: '8px' } },
+              h(
+                'button',
+                {
+                  className: 'wl-btn',
+                  disabled: state.connDraft !== null,
+                  onClick: () => {
+                    state.connDraft = { id: '', type: 'feishu', label: '', enabled: true, config: {} }
+                    if (!state.connList) loadConns()
+                    render()
+                  },
+                },
+                '新建连接器',
+              ),
+              connectors.length
+                ? h(
                     'button',
                     {
                       className: 'wl-btn',
-                      disabled: state.connDraft !== null,
-                      onClick: () => {
-                        state.connDraft = { id: '', type: 'feishu', label: '', enabled: true, config: {} }
-                        if (!state.connList) loadConns()
-                        render()
-                      },
-                    },
-                    '新建连接器',
-                  ),
-                  connectors.length
-                    ? h(
-                        'button',
-                        { className: 'wl-btn', disabled: state.busy === 'conn-sync', onClick: () => act('conn-sync', async () => {
+                      disabled: state.busy === 'conn-sync',
+                      onClick: () =>
+                        act('conn-sync', async () => {
                           const result = await call('connectors', { action: 'sync' })
                           const okN = result.results.filter((item) => item.status === 'ok').length
                           setNotice('ok', '同步完成：' + okN + '/' + result.results.length + ' 成功')
                           state.connList = null
-                        }) },
-                        '同步全部启用项',
-                      )
-                    : null,
-                ),
-                state.connDraft ? connEditor() : null,
-              ],
-        )
-      : null,
+                        }),
+                    },
+                    '同步全部启用项',
+                  )
+                : null,
+            ),
+            state.connDraft ? connEditor() : null,
+          ],
   )
 }
-
 async function loadReco() {
   if (state.recoData && state.recoData.date === today()) return
   if (state.recoLoading) return
@@ -3685,11 +3799,14 @@ function graphEntityView(data) {
 }
 
 async function loadSessIndex() {
-  if (state.sessIndex) return
+  if (state.sessIndex || state.sessIndexLoading) return
+  state.sessIndexLoading = true
   try {
     state.sessIndex = await call('sessions', { action: 'index_status' })
   } catch {
     state.sessIndex = { builtAt: '', total: 0 }
+  } finally {
+    state.sessIndexLoading = false
   }
   render()
 }
