@@ -706,3 +706,99 @@ body {
 .wl-card.clickable:hover {
   border-color: var(--wl-accent);
 }
+
+/* UX v3: time tab master-detail layout (calendar left, day detail right). */
+.wl-master {
+  display: grid;
+  grid-template-columns: minmax(250px, 42%) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+@media (max-width: 560px) {
+  .wl-master {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Calendar cell marks: exactly three kinds (● log · ▼ due · ◦ sessions). */
+.wl-cal-mark {
+  font-size: 9px;
+  line-height: 1;
+}
+
+.wl-cal-mark.due {
+  color: var(--wl-warn);
+}
+
+.wl-cal-mark.sess {
+  color: var(--wl-faint);
+}
+
+/* Library tab segmented sub-view switch. */
+.wl-seg {
+  display: inline-flex;
+  border: 1px solid var(--wl-border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.wl-seg button {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--wl-muted);
+  padding: 4px 14px;
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  border-right: 1px solid var(--wl-border);
+}
+
+.wl-seg button:last-child {
+  border-right: none;
+}
+
+.wl-seg button.on {
+  background: var(--wl-accent);
+  color: var(--wl-accent-fg);
+}
+
+/* Overlay confirm dialog (report regen / day regen). */
+.wl-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 14, 22, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 20px;
+}
+
+.wl-modal-box {
+  background: var(--wl-bg);
+  border: 1px solid var(--wl-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  max-width: 360px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+}
+
+.wl-modal-title {
+  font-weight: 650;
+  margin-bottom: 6px;
+}
+
+.wl-modal-body {
+  color: var(--wl-muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+/* "Just generated" highlight on the report list. */
+.wl-item.flash {
+  outline: 2px solid var(--wl-accent);
+  outline-offset: 1px;
+}

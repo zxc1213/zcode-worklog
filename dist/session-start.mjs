@@ -316,7 +316,7 @@ var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.17.2";
+    PLUGIN_VERSION = "0.19.0";
   }
 });
 
@@ -2342,7 +2342,7 @@ async function todoDaySection(config, dateString, carried = null) {
   const dues = open.map((todo) => todo.due).filter(Boolean);
   if (open.length) {
     lines.push(
-      `- \u5F53\u524D\u672A\u5B8C\u6210\u5171 ${open.length} \u6761${dues.length ? `\uFF0C\u6700\u8FD1\u5230\u671F ${dues.sort()[0]}` : ""}`
+      `- \u672A\u5B8C\u6210\u5408\u8BA1 ${open.length} \u6761${dues.length ? `\uFF0C\u6700\u8FD1\u5230\u671F ${dues.sort()[0]}` : ""}`
     );
   }
   return lines;

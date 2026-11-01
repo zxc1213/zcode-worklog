@@ -31,22 +31,37 @@ function markMounted() {
 }
 
 const TABS = [
-  ['overview', '概览'],
-  ['schedule', '日程'],
-  ['logs', '日志·汇报'],
-  ['graph', '图谱'],
-  ['sessions', '会话'],
+  ['today', '今天'],
+  ['time', '时间'],
+  ['library', '资料库'],
+  ['report', '报告'],
   ['settings', '设置'],
 ]
 
+// 'custom'（自由总结）walks the report op's summarize action with a start/end
+// range; the other six map straight onto report generate's kind enum.
 const REPORT_KINDS = [
-  ['weekly', '周报'],
   ['daily', '日报'],
+  ['weekly', '周报'],
   ['month', '月报'],
   ['quarter', '季报'],
   ['perf', '绩效素材'],
   ['project', '项目档案'],
+  ['custom', '自由总结'],
 ]
+
+// Report list entries only carry a file name ("<kind>-<key>.md"), so the kind
+// label for grouping/regeneration is derived from the same enum (summarize is
+// how the backend names 自由总结 files).
+const REPORT_KIND_LABELS = {
+  daily: '日报',
+  weekly: '周报',
+  month: '月报',
+  quarter: '季报',
+  perf: '绩效素材',
+  project: '项目档案',
+  summarize: '自由总结',
+}
 
 function pad(n) {
   return String(n).padStart(2, '0')
@@ -66,8 +81,28 @@ function quarter() {
   return `${now.getFullYear()}-Q${Math.floor(now.getMonth() / 3) + 1}`
 }
 
+function daysAgo(n) {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function yesterdayOf(dateText) {
+  const d = new Date(dateText)
+  d.setDate(d.getDate() - 1)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function cnDate(dateText) {
+  return Number(String(dateText).slice(5, 7)) + '月' + Number(String(dateText).slice(8, 10)) + '日'
+}
+
+function weekdayCn(dateText) {
+  return '日一二三四五六'[new Date(dateText).getDay()] || ''
+}
+
 const state = {
-  tab: 'overview',
+  tab: 'today',
   busy: '',
   notice: null,
   status: null,
@@ -83,11 +118,15 @@ const state = {
   schedLoading: false,
   calMonth: '',
   calData: null,
+  calDataLoading: false,
   calSelected: '',
   calMode: 'month',
   calAnchor: '',
   calDay: null,
   calDayLoading: false,
+  dayEdit: false,
+  yesterday: { date: '', text: '', loaded: false, loading: false },
+  libView: 'sessions',
   wizardTypes: null,
   wizardDraft: { type: 'claude', location: '' },
   wizardProbe: null,
@@ -103,16 +142,8 @@ const state = {
   graphEntity: '',
   graphLoading: false,
   sessIndex: null,
-  sessCalMonth: '',
-  sessCalData: null,
-  sessCalLoading: false,
-  sessCalSelected: '',
   sessContent: {},
-  reportsOpen: false,
-  logCalMonth: '',
-  logCalData: null,
-  logCalLoading: false,
-  logView: 'view',
+  sessExpanded: [],
   sessFilters: { q: '', project: '', source: '', start: '', end: '', minTurns: '', workOnly: false, workKeywords: '' },
   sessGroupBy: '',
   sessResult: null,
@@ -125,12 +156,18 @@ const state = {
   settings: null,
   log: { date: today(), text: '', exists: false, loaded: false },
   hits: [],
+  logExpand: '',
+  logExpandLoading: false,
+  logExpandData: null,
   reportText: '',
   reportKind: 'weekly',
   reportPeriod: today(),
+  reportStart: daysAgo(6),
+  reportEnd: today(),
   reportUseAi: false,
+  reportFlash: '',
+  confirm: null,
   importDir: '',
-  sessions: { date: today(), result: null, sources: null },
   aiCandidates: null,
   aiBusy: false,
   aiPick: '',
@@ -256,11 +293,9 @@ function tabButton(key, label) {
       className: `wl-tab${state.tab === key ? ' on' : ''}`,
       onClick: () => {
         state.tab = key
-        if (key === 'logs' && !state.log.loaded) {
-          loadLog(state.log.date).then(render, (error) => {
-            setNotice('err', String(error?.message || error))
-            render()
-          })
+        if (key === 'today') {
+          loadYesterday().then(render, () => render())
+          if (!state.recoData && !state.recoLoading) loadReco().then(render, () => render())
         }
         if (key === 'settings') {
           if (state.config) state.settings = state.settings || draftFromConfig(state.config)
@@ -273,23 +308,28 @@ function tabButton(key, label) {
   )
 }
 
-function card(label, value, sub, wide, onClick) {
-  return h(
-    'div',
-    {
-      className: `wl-card${wide ? ' wide' : ''}${onClick ? ' clickable' : ''}`,
-      onClick,
-      ...(onClick ? { title: '点击查看详情', style: { cursor: 'pointer' } } : {}),
-    },
-    h('div', { className: 'wl-k' }, label),
-    h('div', { className: `wl-v${String(value).length > 16 ? ' small' : ''}` }, value),
-    sub ? h('div', { className: 'wl-hint' }, sub) : null,
-  )
-}
-
 function gotoTab(tab) {
   state.tab = tab
   render()
+}
+
+// Cross-page jump helpers (explicit links only; no card walls).
+function openLibrarySessions(date) {
+  state.tab = 'library'
+  state.libView = 'sessions'
+  state.sessFilters.start = date || ''
+  state.sessFilters.end = date || ''
+  state.sessGroupBy = ''
+  state.sessResult = null
+  render()
+  runSessQuery()
+}
+
+function gotoWorkbench() {
+  state.tab = 'time'
+  render()
+  const el = document.getElementById('wl-todo-workbench')
+  if (el?.scrollIntoView) el.scrollIntoView({ block: 'start' })
 }
 
 function priorityTag(pri) {
@@ -304,158 +344,155 @@ async function loadLog(date) {
   return data
 }
 
-function overviewTab() {
+// Yesterday preview on the today tab. Guard both 'loaded' and 'in flight';
+// failures still set the loaded sentinel so the panel never retries in a loop.
+async function loadYesterday() {
+  const date = yesterdayOf(today())
+  if (state.yesterday.loaded && state.yesterday.date === date) return
+  if (state.yesterday.loading) return
+  state.yesterday.loading = true
+  state.yesterday.date = date
+  render()
+  try {
+    const data = await call('day', { date })
+    state.yesterday = { date, text: data?.text || '', loaded: true, loading: false }
+  } catch {
+    state.yesterday = { date, text: '', loaded: true, loading: false }
+  }
+  render()
+}
+
+// Jump to a day on the time tab (read mode by default; edit mode is the
+// today tab「继续编辑」target state).
+async function openDay(date, { edit = false } = {}) {
+  state.tab = 'time'
+  render()
+  await selectCalDay(date, { edit })
+}
+
+// Today tab v1: one archive action card, due todos, recommendations, a brief
+// session list and a yesterday preview. The old stat card wall, project cards
+// and "recent runs" block are gone (P1 redesign, see docs/ux-v3-design.md §4.1).
+function todayTab() {
   const status = state.status
   if (!status) return h('div', { className: 'wl-empty' }, '加载中…')
-  const projects = status.projects || []
-  const config = status.config || {}
+  const todayInfo = status.today || { date: today(), archived: false }
+  const todayText = today()
+  const dueTodos = state.todos.filter((item) => item.status !== 'done' && item.due && item.due <= todayText)
+  const overdueCount = dueTodos.filter((item) => item.due < todayText).length
 
   return h(
     'div',
     null,
     noticeNode(),
+    todayInfo.archived
+      ? h(
+          'div',
+          { className: 'wl-card wide' },
+          h(
+            'div',
+            { className: 'wl-row' },
+            h(
+              'div',
+              { className: 'grow' },
+              h('div', { className: 'wl-item-title' }, `今天的日志已生成（${cnDate(todayInfo.date)} 周${weekdayCn(todayInfo.date)}）`),
+              h('div', { className: 'wl-item-meta' }, '可在时间页查看当天汇总，或继续补充手写内容'),
+            ),
+            h('button', { className: 'wl-btn', onClick: () => openDay(todayInfo.date) }, '打开'),
+            h('button', { className: 'wl-btn', onClick: () => openDay(todayInfo.date, { edit: true }) }, '继续编辑'),
+          ),
+        )
+      : h(
+          'div',
+          { className: 'wl-card wide' },
+          h(
+            'div',
+            { className: 'wl-row' },
+            h(
+              'div',
+              { className: 'grow' },
+              h('div', { className: 'wl-item-title' }, `今天（${cnDate(todayInfo.date)} 周${weekdayCn(todayInfo.date)}）尚未生成日志`),
+              h('div', { className: 'wl-item-meta' }, '将汇总：git 提交 · 文档变更 · AI 会话 · 待办'),
+            ),
+            h(
+              'button',
+              {
+                className: 'wl-btn primary',
+                disabled: state.busy === 'archive-today',
+                onClick: () =>
+                  act('archive-today', async () => {
+                    const result = await call('archive', { action: 'run', date: today(), force: false })
+                    setNotice(
+                      'ok',
+                      result.created
+                        ? `今日日志已生成：${result.commitCount} 个提交 / ${result.docCount} 个文档 / ${result.sessionCount || 0} 个会话`
+                        : `${result.date} 已有归档，未覆盖。可在时间页对该天「重新生成」。`,
+                    )
+                    if (state.log.date === today()) state.log.loaded = false
+                  }),
+              },
+              state.busy === 'archive-today' ? '生成中…' : '生成今日日志',
+            ),
+          ),
+        ),
+    h(
+      'div',
+      { className: 'wl-section-title' },
+      '今日待办 ',
+      h('span', { className: 'wl-hint' }, dueTodos.length + ' 件未完成' + (overdueCount ? '（含逾期 ' + overdueCount + '）' : '')),
+    ),
+    h(
+      'div',
+      { className: 'wl-card' },
+      dueTodos.length
+        ? dueTodos.map((todo) => todoItem(todo, todayText))
+        : h('div', { className: 'wl-empty' }, '今天没有到期或逾期的待办 ✓'),
+      h(
+        'div',
+        { className: 'wl-row', style: { marginTop: '6px' } },
+        h('input', {
+          className: 'wl-input',
+          id: 'wl-today-quick',
+          placeholder: '快加一条待办，回车确认（支持 !高 #标签 @日期 repeat=）',
+          onKeydown: (event) => {
+            if (event.key === 'Enter') quickAddTodo('wl-today-quick', todayText)
+          },
+        }),
+        h('button', { className: 'wl-btn', onClick: () => quickAddTodo('wl-today-quick', todayText) }, '添加'),
+      ),
+      h(
+        'div',
+        { style: { marginTop: '8px' } },
+        h('button', { className: 'wl-click', style: { color: 'var(--wl-accent-text)' }, onClick: gotoWorkbench }, '管理全部待办 →'),
+      ),
+    ),
     recoCard(),
     h(
       'div',
-      { className: 'wl-grid' },
-      card('今天', status.today?.archived ? '已归档' : '未归档', status.today?.date + ' · 点看日程', false, () => gotoTab('schedule')),
-      card('日志总数', `${status.days?.count || 0} 天`, `最近 ${status.days?.latest?.[0]?.date || '—'} · 点去浏览`, false, () => gotoTab('logs')),
-      card(
-        '待办',
-        `${status.todos?.open || 0} 进行中`,
-        (status.todos?.overdue ? `${status.todos.overdue} 条已逾期 · ` : `共 ${status.todos?.count || 0} 条 · `) + '点去日程',
-        false,
-        () => gotoTab('schedule'),
-      ),
-      card(
-        '项目',
-        `${projects.length} 个`,
-        `${status.backups?.count || 0} 份备份 · 点看项目档案`,
-        false,
-        () => { gotoTab('logs'); state.reportsOpen = true; state.reportKind = 'project' },
-      ),
-      card('AI 会话', `${status.sessions?.count || 0} 场`, `${status.sessions?.turns || 0} 轮 · 点看今日`, false, () => { gotoTab('sessions'); state.sessFilters.start = state.sessFilters.end = status.today?.date || today(); state.sessResult = null; runSessQuery() }),
-    ),
-    h(
-      'div',
-      { className: 'wl-toolbar' },
-      h(
-        'button',
-        {
-          className: 'wl-btn primary',
-          disabled: state.busy === 'archive-today',
-          onClick: () =>
-            act('archive-today', async () => {
-              const result = await call('archive', { action: 'run', date: today(), force: false })
-              setNotice(
-                'ok',
-                result.created
-                  ? `已归档 ${result.date}：${result.commitCount} 个提交 / ${result.docCount} 个文档 / ${result.sessionCount || 0} 个会话`
-                  : `${result.date} 已有归档，未覆盖。可在「日志」页强制重新归档。`,
-              )
-              if (state.log.date === today()) state.log.loaded = false
-            }),
-        },
-        state.busy === 'archive-today' ? '归档中…' : '归档今天',
-      ),
-      h(
-        'button',
-        {
-          className: 'wl-btn',
-          onClick: () => {
-            state.tab = 'logs'
-            if (!state.log.loaded) loadLog(state.log.date).then(render, () => render())
-            render()
-          },
-        },
-        '打开日志',
-      ),
-      h(
-        'button',
-        {
-          className: 'wl-btn',
-          onClick: () => act('refresh', async () => setNotice('ok', '已刷新')),
-        },
-        '刷新',
-      ),
-    ),
-    config.scanRoots?.length || config.effectiveScanRoots?.length
-      ? null
-      : h('div', { className: 'wl-notice info' }, '还没有配置扫描根目录；归档时默认扫描当前工作区。可在「设置」里添加。'),
-    h('div', { className: 'wl-label' }, '最近日志'),
-    state.days.length
-      ? h(
-          'div',
-          { className: 'wl-list' },
-          state.days.slice(0, 8).map((day) =>
-            h(
-              'div',
-              { className: 'wl-item', key: day.date },
-              h(
-                'button',
-                {
-                  className: 'wl-click grow',
-                  onClick: () => {
-                    state.tab = 'logs'
-                    loadLog(day.date).then(render, (error) => {
-                      setNotice('err', String(error?.message || error))
-                      render()
-                    })
-                  },
-                },
-                h('div', { className: 'wl-item-title' }, day.date),
-                h('div', { className: 'wl-item-meta' }, day.relative),
-              ),
-            ),
-          ),
-        )
-      : h('div', { className: 'wl-empty' }, '还没有归档。点「归档今天」开始。'),
-    h('div', { className: 'wl-label' }, '项目'),
-    projects.length
-      ? h(
-          'div',
-          { className: 'wl-list' },
-          projects.slice(0, 8).map((project) =>
-            h(
-              'div',
-              { className: 'wl-item', key: project.name },
-              h(
-                'div',
-                { className: 'grow' },
-                h('div', { className: 'wl-item-title' }, project.name),
-                h('div', { className: 'wl-item-meta' }, `${project.days.length} 天 · ${project.commits} 提交`),
-              ),
-            ),
-          ),
-        )
-      : h('div', { className: 'wl-empty' }, '还没有从归档中解析到项目。'),
-    h(
-      'div',
-      { className: 'wl-label' },
-      '今天的 AI 会话',
-      h(
-        'button',
-        { className: 'wl-btn tiny', style: { marginLeft: 'auto' }, onClick: () => { gotoTab('sessions'); state.sessFilters.start = state.sessFilters.end = today(); state.sessResult = null; runSessQuery() } },
-        '全部会话',
-      ),
+      { className: 'wl-section-title' },
+      '今天的 AI 会话 ',
+      h('span', { className: 'wl-hint' }, (status.sessions?.items?.length || 0) + ' 场'),
     ),
     status.sessions?.items?.length
       ? h(
           'div',
-          { className: 'wl-list' },
+          { className: 'wl-card' },
           status.sessions.items.map((session, index) =>
             h(
               'div',
               { className: 'wl-item', key: index },
               h(
-                'div',
-                { className: 'grow' },
+                'button',
+                {
+                  className: 'wl-click grow',
+                  title: '在资料库中按今天筛选',
+                  onClick: () => openLibrarySessions(todayText),
+                },
                 h('div', { className: 'wl-item-title' }, session.title),
                 h(
                   'div',
                   { className: 'wl-item-meta' },
                   h('span', { className: 'wl-tag low' }, session.source),
-                  h('span', null, `${session.turns} 轮`),
                   h('span', null, `${session.turns} 轮`),
                   h('span', null, session.start === session.end ? session.start : `${session.start}–${session.end}`),
                 ),
@@ -463,223 +500,112 @@ function overviewTab() {
             ),
           ),
         )
-      : h('div', { className: 'wl-empty' }, status.today?.archived ? '今天的归档里没有 AI 会话记录。' : '今天还没归档；归档时会自动汇总本机 AI 会话。'),
-    status.runHistory?.length
-      ? h(
+      : h(
           'div',
-          { className: 'wl-section' },
-          h('div', { className: 'wl-section-title' }, '最近运行'),
-          h(
-            'div',
-            { className: 'wl-list' },
-            status.runHistory.slice(0, 5).map((item, index) =>
-              h(
-                'div',
-                { className: 'wl-item', key: index },
-                h(
-                  'div',
-                  { className: 'grow' },
-                  h('div', { className: 'wl-item-title' }, `${item.status || ''} · ${item.date || ''} · ${item.mode || ''}`),
-                  h('div', { className: 'wl-item-meta' }, item.note || ''),
-                ),
-              ),
-            ),
-          ),
-        )
-      : null,
+          { className: 'wl-empty' },
+          todayInfo.archived ? '今天的归档里没有 AI 会话记录。' : '生成今日日志时会自动汇总本机 AI 会话。',
+        ),
+    h(
+      'div',
+      { className: 'wl-section-title' },
+      '昨天回顾 ',
+      h('span', { className: 'wl-hint' }, state.yesterday.date || ''),
+    ),
+    h(
+      'div',
+      { className: 'wl-card' },
+      !state.yesterday.loaded
+        ? h('div', { className: 'wl-empty' }, '加载中…')
+        : state.yesterday.text
+          ? [
+              h('div', { className: 'wl-pre', style: { maxHeight: '180px' } }, state.yesterday.text.split(/\r?\n/).slice(0, 10).join('\n')),
+              h('button', { className: 'wl-btn', onClick: () => openDay(state.yesterday.date) }, '打开昨天的日志'),
+            ]
+          : h('div', { className: 'wl-empty' }, '昨天没有日志。'),
+    ),
   )
 }
 
-function logsTab() {
-  const log = state.log
+// Library · logs view: archive search with inline full-text preview
+// (no page jumps, no popup reading — UX v3 rule, see docs/ux-v3-design.md §4.3).
+function logsView() {
   return h(
     'div',
     null,
-    noticeNode(),
     h(
       'div',
-      { className: 'wl-date-row' },
-      h('input', {
-        className: 'wl-input',
-        value: log.date,
-        placeholder: 'YYYY-MM-DD',
-        onInput: (event) => {
-          log.date = event.target.value
-        },
-      }),
+      { className: 'wl-card' },
       h(
-        'button',
-        {
-          className: 'wl-btn',
-          disabled: state.busy === 'load',
-          onClick: () =>
-            act(
-              'load',
-              async () => {
-                await loadLog(log.date)
-              },
-              { refresh: false },
-            ),
-        },
-        '读取',
-      ),
-    ),
-    h(
-      'div',
-      { className: 'wl-toolbar' },
-      h(
-        'button',
-        {
-          className: 'wl-btn',
-          onClick: () => {
-            state.logView = state.logView === 'view' ? 'edit' : 'view'
-            render()
+        'div',
+        { className: 'wl-row' },
+        h('input', {
+          className: 'wl-input',
+          id: 'wl-query',
+          placeholder: '搜索归档日志，例如 巡检 / 数据采集',
+          onKeydown: (event) => {
+            if (event.key === 'Enter') runSearch()
           },
-        },
-        log.exists ? (state.logView === 'view' ? '编辑' : '预览') : '写内容',
+        }),
+        h('button', { className: 'wl-btn primary', onClick: runSearch }, '搜索'),
       ),
-      h(
-        'button',
-        {
-          className: 'wl-btn primary',
-          disabled: state.busy === 'save',
-          onClick: () =>
-            act(
-              'save',
-              async () => {
-                await call('day', { date: log.date, text: log.text })
-                setNotice('ok', `已保存 ${log.date}`)
-                log.exists = true
-              },
-              { refresh: false },
-            ),
-        },
-        '保存',
-      ),
-      h(
-        'button',
-        {
-          className: 'wl-btn',
-          disabled: state.busy === 'rearchive',
-          onClick: () =>
-            act(
-              'rearchive',
-              async () => {
-                const result = await call('archive', { action: 'run', date: log.date, force: true })
-                await loadLog(log.date)
-                setNotice('ok', `已重新归档：${result.commitCount} 个提交 / ${result.docCount} 个文档`)
-              },
-              { refresh: false },
-            ),
-        },
-        state.busy === 'rearchive' ? '归档中…' : '重新归档',
-      ),
-      h(
-        'button',
-        {
-          className: 'wl-btn',
-          disabled: state.busy === 'daily',
-          onClick: () =>
-            act(
-              'daily',
-              async () => {
-                const result = await call('report', { action: 'generate', kind: 'daily', date: log.date })
-                state.reportText = result.text || ''
-                state.reportsOpen = true
-                setNotice('ok', `日报已生成：${result.name}`)
-              },
-              { refresh: false },
-            ),
-        },
-        '生成日报',
-      ),
-    ),
-    log.exists ? null : h('div', { className: 'wl-notice info' }, '这一天还没有归档，可以直接写，或点「重新归档」扫描 Git/文档。'),
-    log.exists && state.logView === 'view'
-      ? h(
-          'div',
-          { className: 'wl-pre', style: { maxHeight: '420px', overflow: 'auto', marginTop: '8px' } },
-          log.text || '（内容为空）',
-        )
-      : h('textarea', {
-      className: 'wl-area',
-      value: log.text,
-      placeholder: '# 工作日志\n\n## 今日概览\n…',
-      onInput: (event) => {
-        log.text = event.target.value
-      },
-    }),
-    h('div', { className: 'wl-label' }, '搜索归档'),
-    h(
-      'div',
-      { className: 'wl-date-row' },
-      h('input', {
-        className: 'wl-input',
-        id: 'wl-query',
-        placeholder: '关键词，例如 巡检 / 数据采集',
-        onKeydown: (event) => {
-          if (event.key === 'Enter') runSearch()
-        },
-      }),
-      h('button', { className: 'wl-btn', onClick: runSearch }, '搜索'),
     ),
     state.hits.length
       ? h(
           'div',
-          { className: 'wl-list' },
-          state.hits.map((hit) =>
+          { className: 'wl-card' },
+          state.hits.slice(0, 60).map((hit) =>
             h(
               'div',
-              { className: 'wl-item', key: hit.date },
+              { key: hit.date },
               h(
-                'button',
-                {
-                  className: 'wl-click grow',
-                  onClick: () => {
-                    loadLog(hit.date).then(render, (error) => {
-                      setNotice('err', String(error?.message || error))
+                'div',
+                { className: 'wl-row' },
+                h(
+                  'button',
+                  {
+                    className: 'wl-click grow',
+                    title: '点击展开/收起全文预览',
+                    onClick: () => {
+                      state.logExpand = state.logExpand === hit.date ? '' : hit.date
                       render()
-                    })
+                    },
                   },
-                },
-                h('div', { className: 'wl-item-title' }, `${hit.date}（${hit.count} 处）`),
-                h('div', { className: 'wl-item-meta' }, hit.snippet),
+                  h('div', { className: 'wl-item-title' }, `${hit.date}（${hit.count} 处）`),
+                  h('div', { className: 'wl-item-meta' }, hit.snippet),
+                ),
               ),
+              state.logExpand === hit.date ? logExpandNode(hit.date) : null,
             ),
           ),
         )
       : null,
-    reportsFold(),
-    h('div', { className: 'wl-label' }, '全部日志'),
-    state.days.length
-      ? h(
-          'div',
-          { className: 'wl-list' },
-          state.days.slice(0, 60).map((day) =>
-            h(
-              'div',
-              { className: 'wl-item', key: day.date },
-              h(
-                'button',
-                {
-                  className: 'wl-click grow',
-                  onClick: () => {
-                    loadLog(day.date).then(render, (error) => {
-                      setNotice('err', String(error?.message || error))
-                      render()
-                    })
-                  },
-                },
-                h('div', { className: 'wl-item-title' }, day.date),
-                h('div', { className: 'wl-item-meta' }, day.relative),
-              ),
-            ),
-          ),
-        )
-      : h('div', { className: 'wl-empty' }, '还没有日志。'),
   )
 }
 
+// Inline day-text loader for the logs view. Guard 'loaded for this date' and
+// 'in flight'; failures cache an empty sentinel so retries stay user-driven.
+function logExpandNode(date) {
+  const cached = state.logExpandData
+  if (!cached || cached.date !== date) {
+    if (!state.logExpandLoading) {
+      state.logExpandLoading = true
+      call('day', { date })
+        .then((data) => {
+          state.logExpandData = { date, text: data?.text || '' }
+        })
+        .catch((error) => {
+          state.logExpandData = { date, text: '' }
+          setNotice('err', '日志预览加载失败：' + String(error?.message || error))
+        })
+        .finally(() => {
+          state.logExpandLoading = false
+          render()
+        })
+    }
+    return h('div', { className: 'wl-hint', style: { padding: '4px 6px 8px 10px' } }, '加载中…')
+  }
+  return h('div', { className: 'wl-pre', style: { maxHeight: '320px', margin: '4px 6px 8px 10px' } }, cached.text || '（内容为空）')
+}
 function runSearch() {
   const input = document.getElementById('wl-query')
   const query = input?.value?.trim() || ''
@@ -1455,169 +1381,304 @@ function subCountNode(todo) {
   return h('span', null, '子任务 ' + subDone + '/' + subTotal)
 }
 
-function addTodoFromForm() {
-  const titleInput = document.getElementById('wl-todo-title')
-  const raw = titleInput?.value?.trim() || ''
-  if (!raw) return
-  const priSelect = document.getElementById('wl-todo-pri')
-  const addPri = priSelect?.value || ''
-  const dueInput = document.getElementById('wl-todo-due')
-  const addDue = dueInput?.value || ''
+// Shared one-line todo parser: !高 #标签 @2026-10-31 repeat=daily.
+function parseTodoRaw(raw, defaults = {}) {
   const priMatch = raw.match(/!(高|中|低)/)
   const dueMatch = raw.match(/@(\d{4}-\d{2}-\d{2})/)
   const repeatMatch = raw.match(/repeat=(daily|weekly:[0-6]|monthly:(?:[1-9]|[12]\d|3[01]))/)
   const tagMatches = raw.match(/#[^\s#@!]+/g) || []
-  const tags = [...new Set(tagMatches.map((item) => item.slice(1)))]
-  const title = raw
-    .replace(/!(高|中|低)/g, '')
-    .replace(/@\d{4}-\d{2}-\d{2}/g, '')
-    .replace(/repeat=\S+/g, '')
-    .replace(/#[^\s#@!]+/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-  if (!title) {
+  return {
+    title: raw
+      .replace(/!(高|中|低)/g, '')
+      .replace(/@\d{4}-\d{2}-\d{2}/g, '')
+      .replace(/repeat=\S+/g, '')
+      .replace(/#[^\s#@!]+/g, '')
+      .replace(/\s+/g, ' ')
+      .trim(),
+    pri: defaults.pri || (priMatch ? priMatch[1] : ''),
+    due: defaults.due || (dueMatch ? dueMatch[1] : ''),
+    repeat: repeatMatch ? repeatMatch[1] : '',
+    tags: [...new Set(tagMatches.map((item) => item.slice(1)))],
+  }
+}
+
+// Quick add used by the today tab (defaults the due date to today).
+function quickAddTodo(inputId, dueDefault) {
+  const input = document.getElementById(inputId)
+  const raw = String(input?.value || '').trim()
+  if (!raw) return
+  const parsed = parseTodoRaw(raw, { due: dueDefault })
+  if (!parsed.title) {
     setNotice('err', '标题不能为空（只留下了标记符号）')
     render()
     return
   }
-  const pri = addPri || (priMatch ? priMatch[1] : '')
-  const due = addDue || (dueMatch ? dueMatch[1] : '')
-  const repeat = repeatMatch ? repeatMatch[1] : ''
   act('todo-add', async () => {
-    await call('todos', { action: 'add', title, pri, due, repeat, tags })
-    state.aiDraft = null
-    if (titleInput) titleInput.value = ''
-    setNotice('ok', `已添加：${title}`)
+    await call('todos', { action: 'add', ...parsed })
+    if (input) input.value = ''
+    setNotice('ok', `已添加：${parsed.title}`)
   })
 }
 
-function reportsBody() {
-  const kind = state.reportKind
-  const placeholder =
-    kind === 'weekly'
-      ? '周一日期（可填任意日期）'
-      : kind === 'project'
-        ? '项目名'
-        : kind === 'month' || kind === 'perf'
-          ? 'YYYY-MM'
-          : kind === 'quarter'
-            ? 'YYYY-Q1..Q4'
-            : 'YYYY-MM-DD'
-  const aiReady = Boolean(state.config?.ai?.model && state.config?.ai?.hasApiKey)
+function addTodoFromForm() {
+  const titleInput = document.getElementById('wl-todo-title')
+  const raw = titleInput?.value?.trim() || ''
+  if (!raw) return
+  const addPri = document.getElementById('wl-todo-pri')?.value || ''
+  const addDue = document.getElementById('wl-todo-due')?.value || ''
+  const parsed = parseTodoRaw(raw, { pri: addPri, due: addDue })
+  if (!parsed.title) {
+    setNotice('err', '标题不能为空（只留下了标记符号）')
+    render()
+    return
+  }
+  act('todo-add', async () => {
+    await call('todos', { action: 'add', ...parsed })
+    state.aiDraft = null
+    if (titleInput) titleInput.value = ''
+    setNotice('ok', `已添加：${parsed.title}`)
+  })
+}
+function reportRangePlaceholder(kind) {
+  if (kind === 'weekly') return '周一日期（可填任意日期）'
+  if (kind === 'project') return '项目名'
+  if (kind === 'month' || kind === 'perf') return 'YYYY-MM'
+  if (kind === 'quarter') return 'YYYY-Q1..Q4'
+  return 'YYYY-MM-DD'
+}
 
+function reportRangeHint(kind) {
+  if (kind === 'daily') return '以某天的日志为内容生成日报'
+  if (kind === 'weekly') return '按所填日期所在周一的一周汇总'
+  if (kind === 'month' || kind === 'perf' || kind === 'quarter') return '按月/季汇总归档与待办'
+  if (kind === 'project') return '按项目名汇总全部相关归档'
+  return '对区间内的日志做一份自由总结'
+}
+
+function selectReportKind(kind) {
+  state.reportKind = kind
+  state.reportPeriod =
+    kind === 'month' || kind === 'perf'
+      ? month()
+      : kind === 'quarter'
+        ? quarter()
+        : kind === 'project'
+          ? ''
+          : today()
+  render()
+}
+
+// One generate/regen code path; kind 'custom'/'summarize' walks the report
+// op's summarize action with a start/end range. `key` carries the range of an
+// existing report file when regenerating; undefined means "use the form".
+async function runReportGenerate(kind, key) {
+  let result
+  if (kind === 'custom' || kind === 'summarize') {
+    const [start, end] = key ? String(key).split('_') : [state.reportStart, state.reportEnd]
+    result = await call('report', { action: 'summarize', start: start || daysAgo(6), end: end || today(), useAi: state.reportUseAi })
+  } else {
+    const body = { action: 'generate', kind, useAi: state.reportUseAi }
+    if (kind === 'daily') body.date = key || state.reportPeriod || today()
+    if (kind === 'weekly') body.monday = key || state.reportPeriod || today()
+    if (kind === 'month' || kind === 'perf') body.month = key || state.reportPeriod || month()
+    if (kind === 'quarter') body.quarter = key || state.reportPeriod || quarter()
+    if (kind === 'project') body.project = key !== undefined ? key : state.reportPeriod
+    result = await call('report', body)
+  }
+  state.reportText = result.text || ''
+  state.reportFlash = result.name || ''
+  setNotice('ok', `已生成 ${result.name}${result.ai ? '（AI 润色）' : ''}`)
+  setTimeout(() => {
+    if (state.reportFlash === result.name) {
+      state.reportFlash = ''
+      render()
+    }
+  }, 2500)
+  return result
+}
+
+// Report tab: the generator sits flat on top (no fold — that was the v0.13
+// "buried high-frequency action" problem), the generated list is grouped by
+// kind below. Regenerating always asks before overwriting.
+function reportTab() {
+  const kind = state.reportKind
+  const aiPolishReady = Boolean(state.config?.ai?.model && state.config?.ai?.hasApiKey)
   return h(
     'div',
     null,
+    noticeNode(),
     h(
       'div',
-      { className: 'wl-card wide' },
+      { className: 'wl-card' },
       h(
         'div',
         { className: 'wl-row' },
-        h(
-          'select',
-          {
-            className: 'wl-select',
-            style: { width: '108px' },
-            onChange: (event) => {
-              state.reportKind = event.target.value
-              state.reportPeriod =
-                state.reportKind === 'month' || state.reportKind === 'perf'
-                  ? month()
-                  : state.reportKind === 'quarter'
-                    ? quarter()
-                    : state.reportKind === 'project'
-                      ? ''
-                      : today()
-              render()
+        REPORT_KINDS.map(([value, label]) =>
+          h(
+            'button',
+            {
+              className: `wl-chip${state.reportKind === value ? ' on' : ''}`,
+              onClick: () => selectReportKind(value),
             },
-          },
-          REPORT_KINDS.map(([value, label]) =>
-            h('option', { value, selected: value === kind }, label),
+            label,
           ),
         ),
-        h('input', {
-          className: 'wl-input',
-          value: state.reportPeriod,
-          placeholder,
-          onInput: (event) => {
-            state.reportPeriod = event.target.value
-          },
-        }),
+      ),
+      h(
+        'div',
+        { className: 'wl-row', style: { marginTop: '8px' } },
+        h('span', { className: 'wl-hint', style: { width: '34px' } }, '范围'),
+        kind === 'custom'
+          ? [
+              h('input', {
+                className: 'wl-input',
+                type: 'date',
+                value: state.reportStart,
+                style: { width: '140px' },
+                onInput: (event) => {
+                  state.reportStart = event.target.value
+                },
+              }),
+              h('span', { className: 'wl-hint' }, '至'),
+              h('input', {
+                className: 'wl-input',
+                type: 'date',
+                value: state.reportEnd,
+                style: { width: '140px' },
+                onInput: (event) => {
+                  state.reportEnd = event.target.value
+                },
+              }),
+            ]
+          : h('input', {
+              className: 'wl-input',
+              value: state.reportPeriod,
+              placeholder: reportRangePlaceholder(kind),
+              style: { maxWidth: '220px' },
+              onInput: (event) => {
+                state.reportPeriod = event.target.value
+              },
+            }),
+        h(
+          'label',
+          { className: 'wl-checkline', style: { margin: '0 0 0 auto' } },
+          h('input', {
+            type: 'checkbox',
+            checked: state.reportUseAi && aiPolishReady,
+            disabled: !aiPolishReady,
+            onChange: (event) => {
+              state.reportUseAi = event.target.checked
+              render()
+            },
+          }),
+          'AI 润色',
+        ),
+      ),
+      h(
+        'div',
+        { className: 'wl-hint', style: { marginTop: '4px' } },
+        (aiPolishReady ? '' : '未配置 AI 接口，将生成确定性草稿；可到「设置 → AI 润色」配置。') + reportRangeHint(kind),
+      ),
+      h(
+        'div',
+        { className: 'wl-row', style: { marginTop: '8px' } },
         h(
           'button',
           {
             className: 'wl-btn primary',
             disabled: state.busy === 'report',
             onClick: () =>
-              act(
-                'report',
-                async () => {
-                  const body = { action: 'generate', kind: state.reportKind, useAi: state.reportUseAi }
-                  if (state.reportKind === 'daily') body.date = state.reportPeriod || today()
-                  if (state.reportKind === 'weekly') body.monday = state.reportPeriod || today()
-                  if (state.reportKind === 'month' || state.reportKind === 'perf') body.month = state.reportPeriod || month()
-                  if (state.reportKind === 'quarter') body.quarter = state.reportPeriod || quarter()
-                  if (state.reportKind === 'project') body.project = state.reportPeriod
-                  const result = await call('report', body)
-                  state.reportText = result.text || ''
-                  setNotice('ok', `已生成 ${result.name}${result.ai ? '（AI 润色）' : ''}`)
-                },
-                { refresh: false },
-              ),
+              act('report', async () => {
+                await runReportGenerate(kind)
+              }),
           },
           state.busy === 'report' ? '生成中…' : '生成',
         ),
       ),
-      aiReady
-        ? h(
-            'label',
-            { className: 'wl-checkline' },
-            h('input', {
-              type: 'checkbox',
-              checked: state.reportUseAi,
-              onChange: (event) => {
-                state.reportUseAi = event.target.checked
-              },
-            }),
-            '使用已配置的 AI 润色（否则生成确定性草稿）',
-          )
-        : h('div', { className: 'wl-hint', style: { marginTop: '6px' } }, '未配置 AI 接口，将生成确定性草稿；可在「设置」里配置。'),
     ),
     state.reportText ? h('pre', { className: 'wl-pre' }, state.reportText) : null,
-    h('div', { className: 'wl-label' }, '已生成报告'),
-    state.reports.length
-      ? h(
-          'div',
-          { className: 'wl-list' },
-          state.reports.slice(0, 40).map((report) =>
-            h(
-              'div',
-              { className: 'wl-item', key: report.name },
-              h(
-                'button',
-                {
-                  className: 'wl-click grow',
-                  onClick: () =>
-                    act(
-                      'report-read',
-                      async () => {
-                        const data = await call('report', { action: 'read', name: report.name })
-                        state.reportText = data.text || ''
-                      },
-                      { refresh: false },
-                    ),
-                },
-                h('div', { className: 'wl-item-title' }, report.name),
-                h('div', { className: 'wl-item-meta' }, String(report.mtime || '').replace('T', ' ').slice(0, 16)),
-              ),
-            ),
-          ),
-        )
-      : h('div', { className: 'wl-empty' }, '还没有生成报告。'),
+    h('div', { className: 'wl-section-title', style: { marginTop: '12px' } }, '已生成报告'),
+    reportsListGrouped(),
   )
 }
 
+// Report list files are named "<kind>-<key>.md"; the kind drives grouping and
+// the parameter shape a regeneration needs (same enum as generate).
+function reportKindKey(name) {
+  const match = String(name || '').match(/^([a-z]+)-(.+)\.md$/i)
+  return match ? { kind: match[1], key: match[2] } : { kind: '', key: '' }
+}
+
+function reportsListGrouped() {
+  if (!state.reports.length) return h('div', { className: 'wl-empty' }, '还没有生成报告。')
+  const groups = {}
+  for (const report of state.reports.slice(0, 80)) {
+    const { kind } = reportKindKey(report.name)
+    const label = REPORT_KIND_LABELS[kind] || '其他'
+    ;(groups[label] = groups[label] || []).push(report)
+  }
+  return Object.entries(groups).map(([label, list]) =>
+    h(
+      'div',
+      { className: 'wl-section', key: label },
+      h('div', { className: 'wl-section-title' }, label + '（' + list.length + '）'),
+      h(
+        'div',
+        { className: 'wl-list' },
+        list.map((report) => {
+          const { kind, key } = reportKindKey(report.name)
+          return h(
+            'div',
+            { className: `wl-item${state.reportFlash === report.name ? ' flash' : ''}`, key: report.name },
+            h(
+              'button',
+              {
+                className: 'wl-click grow',
+                onClick: () =>
+                  act(
+                    'report-read',
+                    async () => {
+                      const data = await call('report', { action: 'read', name: report.name })
+                      state.reportText = data.text || ''
+                    },
+                    { refresh: false },
+                  ),
+              },
+              h('div', { className: 'wl-item-title' }, report.name),
+              h('div', { className: 'wl-item-meta' }, String(report.mtime || '').replace('T', ' ').slice(0, 16)),
+            ),
+            h('button', { className: 'wl-btn tiny', onClick: () => confirmRegenerateReport(report.name, kind, key) }, '重新生成'),
+            h('button', { className: 'wl-btn tiny', onClick: () => copyReport(report.name) }, '复制'),
+          )
+        }),
+      ),
+    ),
+  )
+}
+
+function confirmRegenerateReport(name, kind, key) {
+  state.confirm = {
+    title: '重新生成 ' + (REPORT_KIND_LABELS[kind] || kind || '报告') + '？',
+    body: '将覆盖 ' + name + ' 的现有内容；若该报告含手写修改，会被替换。',
+    okLabel: '重新生成',
+    run: () =>
+      act('report-regen', async () => {
+        await runReportGenerate(kind, key)
+      }),
+  }
+  render()
+}
+
+async function copyReport(name) {
+  try {
+    const data = await call('report', { action: 'read', name })
+    await navigator.clipboard?.writeText(data.text || '')
+    setNotice('ok', '已复制 Markdown：' + name)
+  } catch (error) {
+    setNotice('err', '复制失败：' + String(error?.message || error))
+  }
+  render()
+}
 async function detectAi() {
   if (state.aiBusy) return
   state.aiBusy = true
@@ -1746,102 +1807,6 @@ function aiCandidateRow(candidates) {
           `${current.baseUrl}${current.note ? ` · ${current.note}` : ''}`,
         )
       : h('div', { className: 'wl-hint' }, '选择后自动填到下方 Base URL / 接口格式 / 模型；点「使用」直接写入配置并带上 Key。'),
-  )
-}
-
-async function scanSessionsNow() {
-  await act('sessions-scan', async () => {
-    const data = await call('sessions', { date: state.sessions.date || today() })
-    state.sessions.result = data
-    setNotice('ok', `已扫描 ${data.date || state.sessions.date}：${data.totals?.sessions || 0} 场会话 / ${data.totals?.turns || 0} 轮`)
-  }, { refresh: false })
-}
-
-function sessionsTab() {
-  const sessions = state.sessions
-  const result = sessions.result
-  return h(
-    'div',
-    null,
-    noticeNode(),
-    sessionsCalendarWrapper(),
-    sessionsV2Block(),
-    h(
-      'div',
-      { className: 'wl-date-row' },
-      h('input', {
-        className: 'wl-input',
-        value: sessions.date,
-        placeholder: 'YYYY-MM-DD',
-        onInput: (event) => {
-          sessions.date = event.target.value
-        },
-      }),
-      h(
-        'button',
-        {
-          className: 'wl-btn primary',
-          disabled: state.busy === 'sessions-scan',
-          onClick: scanSessionsNow,
-        },
-        state.busy === 'sessions-scan' ? '扫描中…' : '扫描会话',
-      ),
-    ),
-    h('div', { className: 'wl-hint' }, '只读本机 AI 工具会话（Claude Code / Codex / DeepSeek Harness / WorkBuddy / ZCode / OpenCode / Gemini CLI）；归档时会自动写入日文档。首次扫描解析历史文件，之后按文件 mtime+size 增量缓存。'),
-    result
-      ? h(
-          'div',
-          null,
-          h(
-            'div',
-            { className: 'wl-grid', style: { marginTop: '8px' } },
-            card('会话', `${result.totals?.sessions || 0} 场`),
-            card('用户轮数', `${result.totals?.turns || 0} 轮`),
-          ),
-          result.errors?.length
-            ? h(
-                'div',
-                { className: 'wl-notice err', style: { marginTop: '7px' } },
-                `部分来源读取失败：${result.errors.map((item) => item.source).join('、')}`,
-              )
-            : null,
-          result.sessions?.length
-            ? h(
-                'div',
-                { className: 'wl-list' },
-                result.sessions.map((session, index) =>
-                  h(
-                    'div',
-                    { className: 'wl-item', key: index },
-                    h(
-                      'div',
-                      { className: 'grow' },
-                      h('div', { className: 'wl-item-title' }, session.title),
-                      h(
-                        'div',
-                        { className: 'wl-item-meta' },
-                        h('span', { className: 'wl-tag low' }, session.label),
-                        h('span', null, `${session.turns} 轮`),
-                        h('span', null, session.timeRange || ''),
-                      ),
-                      session.cwd
-                        ? h('div', { className: 'wl-hint', style: { fontFamily: 'var(--wl-mono)' } }, session.cwd)
-                        : null,
-                      session.texts?.[0] && session.texts[0] !== session.title
-                        ? h('div', { className: 'wl-item-meta' }, session.texts[0])
-                        : null,
-                    ),
-                  ),
-                ),
-              )
-            : h('div', { className: 'wl-empty' }, '这一天没有扫描到 AI 会话。'),
-        )
-      : null,
-    h(
-      'div',
-      { className: 'wl-hint', style: { marginTop: '8px' } },
-      '扫不到某些工具的会话？到「设置 → 数据与扫描」的会话目录里自行添加路径，或在「设置 → 采集调度与诊断」查看各来源状态。',
-    ),
   )
 }
 
@@ -2564,27 +2529,58 @@ async function loadCalMonth(month) {
   render()
 }
 
-async function selectCalDay(date) {
+async function selectCalDay(date, { edit = false } = {}) {
   state.calSelected = date
+  state.dayEdit = edit
+  if (state.calMonth !== date.slice(0, 7)) {
+    state.calMonth = date.slice(0, 7)
+    state.calData = null
+  }
   state.calDayLoading = true
   render()
   try {
     state.calDay = await call('calendar', { action: 'day', date })
   } catch (error) {
+    state.calDay = null
     setNotice('err', '当日详情加载失败：' + String(error?.message || error))
   } finally {
     state.calDayLoading = false
   }
+  try {
+    await loadLog(date)
+  } catch (error) {
+    setNotice('err', '日志加载失败：' + String(error?.message || error))
+  }
   render()
 }
 
+// Re-pull the day detail after an in-place mutation (todo done/added,
+// archive regenerated).
+async function refreshDayDetail() {
+  const date = state.calSelected
+  if (!date) return
+  state.calDay = null
+  await selectCalDay(date)
+}
+
+function addDayTodo(date) {
+  const input = document.getElementById('wl-daytodo-title')
+  const title = String(input?.value || '').trim()
+  if (!title) return
+  act('daytodo-add', async () => {
+    await call('todos', { action: 'add', title, due: date })
+    await refreshDayDetail()
+    setNotice('ok', '已添加：' + title)
+  })
+}
+
+// Calendar marks are capped at three kinds (+ selection state): ● log,
+// ▼ due todos, ◦ sessions. Counts and report info live only in the detail.
 function calCell(day, today) {
   const marks = []
-  if (day.archived) marks.push(h('span', { className: 'wl-cal-dot ok' }, ''))
-  if (day.hasDailyReport) marks.push(h('span', { className: 'wl-cal-dot rep' }, ''))
-  if (day.entryCount) marks.push(h('span', { className: 'wl-cal-badge' }, String(day.entryCount)))
-  if (day.todoDone) marks.push(h('span', { className: 'wl-cal-badge todo' }, '✓' + day.todoDone))
-  if (day.todoDue) marks.push(h('span', { className: 'wl-carry' }, '▼' + day.todoDue))
+  if (day.archived) marks.push(h('span', { className: 'wl-cal-mark log', title: '有日志' }, '●'))
+  if (day.todoDue) marks.push(h('span', { className: 'wl-cal-mark due', title: '有到期待办' }, '▼'))
+  if (day.sessionCount) marks.push(h('span', { className: 'wl-cal-mark sess', title: '有会话' }, '◦'))
   return h(
     'button',
     {
@@ -2598,7 +2594,6 @@ function calCell(day, today) {
     h('div', { className: 'wl-cal-marks' }, marks),
   )
 }
-
 function weekDatesOf(anchor) {
   const base = new Date(anchor)
   const lead = (base.getDay() + 6) % 7
@@ -2652,62 +2647,187 @@ function calGrid() {
   )
 }
 
-function dayHub() {
+// Right pane of the time tab: the selected day's archive action, todos, log,
+// sessions and records. Selecting a day never replaces the page — only this
+// pane re-renders (UX v3 master-detail rule; the old "day hub" mode is gone).
+function dayDetail() {
+  if (state.calDayLoading && !state.calDay) return h('div', { className: 'wl-card' }, h('div', { className: 'wl-hint' }, '加载中…'))
   const detail = state.calDay
-  if (state.calDayLoading) return h('div', { className: 'wl-hint' }, '加载中…')
-  if (!detail) return h('div', { className: 'wl-hint' }, '点日期查看当天：待办 / 日志 / 会话 / 采集 / 报告。')
+  if (!detail) return h('div', { className: 'wl-card' }, h('div', { className: 'wl-empty' }, '在左侧日历点一天，这里显示当天详情。'))
+  const date = detail.date
+  const todayText = today()
+  const isToday = date === todayText
+  const past = date < todayText
   const dueList = detail.todosDue || []
-  const addDue = () => {
-    const input = document.getElementById('wl-daytodo-title')
-    const title = String(input?.value || '').trim()
-    if (!title) return
-    act('daytodo-add', async () => {
-      await call('todos', { action: 'add', title, due: detail.date })
-      state.calDay = null
-      setNotice('ok', '已添加：' + title)
-    })
-  }
-  return h(
-    'div',
-    { className: 'wl-section' },
-    h(
-      'div',
-      { className: 'wl-row' },
-      h('div', { className: 'wl-section-title' }, detail.date + (detail.archived ? '' : '（未归档）')),
-      h(
+  const logForDay = state.log.date === date && state.log.loaded
+
+  // One primary action per state: generate today / regenerate (confirm) /
+  // backfill a past day without a log.
+  const headAction = () => {
+    if (isToday && !detail.archived) {
+      return h(
         'button',
         {
-          className: 'wl-btn tiny',
+          className: 'wl-btn primary',
+          disabled: state.busy === 'day-archive',
+          onClick: () =>
+            act('day-archive', async () => {
+              const result = await call('archive', { action: 'run', date, force: false })
+              setNotice(
+                'ok',
+                result.created
+                  ? `今日日志已生成：${result.commitCount} 个提交 / ${result.docCount} 个文档 / ${result.sessionCount || 0} 个会话`
+                  : `${date} 已有归档，未覆盖。`,
+              )
+              state.log.loaded = false
+            }),
+        },
+        state.busy === 'day-archive' ? '生成中…' : '生成今日日志',
+      )
+    }
+    if (detail.archived || (logForDay && (state.log.exists || state.log.text))) {
+      return h(
+        'button',
+        {
+          className: 'wl-btn',
+          disabled: state.busy === 'day-regen',
           onClick: () => {
-            state.tab = 'logs'
-            state.log.date = detail.date
-            state.log.loaded = false
-            state.logView = 'view'
+            state.confirm = {
+              title: '重新生成 ' + date + ' 的日志？',
+              body: '将重新扫描该天的 Git 提交、文档与会话，并覆盖现有内容（含手写备注）。',
+              okLabel: '重新生成',
+              run: () =>
+                act('day-regen', async () => {
+                  const result = await call('archive', { action: 'run', date, force: true })
+                  state.log.loaded = false
+                  await loadLog(date)
+                  await refreshDayDetail()
+                  setNotice('ok', `已重新生成：${result.commitCount} 个提交 / ${result.docCount} 个文档`)
+                }),
+            }
             render()
           },
         },
-        '打开日志',
-      ),
-      h(
+        state.busy === 'day-regen' ? '生成中…' : '重新生成',
+      )
+    }
+    if (past) {
+      return h(
         'button',
         {
-          className: 'wl-btn tiny',
-          disabled: state.busy === 'day-report',
+          className: 'wl-btn',
+          disabled: state.busy === 'day-backfill',
           onClick: () =>
-            act('day-report', async () => {
-              await call('report', { action: 'generate', kind: 'daily', date: detail.date })
-              state.tab = 'logs'
-              state.reportsOpen = true
-              state.log.date = detail.date
+            act('day-backfill', async () => {
+              const result = await call('archive', { action: 'run', date, force: false })
               state.log.loaded = false
-              setNotice('ok', '日报已生成，已带到日志·汇报页')
+              await refreshDayDetail()
+              setNotice('ok', result.created ? `已回填 ${date}：${result.commitCount} 个提交 / ${result.docCount} 个文档` : `${date} 已有归档，未覆盖。`)
             }),
         },
-        '生成日报',
+        state.busy === 'day-backfill' ? '回填中…' : '回填归档',
+      )
+    }
+    return null
+  }
+
+  // Log card: read mode first, explicit edit button — same behavior for old
+  // and brand-new logs (UX v3 behavior unification, §5).
+  const logCard = h(
+    'div',
+    { className: 'wl-card' },
+    state.dayEdit
+      ? [
+          h('textarea', {
+            className: 'wl-area',
+            style: { minHeight: '160px' },
+            value: state.log.text,
+            placeholder: '# 工作日志\n\n## 今日概览\n…',
+            onInput: (event) => {
+              state.log.text = event.target.value
+            },
+          }),
+          h(
+            'div',
+            { className: 'wl-row', style: { marginTop: '6px' } },
+            h(
+              'button',
+              {
+                className: 'wl-btn primary',
+                disabled: state.busy === 'day-save',
+                onClick: () =>
+                  act(
+                    'day-save',
+                    async () => {
+                      await call('day', { date, text: state.log.text })
+                      state.log.exists = true
+                      state.dayEdit = false
+                      setNotice('ok', '已保存 ' + date)
+                    },
+                    { refresh: false },
+                  ),
+              },
+              state.busy === 'day-save' ? '保存中…' : '保存',
+            ),
+            h(
+              'button',
+              {
+                className: 'wl-btn',
+                onClick: () => {
+                  state.dayEdit = false
+                  if (!state.log.exists) {
+                    loadLog(date).then(render, () => render())
+                  } else render()
+                },
+              },
+              '取消',
+            ),
+          ),
+        ]
+      : logForDay
+        ? [
+            h('div', { className: 'wl-pre', style: { maxHeight: '300px' } }, state.log.text || '（内容为空）'),
+            h(
+              'button',
+              {
+                className: 'wl-btn',
+                onClick: () => {
+                  state.dayEdit = true
+                  render()
+                },
+              },
+              state.log.exists ? '编辑' : '写内容',
+            ),
+          ]
+        : h('div', { className: 'wl-hint' }, '日志加载中…'),
+  )
+
+  return h(
+    'div',
+    null,
+    h(
+      'div',
+      { className: 'wl-card' },
+      h(
+        'div',
+        { className: 'wl-row' },
+        h(
+          'div',
+          { className: 'grow' },
+          h('div', { className: 'wl-item-title' }, `${cnDate(date)} 周${weekdayCn(date)}${isToday ? ' · 今天' : ''}`),
+          h('div', { className: 'wl-item-meta' }, date + (detail.archived ? ' · 已生成日志' : '')),
+        ),
+        headAction(),
       ),
     ),
-    [
-      h('div', { className: 'wl-section-title', style: { marginTop: '6px' } }, '到期待办 ' + (dueList.length ? '（' + dueList.length + ' 条）' : '')),
+    h(
+      'div',
+      { className: 'wl-section-title' },
+      '当天到期待办' + (dueList.length ? '（' + dueList.length + ' 条）' : ''),
+    ),
+    h(
+      'div',
+      { className: 'wl-card' },
       dueList.length
         ? dueList.map((todo) =>
             h(
@@ -2719,12 +2839,16 @@ function dayHub() {
                 onChange: () =>
                   act('daytodo-done', async () => {
                     await call('todos', { action: 'complete', id: todo.id })
-                    state.calDay = null
+                    await refreshDayDetail()
                   }),
               }),
-              h('div', { className: 'grow' },
+              h(
+                'div',
+                { className: 'grow' },
                 h('div', { className: 'wl-item-title' }, todo.title),
-                h('div', { className: 'wl-item-meta' },
+                h(
+                  'div',
+                  { className: 'wl-item-meta' },
                   todo.pri ? h('span', { className: 'wl-tag ' + (todo.pri === '高' ? 'high' : todo.pri === '中' ? 'mid' : 'low') }, todo.pri) : null,
                   todo.carries ? h('span', { className: 'wl-carry' }, '顺延 ' + todo.carries) : null,
                 ),
@@ -2735,58 +2859,73 @@ function dayHub() {
       h(
         'div',
         { className: 'wl-row', style: { marginTop: '4px' } },
-        h('input', { className: 'wl-input', id: 'wl-daytodo-title', placeholder: '给这天加个待办（回车添加）', style: { flex: '1' }, onKeydown: (e) => { if (e.key === 'Enter') addDue() } }),
-        h('button', { className: 'wl-btn tiny', onClick: addDue }, '添加'),
+        h('input', {
+          className: 'wl-input',
+          id: 'wl-daytodo-title',
+          placeholder: '给这天加个待办（回车添加）',
+          style: { flex: '1' },
+          onKeydown: (event) => {
+            if (event.key === 'Enter') addDayTodo(date)
+          },
+        }),
+        h('button', { className: 'wl-btn tiny', onClick: () => addDayTodo(date) }, '添加'),
       ),
-    ],
-    detail.sessions.length
+    ),
+    h('div', { className: 'wl-section-title' }, '日志'),
+    logCard,
+    detail.sessions?.length
       ? [
-          h('div', { className: 'wl-section-title' }, 'AI 会话 ' + detail.sessions.length + ' 场'),
-          detail.sessions.map((session) =>
+          h('div', { className: 'wl-section-title' }, '当天 AI 会话 ' + detail.sessions.length + ' 场'),
+          h(
+            'div',
+            { className: 'wl-card' },
+            detail.sessions.map((session) =>
+              h(
+                'div',
+                { className: 'wl-row', key: session.title + session.timeRange },
+                h('span', { className: 'wl-tag' }, session.label),
+                h('span', { className: 'grow wl-hint' }, session.title),
+                h('span', { className: 'wl-hint' }, (session.turns || 0) + ' 轮 ' + (session.timeRange || '')),
+              ),
+            ),
             h(
-              'div',
-              { className: 'wl-row', key: session.title + session.timeRange },
-              h('span', { className: 'wl-tag' }, session.label),
-              h('span', { className: 'grow wl-hint' }, session.title),
-              h('span', { className: 'wl-hint' }, (session.turns || 0) + ' 轮 ' + (session.timeRange || '')),
+              'button',
+              { className: 'wl-btn tiny', style: { marginTop: '6px' }, onClick: () => openLibrarySessions(date) },
+              '在资料库打开这天',
             ),
           ),
-          h(
-            'button',
-            {
-              className: 'wl-btn tiny',
-              onClick: () => {
-                state.tab = 'sessions'
-                state.sessFilters.start = detail.date
-                state.sessFilters.end = detail.date
-                state.sessResult = null
-                render()
-                runSessQuery()
-              },
-            },
-            '在会话页打开这天',
-          ),
         ]
       : null,
-    detail.todosDone.length
+    detail.todosDone?.length
       ? [
           h('div', { className: 'wl-section-title' }, '完成待办 ' + detail.todosDone.length + ' 条'),
-          detail.todosDone.map((todo) =>
-            h('div', { className: 'wl-row', key: todo.title }, '✓ ' + todo.title),
+          h(
+            'div',
+            { className: 'wl-card' },
+            detail.todosDone.map((todo) => h('div', { className: 'wl-row', key: todo.title }, '✓ ' + todo.title)),
           ),
         ]
       : null,
-    detail.entries.count
+    detail.entries?.count
       ? [
-          h('div', { className: 'wl-section-title' }, '采集条目 ' + detail.entries.count + ' 条'),
-          Object.entries(detail.entries.bySource)
-            .map(([source, count]) => h('span', { className: 'wl-tag', key: source }, source + ' ' + count)),
-          detail.entries.items.map((entry) =>
+          h('div', { className: 'wl-section-title' }, '当天记录 ' + detail.entries.count + ' 条'),
+          h(
+            'div',
+            { className: 'wl-card' },
             h(
               'div',
-              { className: 'wl-row', key: entry.ref + entry.title },
-              h('span', { className: 'wl-hint' }, entry.time || ''),
-              h('span', { className: 'grow wl-hint', style: { wordBreak: 'break-all' } }, entry.title),
+              { className: 'wl-row' },
+              Object.entries(detail.entries.bySource || {}).map(([source, count]) =>
+                h('span', { className: 'wl-tag', key: source }, source + ' ' + count),
+              ),
+            ),
+            (detail.entries.items || []).map((entry) =>
+              h(
+                'div',
+                { className: 'wl-row', key: entry.ref + entry.title },
+                h('span', { className: 'wl-hint' }, entry.time || ''),
+                h('span', { className: 'grow wl-hint', style: { wordBreak: 'break-all' } }, entry.title),
+              ),
             ),
           ),
         ]
@@ -2794,7 +2933,86 @@ function dayHub() {
   )
 }
 
-function scheduleTab() {
+// Calendar card — the only calendar in the panel (the session tab's month
+// calendar was removed with UX v3).
+function timeCalendar() {
+  const data = state.calData
+  const shiftWeek = (delta) => {
+    const d = new Date(state.calAnchor || data?.today || today())
+    d.setDate(d.getDate() + delta * 7)
+    const p = (n) => String(n).padStart(2, '0')
+    state.calAnchor = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+    if (state.calAnchor.slice(0, 7) !== state.calMonth) loadCalMonth(state.calAnchor.slice(0, 7))
+    else render()
+  }
+  return [
+    h(
+      'div',
+      { className: 'wl-row' },
+      h(
+        'button',
+        {
+          className: 'wl-btn tiny',
+          disabled: state.calDataLoading,
+          onClick: () => {
+            if (state.calMode === 'week') shiftWeek(-1)
+            else loadCalMonth(shiftMonth(state.calMonth, -1))
+          },
+        },
+        '◀',
+      ),
+      h(
+        'div',
+        { className: 'wl-section-title' },
+        state.calMode === 'week' ? (state.calAnchor || data?.today || today()).slice(5) + ' 起的一周' : state.calMonth,
+      ),
+      h(
+        'button',
+        {
+          className: 'wl-btn tiny' + (state.calMode === 'week' ? '' : ' primary'),
+          onClick: () => {
+            state.calMode = 'month'
+            state.calAnchor = ''
+            render()
+          },
+        },
+        '月',
+      ),
+      h(
+        'button',
+        {
+          className: 'wl-btn tiny' + (state.calMode === 'week' ? ' primary' : ''),
+          onClick: () => {
+            state.calMode = 'week'
+            if (!state.calAnchor) state.calAnchor = data?.today || today()
+            render()
+          },
+        },
+        '周',
+      ),
+      h(
+        'button',
+        {
+          className: 'wl-btn tiny',
+          disabled: state.calDataLoading,
+          onClick: () => {
+            if (state.calMode === 'week') shiftWeek(1)
+            else loadCalMonth(shiftMonth(state.calMonth, 1))
+          },
+        },
+        '▶',
+      ),
+      h('button', { className: 'wl-btn tiny', onClick: () => loadCalMonth(calKey()) }, '今天'),
+    ),
+    calGrid(),
+    h('div', { className: 'wl-hint', style: { marginTop: '7px' } }, '标记：● 有日志 · ▼ 有到期待办 · ◦ 有会话'),
+  ]
+}
+
+// Time tab: fixed master (calendar) / detail (selected day) layout with the
+// todo workbench as a full-width band below. No "enter/exit" day mode —
+// clicking a day only refreshes the right pane.
+function timeTab() {
   if (!state.calMonth) state.calMonth = calKey()
   if (!state.calData && !state.calDataLoading) {
     state.calDataLoading = true
@@ -2808,85 +3026,24 @@ function scheduleTab() {
         render()
       })
   }
-  const data = state.calData
   return h(
     'div',
     null,
     noticeNode(),
     h(
       'div',
-      { className: 'wl-card wide' },
-      h(
-        'div',
-        { className: 'wl-row' },
-        h(
-          'button',
-          {
-            className: 'wl-btn tiny',
-            disabled: state.calDataLoading,
-            onClick: () => {
-              if (state.calMode === 'week') {
-                const d = new Date(state.calAnchor || data?.today || today())
-                d.setDate(d.getDate() - 7)
-                const pad = (n) => String(n).padStart(2, '0')
-                state.calAnchor = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
-                if (state.calAnchor.slice(0, 7) !== state.calMonth) loadCalMonth(state.calAnchor.slice(0, 7))
-                else render()
-              } else loadCalMonth(shiftMonth(state.calMonth, -1))
-            },
-          },
-          '◀',
-        ),
-        h('div', { className: 'wl-section-title' }, state.calMode === 'week' ? (state.calAnchor || data?.today || today()).slice(5) + ' 起的一周' : state.calMonth),
-        h(
-          'button',
-          {
-            className: 'wl-btn tiny' + (state.calMode === 'week' ? '' : ' primary'),
-            onClick: () => { state.calMode = 'month'; state.calAnchor = ''; render() },
-          },
-          '月',
-        ),
-        h(
-          'button',
-          {
-            className: 'wl-btn tiny' + (state.calMode === 'week' ? ' primary' : ''),
-            onClick: () => { state.calMode = 'week'; if (!state.calAnchor) state.calAnchor = data?.today || today(); render() },
-          },
-          '周',
-        ),
-        h(
-          'button',
-          {
-            className: 'wl-btn tiny',
-            disabled: state.calDataLoading,
-            onClick: () => {
-              if (state.calMode === 'week') {
-                const d = new Date(state.calAnchor || data?.today || today())
-                d.setDate(d.getDate() + 7)
-                const pad = (n) => String(n).padStart(2, '0')
-                state.calAnchor = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
-                if (state.calAnchor.slice(0, 7) !== state.calMonth) loadCalMonth(state.calAnchor.slice(0, 7))
-                else render()
-              } else {
-                loadCalMonth(shiftMonth(state.calMonth, 1))
-              }
-            },
-          },
-          '▶',
-        ),
-        h(
-          'button',
-          { className: 'wl-btn tiny', onClick: () => loadCalMonth(calKey()) },
-          '今天',
-        ),
-      ),
-      calGrid(),
+      { className: 'wl-master' },
+      h('div', { className: 'wl-card' }, timeCalendar()),
+      h('div', null, dayDetail()),
     ),
-    h('div', { className: 'wl-card wide' }, dayHub()),
-    todosWorkbench(),
+    h(
+      'div',
+      { className: 'wl-section', id: 'wl-todo-workbench' },
+      h('div', { className: 'wl-section-title' }, '全部待办'),
+      todosWorkbench(),
+    ),
   )
 }
-
 async function loadTpls() {
   if (state.tplList || state.tplLoading) return
   state.tplLoading = true
@@ -3345,14 +3502,9 @@ function recoCard() {
               className: 'wl-click wl-item-title',
               title: '点跳到对应板块',
               onClick: () => {
-                if (item.kind === 'overdue' || item.kind === 'stale') gotoTab('schedule')
-                else if (item.refs?.date || item.date) {
-                  gotoTab('schedule')
-                  const d = item.refs?.date || item.date
-                  state.calMonth = d.slice(0, 7)
-                  state.calData = null
-                  state.calDay = null
-                } else gotoTab('schedule')
+                const d = item.refs?.date || item.date
+                if (d) openDay(d)
+                else gotoTab('time')
               },
             },
             item.title,
@@ -3390,8 +3542,6 @@ function recoCard() {
     ),
   )
 }
-
-
 async function loadGraphView(entity) {
   state.graphLoading = true
   state.graphEntity = entity || ''
@@ -3406,50 +3556,47 @@ async function loadGraphView(entity) {
   render()
 }
 
-function graphTab() {
+// Library · graph view (moved verbatim from the old graph tab).
+function graphView() {
   if (!state.graphData && !state.graphLoading) loadGraphView('')
   const data = state.graphData
   const loading = h('div', { className: 'wl-hint' }, '加载中…')
   return h(
     'div',
-    null,
-    noticeNode(),
-    h(
-      'div',
-      { className: 'wl-card wide' },
-      data
-        ? [
+    { className: 'wl-card' },
+    data
+      ? [
+          h(
+            'div',
+            { className: 'wl-row' },
+            h('div', { className: 'wl-section-title' }, data.found || data.entity ? '实体关系' : '知识图谱'),
             h(
-              'div',
-              { className: 'wl-row' },
-              h('div', { className: 'wl-section-title' }, data.found || data.entity ? '实体关系' : '知识图谱'),
-              h('span', { className: 'wl-hint' },
-                data.builtAt ? '构建于 ' + String(data.builtAt).slice(5, 16).replace('T', ' ') : '未构建'),
-              h(
-                'button',
-                {
-                  className: 'wl-btn tiny',
-                  disabled: state.graphLoading,
-                  onClick: () => act('graph-rebuild', async () => {
+              'span',
+              { className: 'wl-hint' },
+              data.builtAt ? '构建于 ' + String(data.builtAt).slice(5, 16).replace('T', ' ') : '未构建',
+            ),
+            h(
+              'button',
+              {
+                className: 'wl-btn tiny',
+                disabled: state.graphLoading,
+                onClick: () =>
+                  act('graph-rebuild', async () => {
                     const stats = await call('graph', { action: 'rebuild' })
                     setNotice('ok', '图谱已重建：' + stats.nodes + ' 节点 / ' + stats.edges + ' 关系')
                     state.graphData = null
                   }),
-                },
-                '重建',
-              ),
+              },
+              '重建',
             ),
-            state.graphLoading ? loading : null,
-            !state.graphLoading && data.found === undefined && !data.entity
-              ? graphOverview(data)
-              : null,
-            !state.graphLoading && data.entity ? graphEntityView(data) : null,
-          ]
-        : loading,
-    ),
+          ),
+          state.graphLoading ? loading : null,
+          !state.graphLoading && data.found === undefined && !data.entity ? graphOverview(data) : null,
+          !state.graphLoading && data.entity ? graphEntityView(data) : null,
+        ]
+      : loading,
   )
 }
-
 function graphOverview(data) {
   const byType = {}
   for (const [key, node] of Object.entries(data.nodes || {})) {
@@ -3586,7 +3733,6 @@ async function syncAllSessions(force) {
   await act('sess-sync', async () => {
     const result = await call('sessions', { action: 'sync_all', force })
     state.sessIndex = { builtAt: result.builtAt, total: result.total }
-    state.sessCalData = null
     setNotice('ok', '全量同步完成：' + result.total + ' 个会话' + (result.errors?.length ? '（' + result.errors.length + ' 个来源报错）' : ''))
   })
 }
@@ -3782,124 +3928,86 @@ function sessionsV2Block() {
   )
 }
 
-function sessCalKey(d) {
-  const now = new Date()
-  const y = d ? Number(String(d).slice(0, 4)) : now.getFullYear()
-  const m = d ? Number(String(d).slice(5, 7)) : now.getMonth() + 1
-  return y + '-' + String(m).padStart(2, '0')
-}
-
-async function loadSessCal() {
-  if (state.sessCalLoading) return
-  state.sessCalLoading = true
-  render()
-  try {
-    state.sessCalData = await call('sessions', { action: 'month', month: state.sessCalMonth })
-  } catch (error) {
-    setNotice('err', '会话月历加载失败：' + String(error?.message || error))
-  } finally {
-    state.sessCalLoading = false
-  }
-  render()
-}
-
-async function pickSessDay(date) {
-  state.sessFilters.start = date
-  state.sessFilters.end = date
-  state.sessGroupBy = ''
-  state.sessCalSelected = date
-  await runSessQuery()
-}
-
-function sessCalendarBlock() {
-  if (!state.sessCalMonth) state.sessCalMonth = sessCalKey()
-  if (!state.sessCalData && !state.sessCalLoading && state.sessIndex?.total) loadSessCal()
-  const data = state.sessCalData
-  const days = data?.days || {}
-  const dates = Object.keys(days)
-  const lead = dates.length ? (new Date(dates[0]).getDay() + 6) % 7 : 0
-  const todayText = today()
+// Library tab: segmented sessions / logs / graph sub-views — the panel's
+// single "look things up" surface. The only calendar stays on the time tab.
+function libraryTab() {
+  const views = [
+    ['sessions', '会话'],
+    ['logs', '日志'],
+    ['graph', '图谱'],
+  ]
   return h(
     'div',
-    { className: 'wl-card wide' },
+    null,
+    noticeNode(),
     h(
       'div',
-      { className: 'wl-row' },
-      h('div', { className: 'wl-section-title' }, '会话月历'),
-      h(
-        'button',
-        { className: 'wl-btn tiny', disabled: state.sessCalLoading, onClick: () => { state.sessCalMonth = shiftMonth(state.sessCalMonth, -1); loadSessCal() } },
-        '◀',
+      { className: 'wl-seg' },
+      views.map(([value, label]) =>
+        h(
+          'button',
+          {
+            className: state.libView === value ? 'on' : '',
+            onClick: () => {
+              state.libView = value
+              render()
+            },
+          },
+          label,
+        ),
       ),
-      h('span', { className: 'wl-hint' }, state.sessCalMonth),
-      h(
-        'button',
-        { className: 'wl-btn tiny', disabled: state.sessCalLoading, onClick: () => { state.sessCalMonth = shiftMonth(state.sessCalMonth, 1); loadSessCal() } },
-        '▶',
-      ),
-      h('button', { className: 'wl-btn tiny', onClick: () => { state.sessCalMonth = sessCalKey(); loadSessCal() } }, '今月'),
     ),
-    state.sessIndex?.total
-      ? null
-      : h('div', { className: 'wl-hint' }, '还没有会话索引——先在下方点「同步全部会话」。'),
-    data
-      ? h(
-          'div',
-          { className: 'wl-cal-grid' },
-          ['一', '二', '三', '四', '五', '六', '日'].map((label) => h('div', { className: 'wl-cal-head' }, label)),
-          Array.from({ length: lead }, (_, i) => h('span', { className: 'wl-cal-cell empty', key: 'e' + i }, '')),
-          dates.map((date) =>
-            h(
-              'button',
-              {
-                className: 'wl-cal-cell' + (state.sessCalSelected === date ? ' sel' : '') + (date === todayText ? ' today' : ''),
-                key: date,
-                onClick: () => pickSessDay(date),
-              },
-              h('div', { className: 'wl-cal-num' }, String(Number(date.slice(8, 10)))),
-              h('div', { className: 'wl-cal-marks' },
-                days[date]
-                  ? h('span', { className: 'wl-cal-badge' }, '会话 ' + days[date])
-                  : null),
-            ),
-          ),
-        )
-      : h('div', { className: 'wl-hint' }, state.sessCalLoading ? '加载中…' : ''),
-    data
-      ? h('div', { className: 'wl-hint', style: { marginTop: '4px' } },
-          '点某一天：下方工作台会按该天筛选入库会话（含跨天会话），可直接打标记/设组。')
-      : null,
+    state.libView === 'sessions' ? sessionsV2Block() : state.libView === 'logs' ? logsView() : graphView(),
   )
 }
 
-function sessionsCalendarWrapper() {
-  return h('div', null, sessCalendarBlock())
-}
-
-function reportsFold() {
-  const open = Boolean(state.reportsOpen)
+// Overlay confirm dialog for overwrite/destructive actions (report regen,
+// day regen). Purely a front-end gate: the op runs only from confirm.run.
+function confirmModalNode() {
+  const box = state.confirm
+  if (!box) return null
   return h(
     'div',
-    { className: `wl-fold${open ? ' open' : ''}` },
+    { className: 'wl-modal' },
     h(
-      'button',
-      {
-        className: 'wl-fold-head',
-        type: 'button',
-        onClick: () => {
-          state.reportsOpen = !open
-          render()
-        },
-      },
-      h('span', { className: 'wl-fold-caret' }, open ? '▾' : '▸'),
-      '汇报生成与已生成报告'
+      'div',
+      { className: 'wl-modal-box' },
+      h('div', { className: 'wl-modal-title' }, box.title),
+      h('div', { className: 'wl-modal-body' }, box.body),
+      h(
+        'div',
+        { className: 'wl-row', style: { justifyContent: 'flex-end', marginTop: '10px' } },
+        h(
+          'button',
+          {
+            className: 'wl-btn',
+            onClick: () => {
+              state.confirm = null
+              render()
+            },
+          },
+          '取消',
+        ),
+        h(
+          'button',
+          {
+            className: 'wl-btn primary',
+            onClick: () => {
+              const run = box.run
+              state.confirm = null
+              render()
+              if (run) run()
+            },
+          },
+          box.okLabel || '确认',
+        ),
+      ),
     ),
-    open ? h('div', { className: 'wl-fold-body' }, reportsBody()) : null,
   )
 }
+
 function render() {
-  if (state.tab === 'calendar' || state.tab === 'todos') state.tab = 'schedule'
-  if (state.tab === 'reports') state.tab = 'logs'
+  if (!TABS.some(([key]) => key === state.tab)) state.tab = 'today'
   const root = document.getElementById('app')
   if (!root) return
   root.replaceChildren(
@@ -3923,21 +4031,19 @@ function render() {
     h(
       'div',
       { className: 'wl-body' },
-      state.tab === 'overview'
-        ? overviewTab()
-        : state.tab === 'schedule'
-          ? scheduleTab()
-        : state.tab === 'graph'
-          ? graphTab()
-        : state.tab === 'logs'
-          ? logsTab()
-            : state.tab === 'sessions'
-                ? sessionsTab()
-                : settingsTab(),
+      state.tab === 'today'
+        ? todayTab()
+        : state.tab === 'time'
+          ? timeTab()
+          : state.tab === 'library'
+            ? libraryTab()
+            : state.tab === 'report'
+              ? reportTab()
+              : settingsTab(),
+      confirmModalNode(),
     ),
   )
 }
-
 function applyHostContext(context) {
   if (context?.theme) applyDocumentTheme(context.theme)
   if (context?.styles?.variables) applyHostStyleVariables(context.styles.variables)
@@ -3961,6 +4067,10 @@ async function main() {
     applyHostContext(app.getHostContext())
     await refreshAll()
     render()
+    // The default tab is today: run its lazy loaders once on boot too (they
+    // are click-triggered for every later tab switch).
+    loadYesterday().then(render, () => render())
+    if (!state.recoData && !state.recoLoading) loadReco().then(render, () => render())
   } catch (error) {
     const root = document.getElementById('app')
     if (root) {
