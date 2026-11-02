@@ -177,6 +177,7 @@ npm install        # build/test only (esbuild + MCP SDK + ext-apps + jsdom)
 npm run build      # writes dist/: server.mjs, session-start.mjs, panel.js, panel.html, panel.css
 npm test           # store / archive / reports / MCP API
 npm run test:panel # jsdom MCP App host simulation: handshake, bootstrap, all five tabs
+npm run preview    # serve the panel at http://127.0.0.1:4173 with mock data (?tab= switches tabs) for visual checks
 npm run smoke      # end-to-end in a temp directory
 node test/smoke-mcp.mjs   # real stdio JSON-RPC: initialize / tools/list / tools/call / resources/read
 ```

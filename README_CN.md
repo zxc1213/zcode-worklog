@@ -186,6 +186,7 @@ npm install        # 仅构建/测试需要（esbuild + MCP SDK + ext-apps + jsd
 npm run build      # 生成 dist/：server.mjs、session-start.mjs、panel.js、panel.html、panel.css
 npm test           # 本地存储/归档/报告/MCP API
 npm run test:panel # jsdom 里模拟 MCP App 宿主，验证握手、bootstrap 和五个页签
+npm run preview    # 本地起 http://127.0.0.1:4173 可视预览面板（mock 数据，?tab= 切页签，配合截图目检布局）
 npm run smoke      # 临时目录下跑通归档+待办+备份
 node test/smoke-mcp.mjs   # 真实 stdio JSON-RPC：initialize/tools/list/tools/call/resources/read
 ```

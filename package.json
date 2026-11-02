@@ -1,6 +1,6 @@
 {
   "name": "zcode-worklog",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "private": true,
   "type": "module",
   "description": "WorkLog for ZCode: local daily journal, git/doc archiving, todos, reports and a side panel.",
@@ -8,6 +8,7 @@
     "build": "node scripts/build.mjs",
     "test": "node --test test/*.test.mjs",
     "test:panel": "node test/panel-sim.mjs",
+    "preview": "node test/visual/preview.mjs",
     "smoke": "node test/smoke.mjs",
     "smoke:mcp": "node test/smoke-mcp.mjs"
   },

@@ -411,7 +411,7 @@ function todayTab() {
 
   return h(
     'div',
-    null,
+    { className: 'wl-stack' },
     noticeNode(),
     todayInfo.archived
       ? h(
@@ -547,7 +547,7 @@ function todayTab() {
 function logsView() {
   return h(
     'div',
-    null,
+    { className: 'wl-stack' },
     h(
       'div',
       { className: 'wl-card' },
@@ -573,6 +573,7 @@ function logsView() {
           id: 'wl-log-start',
           value: state.logRange.start,
           title: '只搜该日期（含）之后',
+          style: { width: '132px' },
           onInput: (event) => {
             state.logRange.start = event.target.value
           },
@@ -584,6 +585,7 @@ function logsView() {
           id: 'wl-log-end',
           value: state.logRange.end,
           title: '只搜该日期（含）之前',
+          style: { width: '132px' },
           onInput: (event) => {
             state.logRange.end = event.target.value
           },
@@ -988,7 +990,7 @@ function todosWorkbench() {
 
   return h(
     'div',
-    null,
+    { className: 'wl-stack' },
     suggestCard(),
     h(
       'div',
@@ -1546,7 +1548,7 @@ function reportTab() {
   const aiPolishReady = Boolean(state.config?.ai?.model && state.config?.ai?.hasApiKey)
   return h(
     'div',
-    null,
+    { className: 'wl-stack' },
     noticeNode(),
     h(
       'div',
@@ -1982,7 +1984,7 @@ function settingsGeneralPage() {
   const set = settingsSet(draft)
   return h(
     'div',
-    null,
+    { className: 'wl-stack' },
     noticeNode(),
     h(
       'div',
@@ -2047,7 +2049,7 @@ function settingsAiPage() {
   const aiHint = config.ai?.model ? `${config.ai.model}${config.ai.hasApiKey ? ' · 已配置 Key' : ' · 无 Key'}` : '未配置'
   return h(
     'div',
-    null,
+    { className: 'wl-stack' },
     noticeNode(),
     h('div', { className: 'wl-hint', style: { marginBottom: '8px' } }, '当前：' + aiHint),
     h(
@@ -2171,7 +2173,7 @@ function settingsDiagPage() {
   const usage = state.status?.aiUsage
   return h(
     'div',
-    null,
+    { className: 'wl-stack' },
     noticeNode(),
     data?.error
       ? h(
@@ -2285,7 +2287,7 @@ function settingsDiagPage() {
 
 // 连接器子页：原折叠块 body 整体平移（新建/编辑/测试/同步/删除，删除需确认）。
 function settingsConnPage() {
-  return h('div', null, noticeNode(), connBlock())
+  return h('div', { className: 'wl-stack' }, noticeNode(), connBlock())
 }
 
 // 提示词模板子页：原折叠块 body 平移（5 场景编辑/恢复内置），失败可重试。
@@ -2296,7 +2298,7 @@ function settingsTplPage() {
   const current = draft ? list.find((item) => item.scene === draft.scene) : null
   return h(
     'div',
-    null,
+    { className: 'wl-stack' },
     noticeNode(),
     h(
       'div',
@@ -2438,7 +2440,7 @@ function settingsTplPage() {
 function settingsBackupPage() {
   return h(
     'div',
-    null,
+    { className: 'wl-stack' },
     noticeNode(),
     h(
       'div',
@@ -2642,7 +2644,7 @@ function settingsCollectPage() {
   const tasks = data?.tasks || []
   return h(
     'div',
-    null,
+    { className: 'wl-stack' },
     noticeNode(),
     data?.error
       ? h(
@@ -3151,7 +3153,7 @@ function dayDetail() {
 
   return h(
     'div',
-    null,
+    { className: 'wl-stack' },
     h(
       'div',
       { className: 'wl-card' },
@@ -3367,7 +3369,7 @@ function timeTab() {
   if (!state.calMonths[state.calMonth]) fetchCalMonth(state.calMonth)
   return h(
     'div',
-    null,
+    { className: 'wl-stack' },
     noticeNode(),
     h(
       'div',
@@ -4333,7 +4335,7 @@ function libraryTab() {
   ]
   return h(
     'div',
-    null,
+    { className: 'wl-stack' },
     noticeNode(),
     h(
       'div',

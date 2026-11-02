@@ -540,6 +540,19 @@ body {
   margin-bottom: 4px;
 }
 
+/* ── Vertical rhythm (0.24.0) ─────────────────────────────────────────────
+   Tab roots / day-detail pane / workbench carry .wl-stack: every direct
+   child after the first gets a top margin that collapses with the previous
+   sibling's bottom margin (no doubling). Grouped content hugs its section
+   title via the tighter rule below. */
+.wl-stack > * + * {
+  margin-top: 12px;
+}
+
+.wl-stack > .wl-section-title + * {
+  margin-top: 6px;
+}
+
 .wl-savebar {
   position: sticky;
   top: 0;
