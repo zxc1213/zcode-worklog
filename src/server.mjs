@@ -112,9 +112,11 @@ tool(
   'worklog_search',
   {
     title: '搜索归档',
-    description: '在本地日归档中做全文检索，返回日期、命中次数和摘要片段。',
+    description: '在本地日归档中做全文检索，返回日期、命中次数和摘要片段；可选 start/end（YYYY-MM-DD）限定日期范围。',
     inputSchema: z.object({
       query: z.string().describe('关键词或短语'),
+      start: z.string().optional().describe('YYYY-MM-DD，只搜该日期（含）之后'),
+      end: z.string().optional().describe('YYYY-MM-DD，只搜该日期（含）之前'),
     }),
   },
   (args) => dispatch('search', args),
@@ -184,7 +186,7 @@ tool(
   {
     title: '本机 AI 会话汇总',
     description:
-      '读取本机 AI 工具会话：action=sync_all 一键全量同步所有工具的全部历史会话到持久索引（force 忽略缓存、windowDays 限制 sqlite 源窗口）；action=query 按条件筛选 {q 关键词, project/cwd, source, start/end 日期, minTurns, mark, group, workOnly 仅工作相关(按扫描目录与 workKeywords), workKeywords[], groupBy=project|source|date|mark|group}，返回命中会话+关键词分析(keywords)+分组(groups)；action=mark/unmark {keys, mark} 打/去标记；action=group {keys, group} 设自定义分组；index_status 查索引状态；list 按天视图；sources 列来源；refresh 强制重扫。',
+      '读取本机 AI 工具会话：action=sync_all 一键全量同步所有工具的全部历史会话到持久索引（force 忽略缓存、windowDays 限制 sqlite 源窗口）；action=query 按条件筛选 {q 关键词, project/cwd, source, start/end 日期, minTurns, mark, group, workOnly 仅工作相关(按扫描目录与 workKeywords), workKeywords[], groupBy=project|source|date|mark|group}，返回命中会话+关键词分析(keywords)+分组(groups)；action=mark/unmark {keys, mark} 打/去标记；action=group {keys, group} 设自定义分组；action=content {key} 读取该会话按天的用户提问摘录（纯缓存读，未同步时提示先 sync_all）；action=month {month} 按月返回每天会话数；index_status 查索引状态；list 按天视图；sources 列来源；refresh 强制重扫。',
     inputSchema: z.object({
       action: z.enum(['list', 'sources', 'refresh', 'sync_all', 'query', 'mark', 'unmark', 'group', 'index_status', 'month', 'content']).optional(),
       q: z.string().optional(),
@@ -302,7 +304,7 @@ tool(
   {
     title: 'AI 工具配置向导',
     description:
-      'WorkLog AI 工具配置向导：action=types 列出可引导配置的工具类型（claude/codex/dsh/zcode/gemini/custom）；action=probe {type, location?} 按位置探测该工具的本机配置详情（模型列表数、接口地址、Key 是否配置及掩码），不返回 Key 明文；探测结果确认后用 worklog_config 或 worklog_ai（action=apply, id=候选id）应用。',
+      'WorkLog AI 工具配置向导：action=types 列出可引导配置的工具类型（claude/codex/dsh/zcode/gemini/custom）；action=probe {type, location?} 按位置探测该工具的本机配置详情（模型列表数、接口地址、Key 是否配置及掩码），不返回 Key 明文；探测结果确认后用 worklog_config（action=set, patch.ai）写入配置应用；面板内则在「设置 → AI 接口」中一键使用。',
     inputSchema: z.object({
       action: z.enum(['types', 'probe']).optional(),
       type: z.string().optional(),

@@ -156,6 +156,9 @@ const state = {
   config: null,
   settings: null,
   log: { date: today(), text: '', exists: false, loaded: false },
+  logRange: { start: '', end: '' },
+  sessSources: null,
+  sessSourcesLoading: false,
   hits: [],
   logExpand: '',
   logExpandLoading: false,
@@ -269,7 +272,12 @@ function splitLines(text) {
 }
 
 async function act(label, fn, { refresh = true } = {}) {
-  if (state.busy) return
+  if (state.busy) {
+    // A click during an in-flight op used to vanish silently; say so instead.
+    setNotice('info', '上一步操作仍在进行，请稍候。')
+    render()
+    return
+  }
   state.busy = label
   state.notice = null
   render()
@@ -344,8 +352,24 @@ function priorityTag(pri) {
 
 async function loadLog(date) {
   const data = await call('day', { date })
-  state.log = { date: data.date || date, text: data.text || '', exists: Boolean(data.exists), loaded: true }
+  state.log = {
+    date: data.date || date,
+    text: data.text || '',
+    exists: Boolean(data.exists),
+    loaded: true,
+    savedText: data.text || '',
+  }
   return data
+}
+
+// The day-log edit is dirty when edit mode is on and the text diverges from
+// what was loaded from disk. Used to gate day switches (no silent data loss).
+function logEditDirty() {
+  return Boolean(
+    state.dayEdit
+      && state.log.loaded
+      && state.log.text !== (state.log.savedText ?? state.log.text),
+  )
 }
 
 // Yesterday preview on the today tab. Guard both 'loaded' and 'in flight';
@@ -540,6 +564,32 @@ function logsView() {
         }),
         h('button', { className: 'wl-btn primary', onClick: runSearch }, '搜索'),
       ),
+      h(
+        'div',
+        { className: 'wl-row', style: { marginTop: '8px' } },
+        h('input', {
+          className: 'wl-input',
+          type: 'date',
+          id: 'wl-log-start',
+          value: state.logRange.start,
+          title: '只搜该日期（含）之后',
+          onInput: (event) => {
+            state.logRange.start = event.target.value
+          },
+        }),
+        h('span', { className: 'wl-hint' }, '至'),
+        h('input', {
+          className: 'wl-input',
+          type: 'date',
+          id: 'wl-log-end',
+          value: state.logRange.end,
+          title: '只搜该日期（含）之前',
+          onInput: (event) => {
+            state.logRange.end = event.target.value
+          },
+        }),
+        h('span', { className: 'wl-hint' }, '可选：限定日期范围'),
+      ),
     ),
     state.hits.length
       ? h(
@@ -605,7 +655,11 @@ function runSearch() {
   act(
     'search',
     async () => {
-      state.hits = await call('search', { query })
+      state.hits = await call('search', {
+        query,
+        start: state.logRange.start || undefined,
+        end: state.logRange.end || undefined,
+      })
       if (!state.hits.length) setNotice('info', '暂无匹配的归档日志。')
     },
     { refresh: false },
@@ -951,11 +1005,19 @@ function todosWorkbench() {
           {
             className: 'wl-btn',
             disabled: state.busy === 'todo-clear',
-            onClick: () =>
-              act('todo-clear', async () => {
-                const result = await call('todos', { action: 'clear_done' })
-                setNotice('ok', `已清空 ${result.removed} 条已完成待办`)
-              }),
+            onClick: () => {
+              state.confirm = {
+                title: '清空全部已完成待办？',
+                body: '将删除全部「已完成」状态的待办，删除后不可恢复。',
+                okLabel: '清空',
+                run: () =>
+                  act('todo-clear', async () => {
+                    const result = await call('todos', { action: 'clear_done' })
+                    setNotice('ok', `已清空 ${result.removed} 条已完成待办`)
+                  }),
+              }
+              render()
+            },
           },
           '清空已完成',
         ),
@@ -1024,6 +1086,8 @@ function todoItem(todo, todayText) {
       className: 'wl-check',
       type: 'checkbox',
       checked: isDone,
+      title: isDone ? '重新打开' : '完成',
+      'aria-label': (isDone ? '重新打开「' : '完成「') + todo.title + '」',
       onChange: () =>
         act(isDone ? 'todo-reopen' : 'todo-done', async () => {
           await call('todos', { action: isDone ? 'reopen' : 'complete', id: todo.id })
@@ -1059,10 +1123,19 @@ function todoItem(todo, todayText) {
       'button',
       {
         className: 'wl-btn danger tiny',
-        onClick: () =>
-          act('todo-del', async () => {
-            await call('todos', { action: 'delete', id: todo.id })
-          }),
+        onClick: () => {
+          state.confirm = {
+            title: '删除待办？',
+            body: '将删除「' + todo.title + '」，删除后不可恢复。',
+            okLabel: '删除',
+            run: () =>
+              act('todo-del', async () => {
+                await call('todos', { action: 'delete', id: todo.id })
+                setNotice('ok', '已删除待办')
+              }),
+          }
+          render()
+        },
       },
       '删除',
     ),
@@ -1435,6 +1508,12 @@ function selectReportKind(kind) {
 // existing report file when regenerating; undefined means "use the form".
 async function runReportGenerate(kind, key) {
   let result
+  const projectValue = key !== undefined ? key : state.reportPeriod
+  if (kind === 'project' && !String(projectValue || '').trim()) {
+    setNotice('err', '请先填写项目名，再生成项目档案。')
+    render()
+    return
+  }
   if (kind === 'custom' || kind === 'summarize') {
     const [start, end] = key ? String(key).split('_') : [state.reportStart, state.reportEnd]
     result = await call('report', { action: 'summarize', start: start || daysAgo(6), end: end || today(), useAi: state.reportUseAi })
@@ -2493,6 +2572,8 @@ function taskRow(task) {
         className: 'wl-check',
         type: 'checkbox',
         checked: Boolean(task.enabled),
+        title: (task.enabled ? '停用 ' : '启用 ') + task.title,
+        'aria-label': (task.enabled ? '停用 ' : '启用 ') + task.title,
         onChange: () => refreshSched(() => call('collect', { action: 'set', id: task.id, enabled: !task.enabled })),
       }),
       h(
@@ -2743,7 +2824,7 @@ async function fetchCalMonth(key) {
     state.calMonths[key] = await call('calendar', { action: 'month', month: key })
   } catch (error) {
     setNotice('err', '日历加载失败：' + String(error?.message || error))
-    state.calMonths[key] = { month: key, today: today(), days: {} }
+    state.calMonths[key] = { month: key, today: today(), days: {}, failed: true, error: String(error?.message || error) }
   }
   render()
   return state.calMonths[key]
@@ -2756,6 +2837,21 @@ async function loadCalMonth(month) {
 }
 
 async function selectCalDay(date, { edit = false } = {}) {
+  // Unsaved day-log edit is never silently discarded: a day switch while the
+  // log textarea diverges from disk asks first (confirm then discard).
+  if (logEditDirty()) {
+    state.confirm = {
+      title: '有未保存的日志修改',
+      body: '切换日期将丢弃 ' + (state.log.date || '') + ' 的未保存修改。',
+      okLabel: '丢弃并切换',
+      run: () => {
+        state.dayEdit = false
+        selectCalDay(date, { edit })
+      },
+    }
+    render()
+    return
+  }
   state.calSelected = date
   state.dayEdit = edit
   // Week view: the anchor follows the picked day so the shown week always
@@ -2866,6 +2962,24 @@ function calGrid() {
     for (const monthKey of missing) fetchCalMonth(monthKey)
     cells = week.map((date) => calCell(days[date] || { date, archived: false, todoDue: 0, sessionCount: 0 }, now))
   } else {
+    if (data.failed) {
+      return h(
+        'div',
+        null,
+        h('div', { className: 'wl-hint' }, '日历加载失败：' + (data.error || '未知错误')),
+        h(
+          'button',
+          {
+            className: 'wl-btn tiny',
+            onClick: () => {
+              delete state.calMonths[state.calMonth]
+              fetchCalMonth(state.calMonth)
+            },
+          },
+          '重试',
+        ),
+      )
+    }
     const days = data.days || {}
     const first = (data.month || state.calMonth) + '-01'
     const lead = (new Date(first).getDay() + 6) % 7
@@ -3185,6 +3299,8 @@ function timeCalendar() {
         'button',
         {
           className: 'wl-btn tiny',
+          title: state.calMode === 'week' ? '上一周' : '上一月',
+          'aria-label': state.calMode === 'week' ? '上一周' : '上一月',
           onClick: () => {
             if (state.calMode === 'week') shiftWeek(-1)
             else loadCalMonth(shiftMonth(state.calMonth, -1))
@@ -3227,6 +3343,8 @@ function timeCalendar() {
         'button',
         {
           className: 'wl-btn tiny',
+          title: state.calMode === 'week' ? '下一周' : '下一月',
+          'aria-label': state.calMode === 'week' ? '下一周' : '下一月',
           onClick: () => {
             if (state.calMode === 'week') shiftWeek(1)
             else loadCalMonth(shiftMonth(state.calMonth, 1))
@@ -3562,7 +3680,11 @@ async function loadReco() {
   state.recoLoading = true
   render()
   try {
-    state.recoData = await call('recommend', { action: 'get' })
+    // call() unwraps {items:[...]} envelopes to the bare array — normalize so
+    // recoCard always sees { date, items } (the card has been silently blank
+    // whenever the envelope unwrap hit; this is the 检视修复轮 fix).
+    const data = await call('recommend', { action: 'get' })
+    state.recoData = Array.isArray(data) ? { date: today(), items: data } : data
   } catch (error) {
     setNotice('err', '建议加载失败：' + String(error?.message || error))
   } finally {
@@ -3618,11 +3740,12 @@ function recoCard() {
           {
             className: 'wl-btn tiny',
             disabled: state.busy === 'reco-fb',
-            onClick: () =>
-              act('reco-fb', async () => {
-                await call('recommend', { action: 'feedback', kind: item.kind, key: item.title, accepted: true })
-                state.recoData = null
-              }),
+              onClick: () =>
+                act('reco-fb', async () => {
+                  await call('recommend', { action: 'feedback', kind: item.kind, key: item.title, accepted: true })
+                  state.recoData = null
+                  await loadReco()
+                }),
           },
           '采纳',
         ),
@@ -3631,11 +3754,12 @@ function recoCard() {
           {
             className: 'wl-btn tiny',
             disabled: state.busy === 'reco-fb',
-            onClick: () =>
-              act('reco-fb', async () => {
-                await call('recommend', { action: 'feedback', kind: item.kind, key: item.title, accepted: false })
-                state.recoData = null
-              }),
+              onClick: () =>
+                act('reco-fb', async () => {
+                  await call('recommend', { action: 'feedback', kind: item.kind, key: item.title, accepted: false })
+                  state.recoData = null
+                  await loadReco()
+                }),
           },
           '忽略',
         ),
@@ -3932,6 +4056,24 @@ async function loadSessIndex() {
   render()
 }
 
+// Library · sessions view source filter options (matches querySessions's
+// source equality filter). Multiple custom roots share id 'custom' — dedupe.
+async function loadSessSources() {
+  if (state.sessSources || state.sessSourcesLoading) return
+  state.sessSourcesLoading = true
+  try {
+    const data = await call('sessions', { action: 'sources' })
+    const list = Array.isArray(data?.sources) ? data.sources : []
+    const seen = new Set()
+    state.sessSources = list.filter((source) => (seen.has(source.id) ? false : seen.add(source.id)))
+  } catch {
+    state.sessSources = []
+  } finally {
+    state.sessSourcesLoading = false
+  }
+  render()
+}
+
 function sessFilterValue(key, value) {
   state.sessFilters[key] = value
 }
@@ -3988,7 +4130,7 @@ function sessRow(session) {
   return h(
     'div',
     { className: 'wl-item', key: session.key },
-    h('input', { className: 'wl-check', type: 'checkbox', checked, onChange: () => sessToggleKey(session.key) }),
+    h('input', { className: 'wl-check', type: 'checkbox', checked, title: '选择该会话', 'aria-label': '选择会话：' + session.title, onChange: () => sessToggleKey(session.key) }),
     h(
       'div',
       { className: 'grow' },
@@ -4065,6 +4207,7 @@ function sessContentNode(data) {
 
 function sessionsV2Block() {
   loadSessIndex()
+  loadSessSources()
   const f = state.sessFilters
   const result = state.sessResult
   const checkedCount = state.sessChecked.length
@@ -4103,6 +4246,19 @@ function sessionsV2Block() {
       { className: 'wl-row', style: { marginTop: '8px' } },
       h('input', { className: 'wl-input', placeholder: '关键词', value: f.q, onInput: (e) => sessFilterValue('q', e.target.value), style: { width: '120px' } }),
       h('input', { className: 'wl-input', placeholder: '项目/目录', value: f.project, onInput: (e) => sessFilterValue('project', e.target.value), style: { width: '120px' } }),
+      state.sessSources?.length
+        ? h(
+            'select',
+            {
+              className: 'wl-select',
+              value: f.source || '',
+              title: '按会话来源筛选',
+              onChange: (e) => sessFilterValue('source', e.target.value),
+            },
+            h('option', { value: '' }, '全部来源'),
+            state.sessSources.map((source) => h('option', { value: source.id }, source.label)),
+          )
+        : null,
       h('input', { className: 'wl-input', type: 'date', value: f.start, onInput: (e) => sessFilterValue('start', e.target.value), style: { width: '128px' } }),
       h('input', { className: 'wl-input', type: 'date', value: f.end, onInput: (e) => sessFilterValue('end', e.target.value), style: { width: '128px' } }),
     ),
@@ -4205,9 +4361,25 @@ function libraryTab() {
 function confirmModalNode() {
   const box = state.confirm
   if (!box) return null
+  // Default focus lands on the least-destructive button; Escape and clicking
+  // the backdrop both close without running the op.
+  setTimeout(() => {
+    if (state.confirm === box && !box.focusDone) {
+      document.querySelector('.wl-modal button')?.focus?.()
+      box.focusDone = true
+    }
+  }, 0)
   return h(
     'div',
-    { className: 'wl-modal' },
+    {
+      className: 'wl-modal',
+      onClick: (event) => {
+        if (event.target === event.currentTarget) {
+          state.confirm = null
+          render()
+        }
+      },
+    },
     h(
       'div',
       { className: 'wl-modal-box' },
@@ -4292,6 +4464,14 @@ function applyHostContext(context) {
 app.onhostcontextchanged = (context) => {
   applyHostContext(context)
 }
+
+// Escape closes the confirm dialog without running the op.
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && state.confirm) {
+    state.confirm = null
+    render()
+  }
+})
 
 async function main() {
   // The boot fallback in panel.html only covers "this bundle never ran";

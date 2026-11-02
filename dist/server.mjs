@@ -315,7 +315,7 @@ var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.22.0";
+    PLUGIN_VERSION = "0.23.0";
   }
 });
 
@@ -1429,13 +1429,15 @@ async function saveDay(config2, dateString, text) {
   await writeFile2(target, String(text ?? ""), "utf8");
   return getDay(config2, dateString);
 }
-async function searchDays(config2, query) {
+async function searchDays(config2, query, { start: startDay, end: endDay } = {}) {
   const q = String(query || "").trim();
   if (!q) throw new Error("\u641C\u7D22\u5173\u952E\u8BCD\u4E0D\u80FD\u4E3A\u7A7A");
   const lower = q.toLowerCase();
   const days = await listDays(config2);
   const hits = [];
   for (const day of days) {
+    if (startDay && day.date < startDay) continue;
+    if (endDay && day.date > endDay) continue;
     let text;
     try {
       text = await readFile2(day.path, "utf8");
@@ -39644,7 +39646,7 @@ async function dispatch(op, args = {}) {
     case "day":
       return dayAction(args);
     case "search":
-      return searchDays(config2, args.query);
+      return searchDays(config2, args.query, { start: args.start, end: args.end });
     case "todos":
       return todoAction(config2, args);
     case "archive":
@@ -39755,9 +39757,11 @@ tool(
   "worklog_search",
   {
     title: "\u641C\u7D22\u5F52\u6863",
-    description: "\u5728\u672C\u5730\u65E5\u5F52\u6863\u4E2D\u505A\u5168\u6587\u68C0\u7D22\uFF0C\u8FD4\u56DE\u65E5\u671F\u3001\u547D\u4E2D\u6B21\u6570\u548C\u6458\u8981\u7247\u6BB5\u3002",
+    description: "\u5728\u672C\u5730\u65E5\u5F52\u6863\u4E2D\u505A\u5168\u6587\u68C0\u7D22\uFF0C\u8FD4\u56DE\u65E5\u671F\u3001\u547D\u4E2D\u6B21\u6570\u548C\u6458\u8981\u7247\u6BB5\uFF1B\u53EF\u9009 start/end\uFF08YYYY-MM-DD\uFF09\u9650\u5B9A\u65E5\u671F\u8303\u56F4\u3002",
     inputSchema: external_exports.object({
-      query: external_exports.string().describe("\u5173\u952E\u8BCD\u6216\u77ED\u8BED")
+      query: external_exports.string().describe("\u5173\u952E\u8BCD\u6216\u77ED\u8BED"),
+      start: external_exports.string().optional().describe("YYYY-MM-DD\uFF0C\u53EA\u641C\u8BE5\u65E5\u671F\uFF08\u542B\uFF09\u4E4B\u540E"),
+      end: external_exports.string().optional().describe("YYYY-MM-DD\uFF0C\u53EA\u641C\u8BE5\u65E5\u671F\uFF08\u542B\uFF09\u4E4B\u524D")
     })
   },
   (args) => dispatch("search", args)
@@ -39819,7 +39823,7 @@ tool(
   "worklog_sessions",
   {
     title: "\u672C\u673A AI \u4F1A\u8BDD\u6C47\u603B",
-    description: "\u8BFB\u53D6\u672C\u673A AI \u5DE5\u5177\u4F1A\u8BDD\uFF1Aaction=sync_all \u4E00\u952E\u5168\u91CF\u540C\u6B65\u6240\u6709\u5DE5\u5177\u7684\u5168\u90E8\u5386\u53F2\u4F1A\u8BDD\u5230\u6301\u4E45\u7D22\u5F15\uFF08force \u5FFD\u7565\u7F13\u5B58\u3001windowDays \u9650\u5236 sqlite \u6E90\u7A97\u53E3\uFF09\uFF1Baction=query \u6309\u6761\u4EF6\u7B5B\u9009 {q \u5173\u952E\u8BCD, project/cwd, source, start/end \u65E5\u671F, minTurns, mark, group, workOnly \u4EC5\u5DE5\u4F5C\u76F8\u5173(\u6309\u626B\u63CF\u76EE\u5F55\u4E0E workKeywords), workKeywords[], groupBy=project|source|date|mark|group}\uFF0C\u8FD4\u56DE\u547D\u4E2D\u4F1A\u8BDD+\u5173\u952E\u8BCD\u5206\u6790(keywords)+\u5206\u7EC4(groups)\uFF1Baction=mark/unmark {keys, mark} \u6253/\u53BB\u6807\u8BB0\uFF1Baction=group {keys, group} \u8BBE\u81EA\u5B9A\u4E49\u5206\u7EC4\uFF1Bindex_status \u67E5\u7D22\u5F15\u72B6\u6001\uFF1Blist \u6309\u5929\u89C6\u56FE\uFF1Bsources \u5217\u6765\u6E90\uFF1Brefresh \u5F3A\u5236\u91CD\u626B\u3002",
+    description: "\u8BFB\u53D6\u672C\u673A AI \u5DE5\u5177\u4F1A\u8BDD\uFF1Aaction=sync_all \u4E00\u952E\u5168\u91CF\u540C\u6B65\u6240\u6709\u5DE5\u5177\u7684\u5168\u90E8\u5386\u53F2\u4F1A\u8BDD\u5230\u6301\u4E45\u7D22\u5F15\uFF08force \u5FFD\u7565\u7F13\u5B58\u3001windowDays \u9650\u5236 sqlite \u6E90\u7A97\u53E3\uFF09\uFF1Baction=query \u6309\u6761\u4EF6\u7B5B\u9009 {q \u5173\u952E\u8BCD, project/cwd, source, start/end \u65E5\u671F, minTurns, mark, group, workOnly \u4EC5\u5DE5\u4F5C\u76F8\u5173(\u6309\u626B\u63CF\u76EE\u5F55\u4E0E workKeywords), workKeywords[], groupBy=project|source|date|mark|group}\uFF0C\u8FD4\u56DE\u547D\u4E2D\u4F1A\u8BDD+\u5173\u952E\u8BCD\u5206\u6790(keywords)+\u5206\u7EC4(groups)\uFF1Baction=mark/unmark {keys, mark} \u6253/\u53BB\u6807\u8BB0\uFF1Baction=group {keys, group} \u8BBE\u81EA\u5B9A\u4E49\u5206\u7EC4\uFF1Baction=content {key} \u8BFB\u53D6\u8BE5\u4F1A\u8BDD\u6309\u5929\u7684\u7528\u6237\u63D0\u95EE\u6458\u5F55\uFF08\u7EAF\u7F13\u5B58\u8BFB\uFF0C\u672A\u540C\u6B65\u65F6\u63D0\u793A\u5148 sync_all\uFF09\uFF1Baction=month {month} \u6309\u6708\u8FD4\u56DE\u6BCF\u5929\u4F1A\u8BDD\u6570\uFF1Bindex_status \u67E5\u7D22\u5F15\u72B6\u6001\uFF1Blist \u6309\u5929\u89C6\u56FE\uFF1Bsources \u5217\u6765\u6E90\uFF1Brefresh \u5F3A\u5236\u91CD\u626B\u3002",
     inputSchema: external_exports.object({
       action: external_exports.enum(["list", "sources", "refresh", "sync_all", "query", "mark", "unmark", "group", "index_status", "month", "content"]).optional(),
       q: external_exports.string().optional(),
@@ -39925,7 +39929,7 @@ tool(
   "worklog_wizard",
   {
     title: "AI \u5DE5\u5177\u914D\u7F6E\u5411\u5BFC",
-    description: "WorkLog AI \u5DE5\u5177\u914D\u7F6E\u5411\u5BFC\uFF1Aaction=types \u5217\u51FA\u53EF\u5F15\u5BFC\u914D\u7F6E\u7684\u5DE5\u5177\u7C7B\u578B\uFF08claude/codex/dsh/zcode/gemini/custom\uFF09\uFF1Baction=probe {type, location?} \u6309\u4F4D\u7F6E\u63A2\u6D4B\u8BE5\u5DE5\u5177\u7684\u672C\u673A\u914D\u7F6E\u8BE6\u60C5\uFF08\u6A21\u578B\u5217\u8868\u6570\u3001\u63A5\u53E3\u5730\u5740\u3001Key \u662F\u5426\u914D\u7F6E\u53CA\u63A9\u7801\uFF09\uFF0C\u4E0D\u8FD4\u56DE Key \u660E\u6587\uFF1B\u63A2\u6D4B\u7ED3\u679C\u786E\u8BA4\u540E\u7528 worklog_config \u6216 worklog_ai\uFF08action=apply, id=\u5019\u9009id\uFF09\u5E94\u7528\u3002",
+    description: "WorkLog AI \u5DE5\u5177\u914D\u7F6E\u5411\u5BFC\uFF1Aaction=types \u5217\u51FA\u53EF\u5F15\u5BFC\u914D\u7F6E\u7684\u5DE5\u5177\u7C7B\u578B\uFF08claude/codex/dsh/zcode/gemini/custom\uFF09\uFF1Baction=probe {type, location?} \u6309\u4F4D\u7F6E\u63A2\u6D4B\u8BE5\u5DE5\u5177\u7684\u672C\u673A\u914D\u7F6E\u8BE6\u60C5\uFF08\u6A21\u578B\u5217\u8868\u6570\u3001\u63A5\u53E3\u5730\u5740\u3001Key \u662F\u5426\u914D\u7F6E\u53CA\u63A9\u7801\uFF09\uFF0C\u4E0D\u8FD4\u56DE Key \u660E\u6587\uFF1B\u63A2\u6D4B\u7ED3\u679C\u786E\u8BA4\u540E\u7528 worklog_config\uFF08action=set, patch.ai\uFF09\u5199\u5165\u914D\u7F6E\u5E94\u7528\uFF1B\u9762\u677F\u5185\u5219\u5728\u300C\u8BBE\u7F6E \u2192 AI \u63A5\u53E3\u300D\u4E2D\u4E00\u952E\u4F7F\u7528\u3002",
     inputSchema: external_exports.object({
       action: external_exports.enum(["types", "probe"]).optional(),
       type: external_exports.string().optional(),

@@ -9,7 +9,7 @@ WorkLog 是这个插件自己维护的本地工作日志系统。**不依赖 Wor
 
 - 数据目录：插件数据目录下的 `data/`（由 `ZCODE_PLUGIN_DATA` 决定，可用 `worklog_config` 查看准确路径）。
 - 归档结构沿用旧版：`archive/YYYY-MM/第N周(MM.DD-MM.DD)/YYYY-MM-DD.md`，所以旧 `data\archive` 可以直接导入。
-- 侧边面板：ZCode 侧栏的 **WorkLog**（概览 / 日志 / 待办 / 汇报 / 会话 / 设置）。
+- 侧边面板：ZCode 侧栏的 **WorkLog**（今天 / 时间 / 资料库 / 报告 / 设置）。
 
 ## 何时用哪个工具
 

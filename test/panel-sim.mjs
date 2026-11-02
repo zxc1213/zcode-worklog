@@ -175,6 +175,8 @@ function respond(window, message) {
         applied: { name: 'Demo Provider', models: ['GLM-5.2', 'GLM-5-Turbo'] },
         config: bootstrap.config,
       }
+    else if (op === 'recommend' && args.action === 'get')
+      structured = { date: simToday, items: [{ kind: 'overdue', title: '模拟建议', detail: '逾期 1 天', score: 5, final: 5 }] }
     else if (op === 'config') structured = bootstrap.config
     else if (op === 'sessions' && args.action === 'sources')
       structured = {
@@ -323,6 +325,17 @@ assert.equal(todoAddCall.params.arguments.args.title, '表单添加的待办')
 assert.equal(todoAddCall.params.arguments.args.due, simToday, 'due carried from the form default')
 console.log('today OK (archive state machine + form-style todo add)')
 
+// 检视修复轮: recommendation card — feedback refreshes the card in place
+assert.ok(text().includes('建议关注') && text().includes('模拟建议'), 'recommendation card renders on today tab')
+const adoptBtn = [...doc.querySelectorAll('button')].find((item) => item.textContent === '采纳')
+assert.ok(adoptBtn, 'recommendation adopt button exists')
+adoptBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+await wait(450)
+assert.ok(text().includes('建议关注') && text().includes('模拟建议'), 'card persists after feedback → in-place reload')
+const recoGets = messages.filter((m) => m.method === 'tools/call' && m.params?.arguments?.op === 'recommend' && m.params?.arguments?.args?.action === 'get').length
+assert.ok(recoGets >= 2, 'feedback triggers an in-place recommend refetch: ' + recoGets)
+console.log('today reco OK (in-place reload)')
+
 const clickTab = async (label) => {
   const tab = [...doc.querySelectorAll('.wl-tab')].find((item) => item.textContent === label)
   assert.ok(tab, `tab ${label} exists`)
@@ -381,7 +394,52 @@ assert.ok(doc.querySelector('.wl-master'), 'week day pick keeps the master layou
 await wait(200)
 assert.ok(weekTitle() && weekTitle().includes('11-0'), 'week nav crosses the month boundary without a reload loop: ' + weekTitle())
 assert.ok(doc.querySelectorAll('.wl-cal-cell').length > 0, 'cross-month week renders cells')
-console.log('time OK (master-detail, no day hub, week anchor follows)')
+
+// 检视修复轮: unsaved day-log edit → day switch asks before discarding
+const editBtn2 = [...doc.querySelectorAll('button')].find((item) => item.textContent === '编辑')
+assert.ok(editBtn2, 'edit button available again after week navigation')
+editBtn2.click()
+await wait(20)
+const dayArea2 = doc.querySelector('.wl-master textarea')
+assert.ok(dayArea2, 'edit mode re-entered')
+dayArea2.value = '# 修改过的日志'
+dayArea2.dispatchEvent(new window.Event('input', { bubbles: true }))
+await wait(20)
+const guardCell = doc.querySelector('button.wl-cal-cell')
+guardCell.click()
+await wait(20)
+assert.ok(text().includes('有未保存的日志修改'), 'day switch with unsaved log edits asks first')
+;[...doc.querySelectorAll('.wl-modal button')].find((item) => item.textContent === '丢弃并切换').click()
+await wait(400)
+assert.ok(!doc.querySelector('.wl-modal'), 'confirming the dialog discards and switches')
+assert.ok(!doc.querySelector('.wl-master textarea'), 'edit mode exits after discard')
+assert.ok(text().includes('# 测试日志'), 'day log reloaded in read mode')
+
+// 检视修复轮: destructive todo actions ask first
+const delBtn = [...doc.querySelectorAll('button')].find((item) => item.textContent === '删除')
+assert.ok(delBtn, 'todo delete button exists on the workbench')
+delBtn.click()
+await wait(20)
+assert.ok(text().includes('删除待办？'), 'todo delete asks for confirmation')
+;[...doc.querySelectorAll('.wl-modal button')].find((item) => item.textContent === '取消').click()
+await wait(20)
+assert.ok(!doc.querySelector('.wl-modal'), 'cancel aborts the todo delete')
+const delBtn2 = [...doc.querySelectorAll('button')].find((item) => item.textContent === '删除')
+delBtn2.click()
+await wait(20)
+;[...doc.querySelectorAll('.wl-modal button')].find((item) => item.textContent === '删除').click()
+await wait(400)
+assert.ok(messages.some((m) => m.method === 'tools/call' && m.params?.arguments?.op === 'todos' && m.params?.arguments?.args?.action === 'delete'), 'confirmed delete reaches the todos op')
+
+const clearBtn = [...doc.querySelectorAll('button')].find((item) => item.textContent === '清空已完成')
+assert.ok(clearBtn, 'clear-done button exists')
+clearBtn.click()
+await wait(20)
+assert.ok(text().includes('清空全部已完成待办？'), 'clear-done asks for confirmation')
+;[...doc.querySelectorAll('.wl-modal button')].find((item) => item.textContent === '清空').click()
+await wait(400)
+assert.ok(messages.some((m) => m.method === 'tools/call' && m.params?.arguments?.op === 'todos' && m.params?.arguments?.args?.action === 'clear_done'), 'confirmed clear-done reaches the todos op')
+console.log('time OK (dirty guard + delete/clear confirms)')
 
 // --- library tab: sessions / logs / graph sub-views -------------------
 await clickTab('资料库')
@@ -395,6 +453,18 @@ assert.ok(queryBtn, 'sessions filter bar has the query button')
 queryBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
 await wait(450)
 assert.ok(text().includes('模拟会话行'), 'sessions query renders result rows')
+// 检视修复轮: source filter dropdown renders and feeds the query op
+const sourceSel = [...doc.querySelectorAll('select')].find((el) => [...el.options].some((o) => o.textContent === '全部来源'))
+assert.ok(sourceSel, 'session source filter dropdown renders')
+assert.ok([...sourceSel.options].some((o) => o.textContent === 'Claude Code'), 'source dropdown lists sources from the sources op')
+sourceSel.value = 'claude'
+sourceSel.dispatchEvent(new window.Event('change', { bubbles: true }))
+const sourceQueryBtn = [...doc.querySelectorAll('button')].find((item) => item.textContent === '查询')
+sourceQueryBtn.click()
+await wait(450)
+const srcQuery = [...messages].reverse().find((m) => m.method === 'tools/call' && m.params?.arguments?.op === 'sessions' && m.params?.arguments?.args?.action === 'query')
+assert.ok(srcQuery, 'query op fired from the filtered search')
+assert.equal(srcQuery.params.arguments.args.source, 'claude', 'selected source reaches the query op')
 // UX v3.1 P0: 加载完整摘录 is a pure cache read on the server — here we just
 // verify the panel flow: expand row → load → per-date excerpts render inline.
 const sessRowTitle = [...doc.querySelectorAll('.wl-item-title')].find((el) => el.textContent.includes('模拟会话行'))
@@ -415,9 +485,15 @@ const searchInput = doc.querySelector('#wl-query')
 assert.ok(searchInput, 'logs view has the search input')
 searchInput.value = '测试'
 doc.querySelector('#wl-query').dispatchEvent(new window.Event('input', { bubbles: true }))
+const logStart = doc.querySelector('#wl-log-start')
+assert.ok(logStart, 'logs view exposes the date-range inputs')
+logStart.value = '2026-10-01'
+logStart.dispatchEvent(new window.Event('input', { bubbles: true }))
 ;[...doc.querySelectorAll('button')].find((item) => item.textContent === '搜索').click()
 await wait(450)
 assert.ok(text().includes('测试日志片段'), 'log search hits render')
+const searchCall = [...messages].reverse().find((m) => m.method === 'tools/call' && m.params?.arguments?.op === 'search')
+assert.equal(searchCall.params.arguments.args.start, '2026-10-01', 'search range start reaches the op')
 const hitRow = [...doc.querySelectorAll('.wl-item-title')].find((item) => item.textContent.includes('2026-10-28'))
 assert.ok(hitRow, 'hit row exists')
 hitRow.click()
@@ -487,6 +563,12 @@ assert.ok(cancelBtn, 'confirm dialog has a cancel button')
 cancelBtn.click()
 await wait(20)
 assert.ok(!doc.querySelector('.wl-modal'), 'cancel closes the dialog without running the op')
+// 检视修复轮: Escape closes the confirm dialog too
+regenBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+await wait(20)
+doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+await wait(20)
+assert.ok(!doc.querySelector('.wl-modal'), 'Escape closes the confirm dialog without running the op')
 regenBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
 await wait(20)
 const okBtn = [...doc.querySelectorAll('.wl-modal button')].find((item) => item.textContent === '重新生成')

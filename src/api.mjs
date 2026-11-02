@@ -574,7 +574,7 @@ export async function dispatch(op, args = {}) {
     case 'day':
       return dayAction(args)
     case 'search':
-      return searchDays(config, args.query)
+      return searchDays(config, args.query, { start: args.start, end: args.end })
     case 'todos':
       return todoAction(config, args)
     case 'archive':
