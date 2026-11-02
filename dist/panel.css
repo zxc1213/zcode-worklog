@@ -104,7 +104,7 @@ body {
 }
 
 .wl-head {
-  padding: 12px 14px 9px;
+  padding: 12px 12px 8px;
   border-bottom: 1px solid var(--wl-border-soft);
 }
 
@@ -129,7 +129,7 @@ body {
 }
 
 .wl-head-sub {
-  margin-top: 3px;
+  margin-top: 4px;
   font-size: 10.5px;
   color: var(--wl-faint);
   word-break: break-all;
@@ -137,8 +137,8 @@ body {
 
 .wl-tabs {
   display: flex;
-  gap: 2px;
-  padding: 7px 10px 0;
+  gap: 4px;
+  padding: 8px 12px 0;
   border-bottom: 1px solid var(--wl-border-soft);
   overflow: auto;
   scrollbar-width: none;
@@ -153,7 +153,7 @@ body {
   border: 0;
   background: transparent;
   color: var(--wl-muted);
-  padding: 6px 10px;
+  padding: 8px 12px;
   border-radius: 7px 7px 0 0;
   font: inherit;
   font-size: 11.5px;
@@ -175,14 +175,14 @@ body {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 12px 14px 24px;
+  padding: 12px 12px 24px;
 }
 
 .wl-notice {
   border-radius: 7px;
-  padding: 7px 9px;
+  padding: 8px 12px;
   font-size: 11px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   word-break: break-word;
   white-space: pre-wrap;
 }
@@ -211,7 +211,7 @@ body {
 .wl-card {
   border: 1px solid var(--wl-border-soft);
   border-radius: var(--wl-radius);
-  padding: 9px 10px;
+  padding: 8px 12px;
   background: var(--wl-card);
 }
 
@@ -245,7 +245,7 @@ body {
 .wl-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -259,7 +259,7 @@ body {
   background: transparent;
   color: var(--wl-text);
   border-radius: 6px;
-  padding: 4px 9px;
+  padding: 4px 8px;
   font: inherit;
   font-size: 11.5px;
   cursor: pointer;
@@ -301,7 +301,7 @@ body {
 }
 
 .wl-btn.tiny {
-  padding: 2px 6px;
+  padding: 2px 8px;
   font-size: 10.5px;
 }
 
@@ -313,7 +313,7 @@ body {
   background: var(--wl-input);
   color: var(--wl-text);
   border-radius: 6px;
-  padding: 5px 7px;
+  padding: 4px 8px;
   font: inherit;
   font-size: 11.5px;
   outline: none;
@@ -347,20 +347,20 @@ body {
   display: block;
   font-size: 11px;
   color: var(--wl-muted);
-  margin: 10px 0 4px;
+  margin: 8px 0 4px;
 }
 
 .wl-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   margin-top: 8px;
 }
 
 .wl-item {
   border: 1px solid var(--wl-border-soft);
   border-radius: 8px;
-  padding: 7px 8px;
+  padding: 8px 12px;
   display: flex;
   gap: 8px;
   align-items: flex-start;
@@ -390,7 +390,7 @@ body {
   color: var(--wl-faint);
   margin-top: 2px;
   display: flex;
-  gap: 7px;
+  gap: 8px;
   flex-wrap: wrap;
   word-break: break-word;
 }
@@ -398,7 +398,7 @@ body {
 .wl-tag {
   display: inline-block;
   font-size: 10px;
-  padding: 0 5px;
+  padding: 0 4px;
   border-radius: 999px;
   border: 1px solid var(--wl-border);
   line-height: 1.6;
@@ -457,7 +457,7 @@ body {
   background: var(--wl-card);
   border: 1px solid var(--wl-border-soft);
   border-radius: 8px;
-  padding: 9px;
+  padding: 8px 12px;
   max-height: 46vh;
   overflow: auto;
   margin: 8px 0;
@@ -466,21 +466,21 @@ body {
 .wl-empty {
   font-size: 11.5px;
   color: var(--wl-faint);
-  padding: 10px 2px;
+  padding: 8px 4px;
 }
 
 .wl-toolbar {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
   margin: 8px 0;
 }
 
 .wl-date-row {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .wl-date-row .wl-input {
@@ -511,10 +511,10 @@ body {
 .wl-checkline {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 11.5px;
   color: var(--wl-text);
-  margin: 6px 0;
+  margin: 8px 0;
 }
 
 .wl-split {
@@ -529,7 +529,7 @@ body {
 }
 
 .wl-section {
-  margin-top: 14px;
+  margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--wl-border-soft);
 }
@@ -546,10 +546,10 @@ body {
   z-index: 3;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
-  margin: -12px -14px 10px;
-  padding: 9px 14px;
+  margin: -12px -12px 12px;
+  padding: 8px 12px;
   background: var(--wl-bg);
   border-bottom: 1px solid var(--wl-border-soft);
 }
@@ -584,7 +584,7 @@ body {
   border-radius: 6px;
   background: transparent;
   min-height: 44px;
-  padding: 3px 4px;
+  padding: 4px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -616,7 +616,7 @@ body {
 
 .wl-cal-marks {
   display: flex;
-  gap: 3px;
+  gap: 4px;
   align-items: center;
   flex-wrap: wrap;
 }
@@ -658,7 +658,7 @@ body {
 .wl-master {
   display: grid;
   grid-template-columns: minmax(250px, 42%) minmax(0, 1fr);
-  gap: 10px;
+  gap: 12px;
   align-items: start;
 }
 
@@ -688,7 +688,7 @@ body {
   border: 1px solid var(--wl-border);
   border-radius: 8px;
   overflow: hidden;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .wl-seg button {
@@ -696,7 +696,7 @@ body {
   border: none;
   background: transparent;
   color: var(--wl-muted);
-  padding: 4px 14px;
+  padding: 4px 12px;
   font: inherit;
   font-size: 11.5px;
   cursor: pointer;
@@ -721,21 +721,21 @@ body {
   align-items: center;
   justify-content: center;
   z-index: 50;
-  padding: 20px;
+  padding: 24px;
 }
 
 .wl-modal-box {
   background: var(--wl-bg);
   border: 1px solid var(--wl-border);
   border-radius: 10px;
-  padding: 14px 16px;
+  padding: 12px 16px;
   max-width: 360px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
 }
 
 .wl-modal-title {
   font-weight: 650;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .wl-modal-body {
@@ -754,10 +754,10 @@ body {
 .wl-subnav {
   display: flex;
   flex-wrap: wrap;
-  gap: 3px;
+  gap: 4px;
   border-bottom: 1px solid var(--wl-border-soft);
   padding-bottom: 8px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .wl-subnav button {
@@ -767,7 +767,7 @@ body {
   color: var(--wl-muted);
   font: inherit;
   font-size: 11.5px;
-  padding: 4px 10px;
+  padding: 4px 12px;
   border-radius: 7px;
   cursor: pointer;
   white-space: nowrap;
@@ -790,9 +790,165 @@ body {
   z-index: 3;
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 10px -14px -24px;
-  padding: 9px 14px;
+  gap: 8px;
+  margin: 12px -12px -24px;
+  padding: 8px 12px;
   background: var(--wl-bg);
   border-top: 1px solid var(--wl-border-soft);
+}
+
+/* ── UX v3.1 (0.22.0) additions ─────────────────────────────────────────── */
+
+/* Form-style todo creation (today tab + workbench). */
+.wl-todo-form .wl-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Library · graph: entity overview as a card grid. */
+.wl-grid-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 8px;
+}
+
+.wl-entity-card {
+  appearance: none;
+  border: 1px solid var(--wl-border-soft);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--wl-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wl-entity-card:hover {
+  border-color: var(--wl-accent);
+}
+
+.wl-entity-name {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wl-entity-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wl-tag.project {
+  color: var(--wl-accent-text);
+  border-color: var(--wl-accent);
+}
+
+.wl-tag.person {
+  color: var(--wl-ok);
+  border-color: var(--wl-ok);
+}
+
+.wl-tag.tool {
+  color: var(--wl-warn);
+  border-color: var(--wl-warn);
+}
+
+.wl-tag.topic {
+  color: var(--wl-danger);
+  border-color: var(--wl-danger);
+}
+
+.wl-tag.source {
+  color: var(--wl-muted);
+}
+
+.wl-crumb-here {
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+/* Library · graph: deterministic spoke neighborhood, drawn as an inline SVG
+   string (the sandbox serves no external resources) with type colors from the
+   panel palette variables. */
+.wl-graph-wrap {
+  border: 1px solid var(--wl-border-soft);
+  border-radius: 8px;
+  background: var(--wl-bg);
+  overflow-x: auto;
+}
+
+.wl-graph-svg {
+  display: block;
+  width: 100%;
+  min-width: 420px;
+  height: auto;
+}
+
+.wl-graph-svg .gedge {
+  stroke: var(--wl-border);
+  stroke-width: 1.5;
+}
+
+.wl-graph-svg .gverb {
+  fill: var(--wl-muted);
+  font-size: 10px;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  paint-order: stroke;
+  stroke: var(--wl-bg);
+  stroke-width: 3px;
+}
+
+.wl-graph-svg .gnode {
+  cursor: pointer;
+}
+
+.wl-graph-svg .gnode.center {
+  cursor: default;
+}
+
+.wl-graph-svg .gnbox {
+  fill: var(--wl-card);
+  stroke: var(--wl-border);
+}
+
+.wl-graph-svg .gnbox.t-project {
+  fill: var(--wl-accent-soft);
+  stroke: var(--wl-accent);
+}
+
+.wl-graph-svg .gnbox.t-person {
+  fill: var(--wl-ok-soft);
+  stroke: var(--wl-ok);
+}
+
+.wl-graph-svg .gnbox.t-tool {
+  fill: var(--wl-warn-soft);
+  stroke: var(--wl-warn);
+}
+
+.wl-graph-svg .gnbox.t-topic {
+  fill: var(--wl-danger-soft);
+  stroke: var(--wl-danger);
+}
+
+.wl-graph-svg .glabel {
+  fill: var(--wl-text);
+  font-size: 10.5px;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.wl-graph-svg .glabel.strong {
+  font-weight: 650;
+  font-size: 11.5px;
 }

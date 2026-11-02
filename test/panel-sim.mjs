@@ -124,7 +124,14 @@ function respond(window, message) {
     else if (op === 'calendar' && args.action === 'month')
       structured = { month: '2026-10', today: '2026-10-31', days: { '2026-10-31': { date: '2026-10-31', archived: true, hasDailyReport: false, entryCount: 3, bySource: { git: 2, sessions: 1 }, todoDone: 1, todoDue: 1, sessionCount: 1, commitCount: 2 } } }
     else if (op === 'graph' && !args.entity)
-      structured = { builtAt: '2026-10-31T09:00:00.000Z', nodeCount: 3, edgeCount: 3, types: { project: 1, person: 1, tool: 1 }, nodes: [{ key: 'project:商城', type: 'project', label: '商城', weight: 5 }, { key: 'person:Ray', type: 'person', label: 'Ray', weight: 3 }] }
+      structured = {
+        builtAt: '2026-10-31T09:00:00.000Z',
+        nodeCount: 3,
+        edgeCount: 3,
+        types: { project: 1, person: 1, tool: 1 },
+        nodes: [{ key: 'project:商城', type: 'project', label: '商城', weight: 5 }, { key: 'person:Ray', type: 'person', label: 'Ray', weight: 3 }],
+        edges: [{ from: 'person:Ray', to: 'project:商城', kind: '提交了', count: 3 }],
+      }
     else if (op === 'graph' && args.entity)
       structured = { entity: args.entity, found: true, type: 'project', label: args.entity, weight: 5, relations: [{ kind: '提交了', count: 3, direction: 'in', other: 'Ray', otherType: 'person' }] }
     else if (op === 'collect' && args.action === 'diagnostics') {
@@ -197,6 +204,8 @@ function respond(window, message) {
           },
         ],
       }
+    else if (op === 'sessions' && args.action === 'content')
+      structured = { key: args.key, available: true, dates: [{ date: '2026-10-29', turns: 2, texts: ['完整摘录第一条'] }] }
     else if (op === 'sessions')
       structured = {
         date: args.date || '2026-10-29',
@@ -250,6 +259,11 @@ const dom = new JSDOM(html, {
 
 const window = dom.window
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const padSim = (n) => String(n).padStart(2, '0')
+const simToday = (() => {
+  const now = new Date()
+  return now.getFullYear() + '-' + padSim(now.getMonth() + 1) + '-' + padSim(now.getDate())
+})()
 await wait(1200)
 
 const doc = window.document
@@ -266,7 +280,13 @@ assert.ok(doc.querySelector('.wl-tab.on')?.textContent === '今天', 'today tab 
 assert.ok(text().includes('尚未生成日志'), 'today shows the unarchived card')
 assert.ok(text().includes('今日待办'), 'today shows the due-todos section')
 assert.ok(text().includes('测试待办'), 'today lists the due todo')
-assert.ok(doc.querySelector('#wl-today-quick'), 'today has the quick-add input')
+// UX v3.1: the command-line quick add is gone, replaced by a compact form
+assert.ok(!doc.querySelector('#wl-today-quick'), 'command-line quick add input is gone')
+const todayTitle = doc.querySelector('#wl-today-todo-title')
+assert.ok(todayTitle, 'today has the form-style todo creator')
+assert.ok(doc.querySelector('#wl-today-todo-due')?.value === simToday, 'due date defaults to today')
+assert.ok(doc.querySelector('#wl-today-todo-pri'), 'priority select exists')
+assert.ok(doc.querySelector('#wl-today-todo-tag'), 'optional tag input exists')
 assert.ok(text().includes('今天的 AI 会话'), 'today shows the session brief list')
 assert.ok(text().includes('昨天回顾'), 'today shows the yesterday preview')
 await wait(300)
@@ -280,7 +300,28 @@ await wait(400)
 assert.ok(text().includes('今天的日志已生成'), 'phase 3: card flips to archived')
 assert.ok(text().includes('打开') && text().includes('继续编辑'), 'archived card offers open / continue editing')
 assert.ok(text().includes('今日日志已生成'), 'success notice rendered')
-console.log('today OK (archive state machine)')
+// form-style add: title required, fields go straight to the todos add op
+const addBtn = [...doc.querySelectorAll('button')].find((item) => item.textContent === '添加')
+assert.ok(addBtn, 'today form has the 添加 button')
+addBtn.click()
+await wait(250)
+assert.ok(text().includes('请先填写待办标题'), 'empty title is rejected with guidance')
+// the guidance notice re-rendered the app — re-query before filling the form
+const todayTitle2 = doc.querySelector('#wl-today-todo-title')
+todayTitle2.value = '表单添加的待办'
+todayTitle2.dispatchEvent(new window.Event('input', { bubbles: true }))
+doc.querySelector('#wl-today-todo-pri').value = '高'
+const addBtn2 = [...doc.querySelectorAll('button')].find((item) => item.textContent === '添加')
+addBtn2.click()
+await wait(450)
+assert.ok(text().includes('已添加：表单添加的待办'), 'form submit adds the todo')
+const todoAddCall = messages.find((message) => message.method === 'tools/call'
+  && message.params?.arguments?.op === 'todos'
+  && message.params?.arguments?.args?.action === 'add')
+assert.ok(todoAddCall, 'todos add op was called from the form')
+assert.equal(todoAddCall.params.arguments.args.title, '表单添加的待办')
+assert.equal(todoAddCall.params.arguments.args.due, simToday, 'due carried from the form default')
+console.log('today OK (archive state machine + form-style todo add)')
 
 const clickTab = async (label) => {
   const tab = [...doc.querySelectorAll('.wl-tab')].find((item) => item.textContent === label)
@@ -295,6 +336,11 @@ await wait(150)
 assert.ok(doc.querySelector('.wl-master'), 'time tab uses the master-detail layout')
 assert.ok(doc.querySelector('.wl-cal-grid'), 'calendar grid renders')
 assert.ok(text().includes('全部待办'), 'todo workbench lives at the bottom of the time tab')
+// UX v3.1: the workbench form matches the today-tab fields (title/due/pri/tag)
+assert.ok(doc.querySelector('#wl-todo-title'), 'workbench has the form-style creator')
+assert.ok(doc.querySelector('#wl-todo-due')?.value === simToday, 'workbench due defaults to today')
+assert.ok(doc.querySelector('#wl-todo-pri') && doc.querySelector('#wl-todo-tag'), 'workbench form has pri + tag fields')
+assert.ok(!text().includes('行内支持'), 'inline `#标签 @日期` syntax hint is gone from the add path')
 assert.ok(text().includes('标记：● 有日志 · ▼ 有到期待办 · ◦ 有会话'), 'calendar legend shows the three marks')
 const markCount = doc.querySelectorAll('.wl-cal-marks .wl-cal-badge, .wl-cal-marks .wl-cal-dot').length
 assert.equal(markCount, 0, 'legacy badge/dot marks are gone (3 text marks only)')
@@ -349,6 +395,18 @@ assert.ok(queryBtn, 'sessions filter bar has the query button')
 queryBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
 await wait(450)
 assert.ok(text().includes('模拟会话行'), 'sessions query renders result rows')
+// UX v3.1 P0: 加载完整摘录 is a pure cache read on the server — here we just
+// verify the panel flow: expand row → load → per-date excerpts render inline.
+const sessRowTitle = [...doc.querySelectorAll('.wl-item-title')].find((el) => el.textContent.includes('模拟会话行'))
+assert.ok(sessRowTitle, 'session row title is clickable')
+sessRowTitle.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+await wait(150)
+const excerptBtn = [...doc.querySelectorAll('button')].find((item) => item.textContent === '加载完整摘录')
+assert.ok(excerptBtn, 'expanded row offers 加载完整摘录')
+excerptBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+await wait(450)
+assert.ok(text().includes('完整摘录第一条'), 'full excerpts render inline after the load')
+assert.ok(!text().includes('摘录尚未同步'), 'cache-hit path does not show the miss guidance')
 
 const segLogs = [...doc.querySelectorAll('.wl-seg button')].find((item) => item.textContent === '日志')
 segLogs.click()
@@ -371,12 +429,43 @@ segGraph.click()
 await wait(300)
 assert.ok(text().includes('知识图谱'), 'graph view renders')
 assert.ok(text().includes('更新图谱'), 'graph rebuild button uses the §7 wording 更新图谱')
-const chip = Array.from(doc.querySelectorAll('.wl-chip')).find((el) => el.textContent.includes('商城'))
-assert.ok(chip, 'project chip exists')
-chip.click()
-await wait(100)
-assert.ok(text().includes('提交了'), 'entity relations render')
-console.log('library OK (sessions/logs/graph)')
+// UX v3.1: overview = type chips + entity card grid with relation counts
+assert.ok(text().includes('全部 2'), 'type chip row includes the 全部 chip')
+assert.ok(text().includes('项目 1'), 'type chips list the project type')
+const cards = [...doc.querySelectorAll('.wl-entity-card')]
+assert.ok(cards.length >= 2, 'entities render as cards in a grid: ' + cards.length)
+const shopCard = cards.find((el) => el.textContent.includes('商城'))
+assert.ok(shopCard, '商城 card exists')
+assert.ok(shopCard.textContent.includes('3 关系'), 'card shows the relation count from edges: ' + shopCard.textContent)
+assert.ok(shopCard.querySelector('.wl-tag.project'), 'card carries the type badge')
+// click a card → SVG neighborhood with breadcrumb + clickable nodes
+shopCard.click()
+await wait(400)
+const crumb = [...doc.querySelectorAll('.wl-chip')].find((el) => el.textContent === '全部实体')
+assert.ok(crumb, 'breadcrumb back-to-list chip renders')
+const svg = doc.querySelector('.wl-graph-svg')
+assert.ok(svg, 'neighborhood SVG renders')
+assert.ok(svg.querySelector('line'), 'SVG draws the spoke edges')
+assert.ok(svg.querySelector('text')?.textContent.includes('提交了'), 'edge carries the relation verb')
+assert.ok(svg.querySelectorAll('g[data-entity]').length === 1, 'one clickable opposite node + center')
+const rayNode = svg.querySelector('g[data-entity="Ray"]')
+assert.ok(rayNode, 'opposite node is clickable via data-entity')
+rayNode.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+await wait(400)
+assert.ok(text().includes('关系明细'), 'text relation detail stays below the SVG')
+assert.ok(doc.querySelector('.wl-graph-svg'), 'traversal keeps an SVG for the new entity')
+const mallCrumb = [...doc.querySelectorAll('.wl-chip')].find((el) => el.textContent === '商城')
+assert.ok(mallCrumb, 'trail keeps 商城 as a breadcrumb step')
+mallCrumb.click()
+await wait(400)
+const hereCrumb = doc.querySelector('.wl-crumb-here')
+assert.ok(hereCrumb && hereCrumb.textContent === '商城', 'trail chip navigates back to 商城: ' + (hereCrumb && hereCrumb.textContent))
+// 全部实体 returns to the overview card grid
+const backChip = [...doc.querySelectorAll('.wl-chip')].find((el) => el.textContent === '全部实体')
+backChip.click()
+await wait(400)
+assert.ok(doc.querySelector('.wl-entity-card'), 'breadcrumb returns to the card grid')
+console.log('library OK (sessions/logs/graph card grid + SVG neighborhood)')
 
 // --- report tab: flat generator + regenerate confirm dialog -----------
 await clickTab('报告')

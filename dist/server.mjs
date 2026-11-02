@@ -315,7 +315,7 @@ var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.21.0";
+    PLUGIN_VERSION = "0.22.0";
   }
 });
 
@@ -326,6 +326,7 @@ __export(sessions_exports, {
   collectAllSessions: () => collectAllSessions,
   dayBounds: () => dayBounds,
   listSessionSources: () => listSessionSources,
+  loadCache: () => loadCache,
   parseSessionLines: () => parseSessionLines,
   scanSessions: () => scanSessions,
   sessionCacheFile: () => sessionCacheFile,
@@ -36942,7 +36943,8 @@ async function queryGraph(config2, entity = "") {
       types[node3.type] = (types[node3.type] || 0) + 1;
     }
     const nodes = Object.entries(graph.nodes).map(([key, node3]) => ({ key, type: node3.type, label: node3.label, weight: node3.weight })).sort((a, b) => b.weight - a.weight).slice(0, 100);
-    return { builtAt: graph.builtAt, nodeCount: Object.keys(graph.nodes).length, edgeCount: graph.edges.length, types, nodes };
+    const edges = graph.edges.map((edge) => ({ from: edge.from, to: edge.to, kind: edge.kind, count: edge.count }));
+    return { builtAt: graph.builtAt, nodeCount: Object.keys(graph.nodes).length, edgeCount: graph.edges.length, types, nodes, edges };
   }
   const wanted = String(entity).toLowerCase();
   const matchKey = Object.keys(graph.nodes).find((key) => key.toLowerCase().includes(wanted));
@@ -38821,10 +38823,15 @@ function sessionMonthCounts(sessions, month) {
 async function getSessionDetail(config2, key, { home = homedir4(), dshHome } = {}) {
   const index = await loadSessionIndex(config2);
   const meta3 = index.sessions.find((item) => item.key === String(key || ""));
-  if (!meta3) throw new Error("\u4F1A\u8BDD\u4E0D\u5728\u7D22\u5F15\u4E2D\uFF0C\u8BF7\u5148\u540C\u6B65\u5168\u90E8\u4F1A\u8BDD");
-  const { all } = await collectAllSessions(config2, { home, dshHome });
-  const session = all.find((item) => item.source === meta3.source && item.file === meta3.file);
-  if (!session) return { ...meta3, available: false, note: "\u6E90\u6587\u4EF6\u5DF2\u79FB\u52A8\u6216\u5220\u9664\uFF0C\u65E0\u6CD5\u8BFB\u53D6\u6458\u5F55" };
+  if (!meta3) throw new Error("\u4F1A\u8BDD\u4E0D\u5728\u7D22\u5F15\u4E2D\uFF0C\u8BF7\u5148\u540C\u6B65\u4F1A\u8BDD");
+  const cache = await loadCache(config2);
+  const entry = Object.values(cache.files || {}).find(
+    (item) => item && item.source === meta3.source && item.session?.file === meta3.file
+  );
+  const session = entry?.session;
+  if (!session) {
+    return { ...meta3, available: false, note: "\u6458\u5F55\u5C1A\u672A\u540C\u6B65\u2014\u2014\u5148\u70B9\u300C\u540C\u6B65\u4F1A\u8BDD\u300D\uFF0C\u5B8C\u6210\u540E\u518D\u52A0\u8F7D\u5B8C\u6574\u6458\u5F55" };
+  }
   const dates = Object.entries(session.dates || {}).map(([date5, day]) => ({ date: date5, turns: day.turns || 0, texts: day.texts || [] })).sort((a, b) => a.date.localeCompare(b.date));
   return { ...meta3, available: true, dates };
 }

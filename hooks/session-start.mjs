@@ -110,7 +110,7 @@ try {
 
   const hint = archivedToday
     ? '需要补充日志、生成汇报或管理待办时，调用 worklog_* 工具或打开 WorkLog 面板。'
-    : '如需归档今天，调用 worklog_archive（action=run），或让用户在 WorkLog 面板点「归档今天」。'
+    : '如需归档今天，调用 worklog_archive（action=run），或让用户在 WorkLog 面板点「生成今日日志」。'
 
   process.stderr.write(
     `[zcode-worklog] SessionStart source=${input.source || 'unknown'} home=${pluginHome()} archive=${archiveDir(config)}\n`,

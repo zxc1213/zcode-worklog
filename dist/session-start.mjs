@@ -316,7 +316,7 @@ var PLUGIN_NAME, PLUGIN_VERSION;
 var init_config = __esm({
   "lib/config.mjs"() {
     PLUGIN_NAME = "zcode-worklog";
-    PLUGIN_VERSION = "0.21.0";
+    PLUGIN_VERSION = "0.22.0";
   }
 });
 
@@ -505,6 +505,7 @@ __export(sessions_exports, {
   collectAllSessions: () => collectAllSessions,
   dayBounds: () => dayBounds,
   listSessionSources: () => listSessionSources,
+  loadCache: () => loadCache,
   parseSessionLines: () => parseSessionLines,
   scanSessions: () => scanSessions,
   sessionCacheFile: () => sessionCacheFile,
@@ -2659,7 +2660,7 @@ try {
   if (state.lastAutoDate) parts.push(`\u4E0A\u6B21\u81EA\u52A8\u5F52\u6863 ${state.lastAutoDate}`);
   if (autoNote) parts.push(autoNote);
   if (schedNote) parts.push(schedNote);
-  const hint = archivedToday ? "\u9700\u8981\u8865\u5145\u65E5\u5FD7\u3001\u751F\u6210\u6C47\u62A5\u6216\u7BA1\u7406\u5F85\u529E\u65F6\uFF0C\u8C03\u7528 worklog_* \u5DE5\u5177\u6216\u6253\u5F00 WorkLog \u9762\u677F\u3002" : "\u5982\u9700\u5F52\u6863\u4ECA\u5929\uFF0C\u8C03\u7528 worklog_archive\uFF08action=run\uFF09\uFF0C\u6216\u8BA9\u7528\u6237\u5728 WorkLog \u9762\u677F\u70B9\u300C\u5F52\u6863\u4ECA\u5929\u300D\u3002";
+  const hint = archivedToday ? "\u9700\u8981\u8865\u5145\u65E5\u5FD7\u3001\u751F\u6210\u6C47\u62A5\u6216\u7BA1\u7406\u5F85\u529E\u65F6\uFF0C\u8C03\u7528 worklog_* \u5DE5\u5177\u6216\u6253\u5F00 WorkLog \u9762\u677F\u3002" : "\u5982\u9700\u5F52\u6863\u4ECA\u5929\uFF0C\u8C03\u7528 worklog_archive\uFF08action=run\uFF09\uFF0C\u6216\u8BA9\u7528\u6237\u5728 WorkLog \u9762\u677F\u70B9\u300C\u751F\u6210\u4ECA\u65E5\u65E5\u5FD7\u300D\u3002";
   process.stderr.write(
     `[zcode-worklog] SessionStart source=${input.source || "unknown"} home=${pluginHome()} archive=${archiveDir(config)}
 `

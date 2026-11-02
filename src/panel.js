@@ -140,6 +140,8 @@ const state = {
   graphData: null,
   graphEntity: '',
   graphLoading: false,
+  graphTrail: [],
+  graphType: '',
   sessIndex: null,
   sessContent: {},
   sessExpanded: [],
@@ -449,19 +451,7 @@ function todayTab() {
       dueTodos.length
         ? dueTodos.map((todo) => todoItem(todo, todayText))
         : h('div', { className: 'wl-empty' }, '暂无今日到期待办 ✓'),
-      h(
-        'div',
-        { className: 'wl-row', style: { marginTop: '6px' } },
-        h('input', {
-          className: 'wl-input',
-          id: 'wl-today-quick',
-          placeholder: '快加一条待办，回车确认（支持 !高 #标签 @日期 repeat=）',
-          onKeydown: (event) => {
-            if (event.key === 'Enter') quickAddTodo('wl-today-quick', todayText)
-          },
-        }),
-        h('button', { className: 'wl-btn', onClick: () => quickAddTodo('wl-today-quick', todayText) }, '添加'),
-      ),
+      h('div', { className: 'wl-todo-form', style: { marginTop: '8px' } }, todoAddForm('today-todo', todayText)),
       h(
         'div',
         { style: { marginTop: '8px' } },
@@ -687,18 +677,11 @@ function aiReady() {
   return Boolean(state.config?.ai?.baseUrl && state.config?.ai?.model)
 }
 
-function composeDraftInput(draft) {
-  const parts = [draft.title]
-  if ((draft.tags || []).length) parts.push(draft.tags.map((tag) => '#' + tag).join(' '))
-  if (draft.repeat) parts.push('repeat=' + draft.repeat)
-  return parts.filter(Boolean).join(' ')
-}
-
 async function aiFillForm() {
   const titleInput = document.getElementById('wl-todo-title')
   const raw = String(titleInput?.value || '').trim()
   if (!raw) {
-    setNotice('err', '先在输入框里写一句话待办，再点 AI 填单')
+    setNotice('err', '先在标题框写一句话待办，再点 AI 填单')
     render()
     return
   }
@@ -956,64 +939,13 @@ function todosWorkbench() {
     h(
       'div',
       { className: 'wl-card wide' },
+      h('div', { className: 'wl-todo-form' }, todoAddForm('todo', todayText, { withAi: true })),
       h(
         'div',
-        { className: 'wl-row' },
-        h('input', {
-          className: 'wl-input',
-          id: 'wl-todo-title',
-          value: state.aiDraft ? composeDraftInput(state.aiDraft) : '',
-          placeholder: '新待办，支持 !高 #标签 @2026-10-31 repeat=daily',
-          onKeydown: (event) => {
-            if (event.key === 'Enter') addTodoFromForm()
-          },
-        }),
-        h(
-          'button',
-          {
-            className: 'wl-btn primary',
-            disabled: state.busy === 'todo-add',
-            onClick: addTodoFromForm,
-          },
-          '添加',
-        ),
-        h(
-          'select',
-          {
-            className: 'wl-select',
-            id: 'wl-todo-pri',
-            style: { width: '86px' },
-          },
-          h('option', { value: '', selected: !state.aiDraft?.pri }, '优先级'),
-          h('option', { value: '高', selected: state.aiDraft?.pri === '高' }, '高'),
-          h('option', { value: '中', selected: state.aiDraft?.pri === '中' }, '中'),
-          h('option', { value: '低', selected: state.aiDraft?.pri === '低' }, '低'),
-        ),
-        h('input', {
-          className: 'wl-input',
-          id: 'wl-todo-due',
-          type: 'date',
-          value: state.aiDraft?.due || '',
-          style: { width: '136px' },
-        }),
-        aiReady()
-          ? h(
-              'button',
-              {
-                className: 'wl-btn',
-                disabled: state.busy === 'todo-parse',
-                onClick: aiFillForm,
-              },
-              'AI 填单',
-            )
-          : null,
-      ),
-      h(
-        'div',
-        { className: 'wl-row', style: { marginTop: '6px' } },
+        { className: 'wl-row', style: { marginTop: '8px' } },
         state.aiDraft
           ? h('span', { className: 'wl-hint' }, 'AI 填单草稿，确认无误后点「添加」，或直接修改')
-          : h('span', { className: 'wl-hint' }, '优先级/到期日可选，行内支持 !高 #标签 @日期 repeat=语法'),
+          : h('span', { className: 'wl-hint' }, '日期默认今天；优先级/标签可选'),
         h(
           'button',
           {
@@ -1223,7 +1155,7 @@ function todoEditForm(todo) {
       h('input', { className: 'wl-input', id: 'wl-edit-title', value: draft.title }),
       h(
         'div',
-        { className: 'wl-row', style: { marginTop: '6px' } },
+        { className: 'wl-row', style: { marginTop: '8px' } },
         h(
           'select',
           {
@@ -1293,19 +1225,19 @@ function todoEditForm(todo) {
         id: 'wl-edit-md',
         rows: 2,
         placeholder: '备注（详情、链接、上下文）',
-        style: { marginTop: '6px' },
+        style: { marginTop: '8px' },
         onInput: harvest,
       }, draft.md || ''),
       h('input', {
         className: 'wl-input',
         id: 'wl-edit-tags',
         placeholder: '标签，空格分隔，如：周报 okr',
-        style: { marginTop: '6px' },
+        style: { marginTop: '8px' },
         onInput: harvest,
       }, draft.tags || ''),
       h(
         'div',
-        { className: 'wl-section', style: { marginTop: '6px' } },
+        { className: 'wl-section', style: { marginTop: '8px' } },
         h('div', { className: 'wl-section-title' }, '子任务 ' + draft.subtasks.filter((sub) => sub.done).length + '/' + draft.subtasks.length),
         draft.subtasks.map((sub, index) =>
           h(
@@ -1353,7 +1285,7 @@ function todoEditForm(todo) {
       ),
       h(
         'div',
-        { className: 'wl-row', style: { marginTop: '6px' } },
+        { className: 'wl-row', style: { marginTop: '8px' } },
         h(
           'button',
           { className: 'wl-btn primary', disabled: state.busy === 'todo-edit', onClick: save },
@@ -1384,61 +1316,89 @@ function subCountNode(todo) {
 }
 
 // Shared one-line todo parser: !高 #标签 @2026-10-31 repeat=daily.
-function parseTodoRaw(raw, defaults = {}) {
-  const priMatch = raw.match(/!(高|中|低)/)
-  const dueMatch = raw.match(/@(\d{4}-\d{2}-\d{2})/)
-  const repeatMatch = raw.match(/repeat=(daily|weekly:[0-6]|monthly:(?:[1-9]|[12]\d|3[01]))/)
-  const tagMatches = raw.match(/#[^\s#@!]+/g) || []
-  return {
-    title: raw
-      .replace(/!(高|中|低)/g, '')
-      .replace(/@\d{4}-\d{2}-\d{2}/g, '')
-      .replace(/repeat=\S+/g, '')
-      .replace(/#[^\s#@!]+/g, '')
-      .replace(/\s+/g, ' ')
-      .trim(),
-    pri: defaults.pri || (priMatch ? priMatch[1] : ''),
-    due: defaults.due || (dueMatch ? dueMatch[1] : ''),
-    repeat: repeatMatch ? repeatMatch[1] : '',
-    tags: [...new Set(tagMatches.map((item) => item.slice(1)))],
-  }
+// Form-style todo creation (UX v3.1): the old `#标签 @日期` command-line input
+// is gone. One component, two mounts — the today tab (compact) and the
+// time-tab workbench (same fields + AI 填单). Fields go straight into the
+// todos add op; no inline syntax is required anywhere.
+function todoAddForm(prefix, dueDefault, { withAi = false } = {}) {
+  const draft = withAi ? state.aiDraft : null
+  const id = (suffix) => 'wl-' + prefix + '-' + suffix
+  return [
+    h(
+      'div',
+      { className: 'wl-row' },
+      h('input', {
+        className: 'wl-input',
+        id: id('title'),
+        value: draft?.title || '',
+        placeholder: '待办标题（必填）',
+        onKeydown: (event) => {
+          if (event.key === 'Enter') submitTodoForm(prefix, dueDefault)
+        },
+      }),
+    ),
+    h(
+      'div',
+      { className: 'wl-row', style: { marginTop: '8px' } },
+      h('input', {
+        className: 'wl-input',
+        id: id('due'),
+        type: 'date',
+        value: draft?.due || dueDefault || '',
+        style: { width: '136px' },
+      }),
+      h(
+        'select',
+        { className: 'wl-select', id: id('pri'), style: { width: '86px' } },
+        h('option', { value: '', selected: !draft?.pri }, '优先级'),
+        h('option', { value: '高', selected: draft?.pri === '高' }, '高'),
+        h('option', { value: '中', selected: draft?.pri === '中' }, '中'),
+        h('option', { value: '低', selected: draft?.pri === '低' }, '低'),
+      ),
+      h('input', {
+        className: 'wl-input',
+        id: id('tag'),
+        value: (draft?.tags || [])[0] || '',
+        placeholder: '标签（可选）',
+        style: { width: '104px' },
+      }),
+      h('button', {
+        className: 'wl-btn primary',
+        disabled: state.busy === 'todo-add',
+        onClick: () => submitTodoForm(prefix, dueDefault),
+      }, '添加'),
+      withAi && aiReady()
+        ? h('button', { className: 'wl-btn', disabled: state.busy === 'todo-parse', onClick: aiFillForm }, 'AI 填单')
+        : null,
+    ),
+  ]
 }
 
-// Quick add used by the today tab (defaults the due date to today).
-function quickAddTodo(inputId, dueDefault) {
-  const input = document.getElementById(inputId)
-  const raw = String(input?.value || '').trim()
-  if (!raw) return
-  const parsed = parseTodoRaw(raw, { due: dueDefault })
-  if (!parsed.title) {
-    setNotice('err', '标题不能为空（只留下了标记符号）')
+function submitTodoForm(prefix, dueDefault) {
+  const field = (suffix) => document.getElementById('wl-' + prefix + '-' + suffix)
+  const title = String(field('title')?.value || '').trim()
+  if (!title) {
+    setNotice('err', '请先填写待办标题')
     render()
     return
   }
+  const due = String(field('due')?.value || '').trim() || dueDefault || ''
+  const pri = field('pri')?.value || ''
+  const tag = String(field('tag')?.value || '').trim().replace(/^#/, '')
+  // AI drafts may carry a repeat rule (no form field for it — keep the value).
+  const repeat = state.aiDraft?.repeat || ''
   act('todo-add', async () => {
-    await call('todos', { action: 'add', ...parsed })
-    if (input) input.value = ''
-    setNotice('ok', `已添加：${parsed.title}`)
-  })
-}
-
-function addTodoFromForm() {
-  const titleInput = document.getElementById('wl-todo-title')
-  const raw = titleInput?.value?.trim() || ''
-  if (!raw) return
-  const addPri = document.getElementById('wl-todo-pri')?.value || ''
-  const addDue = document.getElementById('wl-todo-due')?.value || ''
-  const parsed = parseTodoRaw(raw, { pri: addPri, due: addDue })
-  if (!parsed.title) {
-    setNotice('err', '标题不能为空（只留下了标记符号）')
-    render()
-    return
-  }
-  act('todo-add', async () => {
-    await call('todos', { action: 'add', ...parsed })
+    await call('todos', { action: 'add', title, due, pri, repeat, tags: tag ? [tag] : [] })
     state.aiDraft = null
-    if (titleInput) titleInput.value = ''
-    setNotice('ok', `已添加：${parsed.title}`)
+    const titleEl = field('title')
+    const tagEl = field('tag')
+    const priEl = field('pri')
+    const dueEl = field('due')
+    if (titleEl) titleEl.value = ''
+    if (tagEl) tagEl.value = ''
+    if (priEl) priEl.value = ''
+    if (dueEl) dueEl.value = dueDefault || ''
+    setNotice('ok', `已添加：${title}`)
   })
 }
 function reportRangePlaceholder(kind) {
@@ -1969,7 +1929,7 @@ function settingsGeneralPage() {
         { className: 'wl-checkline' },
         h('input', { type: 'checkbox', checked: draft.autoArchive, onChange: set('autoArchive') }),
         '每天自动生成',
-        h('input', { type: 'checkbox', checked: draft.skipWeekends, onChange: set('skipWeekends'), style: { marginLeft: '10px' } }),
+        h('input', { type: 'checkbox', checked: draft.skipWeekends, onChange: set('skipWeekends'), style: { marginLeft: '8px' } }),
         '跳过周末',
         h('input', {
           className: 'wl-input',
@@ -2010,7 +1970,7 @@ function settingsAiPage() {
     'div',
     null,
     noticeNode(),
-    h('div', { className: 'wl-hint', style: { marginBottom: '6px' } }, '当前：' + aiHint),
+    h('div', { className: 'wl-hint', style: { marginBottom: '8px' } }, '当前：' + aiHint),
     h(
       'div',
       { className: 'wl-card' },
@@ -2075,7 +2035,7 @@ function settingsAiPage() {
             value: draft.aiModel,
             placeholder: '或手动填写模型名',
             onInput: set('aiModel'),
-            style: { marginTop: '6px' },
+            style: { marginTop: '8px' },
           })
         : null,
       state.aiModelsNote ? h('div', { className: 'wl-hint', style: { marginTop: '4px' } }, state.aiModelsNote) : null,
@@ -2138,7 +2098,7 @@ function settingsDiagPage() {
       ? h(
           'div',
           { className: 'wl-card' },
-          h('div', { className: 'wl-notice err', style: { marginBottom: '6px' } }, '诊断数据加载失败：' + data.error),
+          h('div', { className: 'wl-notice err', style: { marginBottom: '8px' } }, '诊断数据加载失败：' + data.error),
           h(
             'button',
             {
@@ -2236,7 +2196,7 @@ function settingsDiagPage() {
               : h('div', { className: 'wl-hint' }, '暂无会话索引，点「强制重扫」建立。'),
             h(
               'div',
-              { className: 'wl-row', style: { marginTop: '6px' } },
+              { className: 'wl-row', style: { marginTop: '8px' } },
               h('button', { className: 'wl-btn', disabled: state.busy === 'sess-sync', onClick: () => syncAllSessions(true) }, '强制重扫（清空索引并重新同步）'),
             ),
           ),
@@ -2264,7 +2224,7 @@ function settingsTplPage() {
       { className: 'wl-card' },
       state.tplError
         ? [
-            h('div', { className: 'wl-notice err', style: { marginBottom: '6px' } }, '模板加载失败：' + state.tplError),
+            h('div', { className: 'wl-notice err', style: { marginBottom: '8px' } }, '模板加载失败：' + state.tplError),
             h(
               'button',
               {
@@ -2307,7 +2267,7 @@ function settingsTplPage() {
                     className: 'wl-input',
                     value: draft.name,
                     placeholder: '模板名',
-                    style: { marginTop: '6px' },
+                    style: { marginTop: '8px' },
                     onInput: (event) => {
                       draft.name = event.target.value
                     },
@@ -2319,7 +2279,7 @@ function settingsTplPage() {
                     rows: 5,
                     value: draft.system,
                     placeholder: 'SYSTEM 段（角色与硬性规则）',
-                    style: { marginTop: '6px' },
+                    style: { marginTop: '8px' },
                     onInput: (event) => {
                       draft.system = event.target.value
                     },
@@ -2331,7 +2291,7 @@ function settingsTplPage() {
                     rows: 7,
                     value: draft.user,
                     placeholder: 'USER 段（内容与变量）',
-                    style: { marginTop: '6px' },
+                    style: { marginTop: '8px' },
                     onInput: (event) => {
                       draft.user = event.target.value
                     },
@@ -2339,7 +2299,7 @@ function settingsTplPage() {
                 : null,
               h(
                 'div',
-                { className: 'wl-row', style: { marginTop: '6px' } },
+                { className: 'wl-row', style: { marginTop: '8px' } },
                 h(
                   'button',
                   {
@@ -2450,7 +2410,7 @@ function settingsBackupPage() {
       h('div', { className: 'wl-hint' }, '填旧 WorkLog 安装目录（例如 E:\\WorkLog），复制其 data\\archive 到当前数据目录。'),
       h(
         'div',
-        { className: 'wl-date-row', style: { marginTop: '6px' } },
+        { className: 'wl-date-row', style: { marginTop: '8px' } },
         h('input', {
           className: 'wl-input',
           value: state.importDir,
@@ -2525,7 +2485,7 @@ function refreshSched(next) {
 function taskRow(task) {
   return h(
     'div',
-    { style: { marginTop: '6px' }, key: task.id },
+    { style: { marginTop: '8px' }, key: task.id },
     h(
       'div',
       { className: 'wl-row' },
@@ -2607,7 +2567,7 @@ function settingsCollectPage() {
       ? h(
           'div',
           { className: 'wl-card' },
-          h('div', { className: 'wl-notice err', style: { marginBottom: '6px' } }, '采集与调度加载失败：' + data.error),
+          h('div', { className: 'wl-notice err', style: { marginBottom: '8px' } }, '采集与调度加载失败：' + data.error),
           h(
             'button',
             {
@@ -2645,9 +2605,9 @@ function settingsCollectPage() {
               { className: 'wl-checkline' },
               h('input', { type: 'checkbox', checked: draft.git, onChange: set('git') }),
               '扫描 Git 提交',
-              h('input', { type: 'checkbox', checked: draft.docs, onChange: set('docs'), style: { marginLeft: '10px' } }),
+              h('input', { type: 'checkbox', checked: draft.docs, onChange: set('docs'), style: { marginLeft: '8px' } }),
               '扫描文档变更',
-              h('input', { type: 'checkbox', checked: draft.sessions, onChange: set('sessions'), style: { marginLeft: '10px' } }),
+              h('input', { type: 'checkbox', checked: draft.sessions, onChange: set('sessions'), style: { marginLeft: '8px' } }),
               '汇总 AI 会话',
             ),
             h('div', { className: 'wl-label' }, '额外 AI 会话目录（每行一个，可选）'),
@@ -2684,7 +2644,7 @@ function wizardBlock() {
     h('div', { className: 'wl-hint' }, '按位置探测并一键应用'),
     h(
       'div',
-      { className: 'wl-row', style: { marginTop: '6px' } },
+      { className: 'wl-row', style: { marginTop: '8px' } },
       h(
         'select',
         {
@@ -2724,13 +2684,13 @@ function wizardBlock() {
       ),
     ),
     probe && probe.ok && probe.type === 'custom'
-      ? h('div', { className: 'wl-hint', style: { marginTop: '6px' } }, '文件数 ' + probe.custom.fileCount + '。' + (probe.custom.note || ''))
+      ? h('div', { className: 'wl-hint', style: { marginTop: '8px' } }, '文件数 ' + probe.custom.fileCount + '。' + (probe.custom.note || ''))
       : null,
     probe && probe.ok && probe.type !== 'custom'
       ? (probe.candidates || []).map((candidate) =>
           h(
             'div',
-            { className: 'wl-item', key: candidate.id, style: { marginTop: '6px' } },
+            { className: 'wl-item', key: candidate.id, style: { marginTop: '8px' } },
             h(
               'div',
               { className: 'grow' },
@@ -2762,7 +2722,7 @@ function wizardBlock() {
         )
       : null,
     probe && probe.ok && probe.hint ? h('div', { className: 'wl-hint', style: { marginTop: '4px' } }, probe.hint) : null,
-    probe && !probe.ok ? h('div', { className: 'wl-carry', style: { marginTop: '6px' } }, probe.error || '探测失败') : null,
+    probe && !probe.ok ? h('div', { className: 'wl-carry', style: { marginTop: '8px' } }, probe.error || '探测失败') : null,
   )
 }
 function calKey(d) {
@@ -3022,7 +2982,7 @@ function dayDetail() {
           }),
           h(
             'div',
-            { className: 'wl-row', style: { marginTop: '6px' } },
+            { className: 'wl-row', style: { marginTop: '8px' } },
             h(
               'button',
               {
@@ -3163,7 +3123,7 @@ function dayDetail() {
             ),
             h(
               'button',
-              { className: 'wl-btn tiny', style: { marginTop: '6px' }, onClick: () => openLibrarySessions(date) },
+              { className: 'wl-btn tiny', style: { marginTop: '8px' }, onClick: () => openLibrarySessions(date) },
               '在资料库打开这天',
             ),
           ),
@@ -3277,7 +3237,7 @@ function timeCalendar() {
       h('button', { className: 'wl-btn tiny', onClick: () => loadCalMonth(calKey()) }, '今天'),
     ),
     calGrid(),
-    h('div', { className: 'wl-hint', style: { marginTop: '7px' } }, '标记：● 有日志 · ▼ 有到期待办 · ◦ 有会话'),
+    h('div', { className: 'wl-hint', style: { marginTop: '8px' } }, '标记：● 有日志 · ▼ 有到期待办 · ◦ 有会话'),
   ]
 }
 
@@ -3355,7 +3315,7 @@ function connTypeMeta(type) {
 function connRow(connector) {
   return h(
     'div',
-    { style: { marginTop: '6px' }, key: connector.id },
+    { style: { marginTop: '8px' }, key: connector.id },
     h(
       'div',
       { className: 'wl-row' },
@@ -3453,7 +3413,7 @@ function connEditor() {
   const fields = meta?.fields || []
   return h(
     'div',
-    { className: 'wl-section', style: { marginTop: '6px' } },
+    { className: 'wl-section', style: { marginTop: '8px' } },
     h(
       'div',
       { className: 'wl-row' },
@@ -3491,7 +3451,7 @@ function connEditor() {
     ),
     h(
       'div',
-      { className: 'wl-row', style: { marginTop: '6px' } },
+      { className: 'wl-row', style: { marginTop: '8px' } },
       h(
         'button',
         {
@@ -3539,7 +3499,7 @@ function connBlock() {
     { className: 'wl-card' },
     state.connError
       ? [
-          h('div', { className: 'wl-notice err', style: { marginBottom: '6px' } }, '连接器加载失败：' + state.connError),
+          h('div', { className: 'wl-notice err', style: { marginBottom: '8px' } }, '连接器加载失败：' + state.connError),
           h(
             'button',
             {
@@ -3683,6 +3643,18 @@ function recoCard() {
     ),
   )
 }
+const GRAPH_TYPE_META = {
+  project: { label: '项目' },
+  person: { label: '人' },
+  tool: { label: 'AI 工具' },
+  source: { label: '外部系统' },
+  topic: { label: '主题' },
+}
+
+function graphTypeLabel(type) {
+  return GRAPH_TYPE_META[type]?.label || type
+}
+
 async function loadGraphView(entity) {
   state.graphLoading = true
   state.graphEntity = entity || ''
@@ -3697,7 +3669,25 @@ async function loadGraphView(entity) {
   render()
 }
 
-// Library · graph view (moved verbatim from the old graph tab).
+// Traverse from overview cards: a fresh trail. From inside a neighborhood the
+// SVG node handler pushes the current entity onto the trail first.
+function openGraphEntity(label) {
+  state.graphTrail = []
+  loadGraphView(label)
+}
+
+function resetGraphView() {
+  state.graphData = null
+  state.graphEntity = ''
+  state.graphTrail = []
+  state.graphType = ''
+  loadGraphView('')
+}
+
+// Library · graph view: overview = type chips + entity card grid; clicking a
+// card opens a deterministic SVG neighborhood (spokes from the entity, verb on
+// each edge, clickable nodes to keep traversing) with the text detail kept
+// below as a no-SVG fallback. Rebuilt with 更新图谱 (semantics unchanged).
 function graphView() {
   if (!state.graphData && !state.graphLoading) loadGraphView('')
   const data = state.graphData
@@ -3738,43 +3728,148 @@ function graphView() {
       : loading,
   )
 }
+
+function graphBreadcrumb(currentLabel) {
+  const trail = state.graphTrail || []
+  const crumbs = [
+    h('button', {
+      className: 'wl-chip',
+      key: 'root',
+      title: '回到全部实体',
+      onClick: resetGraphView,
+    }, '全部实体'),
+  ]
+  trail.forEach((item, index) => {
+    crumbs.push(h('button', {
+      className: 'wl-chip',
+      key: 't' + index,
+      onClick: () => {
+        state.graphTrail = trail.slice(0, index)
+        loadGraphView(item)
+      },
+    }, item))
+  })
+  crumbs.push(h('span', { className: 'wl-crumb-here', key: 'here' }, currentLabel))
+  return h('div', { className: 'wl-row', style: { marginTop: '8px' } }, crumbs)
+}
+
 function graphOverview(data) {
-  const byType = {}
-  for (const [key, node] of Object.entries(data.nodes || {})) {
-    const list = byType[node.type] || (byType[node.type] = [])
-    list.push({ key, ...node })
+  // Per-entity relation count comes from the edge list (additive field on the
+  // graph query response) so each card can show how connected it is.
+  const degree = {}
+  for (const edge of data.edges || []) {
+    degree[edge.from] = (degree[edge.from] || 0) + (edge.count || 1)
+    degree[edge.to] = (degree[edge.to] || 0) + (edge.count || 1)
   }
-  const typeLabels = { project: '项目', person: '人', tool: 'AI 工具', source: '外部系统', topic: '主题' }
+  const nodes = (data.nodes || [])
+    .map((node) => ({ ...node, relations: degree[node.key] || 0 }))
+  const typeCounts = data.types || {}
+  const typeChips = [
+    ['', '全部 ' + nodes.length],
+    ...Object.keys(GRAPH_TYPE_META)
+      .filter((type) => typeCounts[type])
+      .map((type) => [type, graphTypeLabel(type) + ' ' + typeCounts[type]]),
+  ]
+  const current = state.graphType
+  const shown = current ? nodes.filter((node) => node.type === current) : nodes
   return h(
     'div',
     null,
     h('div', { className: 'wl-hint' },
       '节点 ' + (data.nodeCount || 0) + ' · 关系 ' + (data.edgeCount || 0) +
-      (Object.keys(data.types || {}).length ? ' · ' + Object.entries(data.types).map(([t, n]) => t + ' ' + n).join('、') : '') +
-      '。点实体看关系。'),
-    Object.entries(byType)
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([type, nodes]) =>
-        h(
-          'div',
-          { className: 'wl-section', key: type },
-          h('div', { className: 'wl-section-title' }, typeLabels[type] || type + ' (' + nodes.length + ')'),
-          nodes
-            .sort((a, b) => b.weight - a.weight)
-            .map((node) =>
-              h(
-                'button',
-                {
-                  className: 'wl-chip',
-                  key: node.key,
-                  onClick: () => loadGraphView(node.label),
-                },
-                node.label + ' · ' + node.weight,
+      (data.builtAt ? ' · 构建于 ' + String(data.builtAt).slice(5, 16).replace('T', ' ') : '') +
+      '。点实体卡片看关系图。'),
+    typeChips.length > 1
+      ? h('div', { className: 'wl-row', style: { marginTop: '8px' } },
+          typeChips.map(([type, label]) =>
+            h('button', {
+              className: 'wl-chip' + (current === type ? ' on' : ''),
+              key: type || 'all',
+              onClick: () => { state.graphType = type; render() },
+            }, label),
+          ))
+      : null,
+    shown.length
+      ? h('div', { className: 'wl-grid-cards', style: { marginTop: '8px' } },
+          shown.map((node) =>
+            h('button', {
+              className: 'wl-entity-card',
+              key: node.key,
+              title: node.label + '（' + graphTypeLabel(node.type) + '，' + node.relations + ' 条关系，' + node.weight + ' 次出现）',
+              onClick: () => openGraphEntity(node.label),
+            },
+              h('span', { className: 'wl-entity-name' }, node.label),
+              h('span', { className: 'wl-entity-meta' },
+                h('span', { className: 'wl-tag ' + node.type }, graphTypeLabel(node.type)),
+                h('span', { className: 'wl-hint' }, node.relations + ' 关系'),
               ),
             ),
-        ),
-      ),
+          ))
+      : h('div', { className: 'wl-empty' }, current ? '该类型下没有实体，换个类型看看。' : '暂无实体（在归档与采集积累后点「更新图谱」）'),
   )
+}
+
+// --- Neighborhood SVG (self-contained: the panel sandbox has no external
+// resources, so the graph is built as an SVG string and mounted with
+// innerHTML; clicks are delegated on the wrapper). Deterministic spoke
+// layout — center entity, one relation per spoke, no force simulation.
+function escapeXml(text) {
+  return String(text ?? '').replace(/[<>&"']/g, (ch) => (
+    { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[ch]
+  ))
+}
+
+function clipLabel(text, max) {
+  const value = String(text ?? '')
+  return value.length > max ? value.slice(0, max) + '…' : value
+}
+
+function neighborhoodSvg(centerLabel, centerType, relations) {
+  const W = 520
+  const H = Math.max(200, Math.min(336, 104 + relations.length * 44))
+  const cx = W / 2
+  const cy = H / 2
+  const rx = W / 2 - 74
+  const ry = H / 2 - 46
+  const NODE_W = 104
+  const parts = []
+  relations.forEach((relation, index) => {
+    const angle = -Math.PI / 2 + (index * 2 * Math.PI) / relations.length
+    const nx = cx + rx * Math.cos(angle)
+    const ny = cy + ry * Math.sin(angle)
+    parts.push(`<line x1="${cx}" y1="${cy}" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" class="gedge"/>`)
+    const verb = clipLabel(relation.kind, 6) + (relation.count > 1 ? ' ×' + relation.count : '')
+    parts.push(`<text x="${((cx + nx) / 2).toFixed(1)}" y="${((cy + ny) / 2).toFixed(1)}" class="gverb">${escapeXml(verb)}</text>`)
+    parts.push(
+      '<g class="gnode" data-entity="' + escapeXml(relation.other) + '">' +
+      `<title>${escapeXml(relation.other + '（' + graphTypeLabel(relation.otherType) + '）· 点击继续遍历')}</title>` +
+      `<rect x="${nx - NODE_W / 2}" y="${ny - 14}" width="${NODE_W}" height="28" rx="8" class="gnbox t-${escapeXml(relation.otherType || 'topic')}"/>` +
+      `<text x="${nx}" y="${ny + 3.5}" class="glabel">${escapeXml(clipLabel(relation.other, 8))}</text>` +
+      '</g>',
+    )
+  })
+  parts.push(
+    '<g class="gnode center">' +
+    `<title>${escapeXml(centerLabel + '（' + graphTypeLabel(centerType) + '）')}</title>` +
+    `<rect x="${cx - 64}" y="${cy - 18}" width="128" height="36" rx="9" class="gnbox t-${escapeXml(centerType || 'topic')}"/>` +
+    `<text x="${cx}" y="${cy + 4}" class="glabel strong">${escapeXml(clipLabel(centerLabel, 10))}</text>` +
+    '</g>',
+  )
+  return `<svg viewBox="0 0 ${W} ${H}" class="wl-graph-svg" role="img" aria-label="${escapeXml(centerLabel)} 的关系图">${parts.join('')}</svg>`
+}
+
+function graphNeighborhood(data) {
+  const relations = data.relations || []
+  if (!relations.length) return null
+  const box = h('div', { className: 'wl-graph-wrap', style: { marginTop: '8px' } })
+  box.innerHTML = neighborhoodSvg(data.label, data.type, relations)
+  box.addEventListener('click', (event) => {
+    const node = event.target?.closest?.('g[data-entity]')
+    if (!node) return
+    state.graphTrail = [...(state.graphTrail || []), state.graphEntity].slice(-8)
+    loadGraphView(node.getAttribute('data-entity'))
+  })
+  return box
 }
 
 function graphEntityView(data) {
@@ -3782,46 +3877,45 @@ function graphEntityView(data) {
     return h(
       'div',
       null,
-      h('div', { className: 'wl-empty' }, '没有找到实体：' + data.entity),
-      h(
-        'button',
-        { className: 'wl-btn tiny', onClick: () => { state.graphData = null; state.graphEntity = ''; loadGraphView('') } },
-        '返回总览',
-      ),
+      graphBreadcrumb(data.entity),
+      h('div', { className: 'wl-empty' }, '没有找到实体：' + data.entity + '（回列表换个实体试试）'),
     )
   }
+  const relations = data.relations || []
   return h(
     'div',
     null,
+    graphBreadcrumb(data.label),
+    h('div', { className: 'wl-hint', style: { marginTop: '4px' } },
+      data.label + '（' + graphTypeLabel(data.type) + '）· ' + data.weight + ' 次出现 · ' + relations.length + ' 条关系'),
+    graphNeighborhood(data),
     h(
       'div',
-      { className: 'wl-row' },
-      h('div', { className: 'wl-section-title' }, data.label + '（' + data.weight + ' 次出现）'),
-      h(
-        'button',
-        { className: 'wl-btn tiny', onClick: () => { state.graphData = null; state.graphEntity = ''; loadGraphView('') } },
-        '返回总览',
-      ),
-    ),
-    data.relations.length
-      ? data.relations.map((relation) =>
-          h(
-            'div',
-            { className: 'wl-row', key: relation.kind + relation.other },
-            h('span', { className: 'wl-tag' }, relation.kind),
+      { className: 'wl-section' },
+      h('div', { className: 'wl-section-title' }, '关系明细'),
+      relations.length
+        ? relations.map((relation) =>
             h(
-              'button',
-              {
-                className: 'wl-chip grow',
-                title: '跳到该实体',
-                onClick: () => loadGraphView(relation.other),
-              },
-              (relation.direction === 'out' ? '→ ' : '← ') + relation.other + '（' + relation.otherType + '）',
+              'div',
+              { className: 'wl-row', key: relation.kind + relation.other },
+              h('span', { className: 'wl-tag' }, relation.kind),
+              h(
+                'button',
+                {
+                  className: 'wl-chip grow',
+                  title: '跳到该实体',
+                  onClick: () => {
+                    state.graphTrail = [...(state.graphTrail || []), state.graphEntity].slice(-8)
+                    loadGraphView(relation.other)
+                  },
+                },
+                (relation.direction === 'out' ? '→ ' : '← ') + relation.other + '（' + graphTypeLabel(relation.otherType) + '）',
+              ),
+              h('span', { className: 'wl-hint' }, String(relation.count) + ' 次'),
             ),
-            h('span', { className: 'wl-hint' }, String(relation.count) + ' 次'),
-          ),
-        )
-      : h('div', { className: 'wl-empty' }, '暂无关系记录。'),
+          )
+        : h('div', { className: 'wl-empty' }, '暂无关系记录。'),
+    ),
   )
 }
 
@@ -3998,6 +4092,7 @@ function sessionsV2Block() {
       { className: 'wl-row' },
       h('button', { className: 'wl-btn primary', disabled: state.busy === 'sess-sync', onClick: () => syncAllSessions(false) }, '同步会话'),
       h('button', { className: 'wl-btn', disabled: state.busy === 'sess-sync', onClick: () => syncAllSessions(true) }, '强制重扫'),
+      h('span', { className: 'wl-hint' }, '首次同步可能需要 1-2 分钟'),
       h('span', { className: 'wl-hint' },
         state.sessIndex?.total
           ? '索引 ' + state.sessIndex.total + ' 条 · ' + String(state.sessIndex.builtAt).slice(5, 16).replace('T', ' ')
@@ -4005,7 +4100,7 @@ function sessionsV2Block() {
     ),
     h(
       'div',
-      { className: 'wl-row', style: { marginTop: '6px' } },
+      { className: 'wl-row', style: { marginTop: '8px' } },
       h('input', { className: 'wl-input', placeholder: '关键词', value: f.q, onInput: (e) => sessFilterValue('q', e.target.value), style: { width: '120px' } }),
       h('input', { className: 'wl-input', placeholder: '项目/目录', value: f.project, onInput: (e) => sessFilterValue('project', e.target.value), style: { width: '120px' } }),
       h('input', { className: 'wl-input', type: 'date', value: f.start, onInput: (e) => sessFilterValue('start', e.target.value), style: { width: '128px' } }),
@@ -4013,7 +4108,7 @@ function sessionsV2Block() {
     ),
     h(
       'div',
-      { className: 'wl-row', style: { marginTop: '6px' } },
+      { className: 'wl-row', style: { marginTop: '8px' } },
       h('input', { className: 'wl-input', type: 'number', placeholder: '最少轮次', value: f.minTurns, onInput: (e) => sessFilterValue('minTurns', e.target.value), style: { width: '80px' } }),
       h('input', { className: 'wl-input', placeholder: '工作关键词(逗号)', value: f.workKeywords, onInput: (e) => sessFilterValue('workKeywords', e.target.value), style: { width: '150px' } }),
       h('label', { className: 'wl-hint' },
@@ -4023,14 +4118,14 @@ function sessionsV2Block() {
       h('button', { className: 'wl-btn', onClick: () => { state.sessFilters = { q: '', project: '', source: '', start: '', end: '', minTurns: '', workOnly: false, workKeywords: '' }; state.sessResult = null; state.sessChecked = []; render() } }, '重置'),
     ),
     result && result.keywords?.length
-      ? h('div', { className: 'wl-row', style: { marginTop: '6px' } },
+      ? h('div', { className: 'wl-row', style: { marginTop: '8px' } },
           h('span', { className: 'wl-hint' }, '关键词：'),
           result.keywords.map((item) =>
             h('button', { className: 'wl-chip', key: item.word, onClick: () => { sessFilterValue('q', item.word); runSessQuery() } },
               item.word + ' ' + item.count)))
       : null,
     result
-      ? h('div', { className: 'wl-hint', style: { marginTop: '6px' } },
+      ? h('div', { className: 'wl-hint', style: { marginTop: '8px' } },
           '命中 ' + result.matched + ' / 索引 ' + result.total + ' 条' + (result.matched > 200 ? '（显示前 200）' : ''))
       : null,
     result
@@ -4120,7 +4215,7 @@ function confirmModalNode() {
       h('div', { className: 'wl-modal-body' }, box.body),
       h(
         'div',
-        { className: 'wl-row', style: { justifyContent: 'flex-end', marginTop: '10px' } },
+        { className: 'wl-row', style: { justifyContent: 'flex-end', marginTop: '12px' } },
         h(
           'button',
           {
