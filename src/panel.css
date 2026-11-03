@@ -812,6 +812,22 @@ body {
 
 /* ── UX v3.1 (0.22.0) additions ─────────────────────────────────────────── */
 
+/* Suggestion strip (0.25.0): deliberately NOT a card — the workbench keeps a
+   single primary card (add form); the suggestion entry reads as a light strip
+   with an accent bar instead of a second identical box. */
+.wl-strip {
+  border: 1px solid var(--wl-border-soft);
+  border-left: 3px solid var(--wl-accent);
+  border-radius: var(--wl-radius);
+  padding: 8px 12px;
+}
+
+.wl-strip-title {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+
 /* Form-style todo creation (today tab + workbench). */
 .wl-todo-form .wl-input {
   flex: 1;

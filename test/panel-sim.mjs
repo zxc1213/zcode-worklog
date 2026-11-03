@@ -353,6 +353,8 @@ assert.ok(text().includes('全部待办'), 'todo workbench lives at the bottom o
 assert.ok(doc.querySelector('#wl-todo-title'), 'workbench has the form-style creator')
 assert.ok(doc.querySelector('#wl-todo-due')?.value === simToday, 'workbench due defaults to today')
 assert.ok(doc.querySelector('#wl-todo-pri') && doc.querySelector('#wl-todo-tag'), 'workbench form has pri + tag fields')
+// 0.25.0: the AI suggestion entry is a lightweight strip, not a second card
+assert.ok(doc.querySelector('.wl-strip') && text().includes('今日 3 件要事'), 'suggestion renders as a strip (single primary card rule)')
 assert.ok(!text().includes('行内支持'), 'inline `#标签 @日期` syntax hint is gone from the add path')
 assert.ok(text().includes('标记：● 有日志 · ▼ 有到期待办 · ◦ 有会话'), 'calendar legend shows the three marks')
 const markCount = doc.querySelectorAll('.wl-cal-marks .wl-cal-badge, .wl-cal-marks .wl-cal-dot').length

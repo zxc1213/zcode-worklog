@@ -902,17 +902,20 @@ async function refreshSuggest() {
   })
 }
 
-function suggestCard() {
+function suggestCard(openCount) {
   const picks = state.todoSuggest?.picks || []
+  // Only offer AI picks when there is something to pick from (or when picks
+  // are already shown) — an empty workbench should not advertise it.
+  if (!picks.length && !openCount) return null
   return h(
     'div',
-    { className: 'wl-card wide' },
+    { className: 'wl-strip' },
     picks.length
       ? [
           h(
             'div',
             { className: 'wl-row' },
-            h('div', { className: 'wl-section-title', style: { flex: '1' } }, '今日 3 件要事'),
+            h('div', { className: 'wl-strip-title grow' }, '今日 3 件要事'),
             h(
               'button',
               {
@@ -961,7 +964,12 @@ function suggestCard() {
       : h(
           'div',
           { className: 'wl-row' },
-          h('div', { className: 'grow wl-hint' }, '让 AI 从进行中的待办里挑今天的 3 件要事。'),
+          h(
+            'div',
+            { className: 'grow' },
+            h('div', { className: 'wl-strip-title' }, '今日 3 件要事'),
+            h('div', { className: 'wl-hint' }, '让 AI 从进行中的待办里挑出今天的重点。'),
+          ),
           h(
             'button',
             {
@@ -991,7 +999,7 @@ function todosWorkbench() {
   return h(
     'div',
     { className: 'wl-stack' },
-    suggestCard(),
+    suggestCard(open.length),
     h(
       'div',
       { className: 'wl-card wide' },

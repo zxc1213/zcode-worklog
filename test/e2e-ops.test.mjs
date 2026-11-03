@@ -27,7 +27,7 @@ const call = (op, args = {}) => api.dispatch(op, args)
 describe('e2e dispatch sweep', () => {
   it('01 bootstrap + status return the core shape', async () => {
     const boot = await call('bootstrap')
-    assert.equal(boot.status.version, '0.24.0')
+    assert.equal(boot.status.version, '0.25.0')
     assert.ok(Array.isArray(boot.todos))
     const status = await call('status')
     assert.ok(status.today?.date)
